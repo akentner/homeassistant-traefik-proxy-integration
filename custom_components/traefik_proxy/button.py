@@ -12,7 +12,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
+from homeassistant.components.button import ButtonEntity
+
+try:
+    from homeassistant.components.button.const import ButtonDeviceClass
+except ImportError:  # HA releases before 2026.10 define it in the package
+    from homeassistant.components.button import ButtonDeviceClass  # type: ignore[attr-defined]
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN

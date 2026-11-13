@@ -6,10 +6,12 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, cast
 
-from homeassistant.components.binary_sensor import (
-    BinarySensorDeviceClass,
-    BinarySensorEntity,
-)
+from homeassistant.components.binary_sensor import BinarySensorEntity
+
+try:
+    from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
+except ImportError:  # HA releases before 2026.10 define it in the package
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass  # type: ignore[attr-defined]
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 

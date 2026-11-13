@@ -95,20 +95,24 @@ def test_user_schema_omitted_api_key_defaults_to_empty() -> None:
 
 
 def test_user_schema_serializes_for_config_flow_endpoint() -> None:
-    """``voluptuous_serialize.convert`` is what HA's frontend JSON-over-WS
-    config flow endpoint calls before shipping the form to the browser.
+    """The schema serializer HA's frontend JSON-over-WS config flow endpoint
+    calls before shipping the form to the browser: ``probatio.to_field_list``
+    on HA 2026.10+, ``voluptuous_serialize.convert`` on HA 2026.3.
 
     v0.1.3 regression: ``vol.All(cv.string, cv.url)`` serialized as
     ``<function url at 0x…>`` and raised ``ValueError`` in the reconfigure
     flow. The fix is to use a ``TextSelector(type=URL)`` for UI schemas so
     the serializer can introspect a known type instead of a function ref.
     """
-    import voluptuous_serialize
+    try:
+        from probatio import to_field_list as serialize_schema
+    except ImportError:
+        from voluptuous_serialize import convert as serialize_schema
     from homeassistant.helpers import config_validation as cv
 
     from custom_components.traefik_proxy.config_flow import STEP_USER_DATA_SCHEMA
 
-    serialized = voluptuous_serialize.convert(STEP_USER_DATA_SCHEMA, custom_serializer=cv.custom_serializer)
+    serialized = serialize_schema(STEP_USER_DATA_SCHEMA, custom_serializer=cv.custom_serializer)
     assert isinstance(serialized, list)
     assert len(serialized) == 3
     # URL field becomes a selector block of type=text/url.

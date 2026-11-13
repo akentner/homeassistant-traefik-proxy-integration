@@ -25,7 +25,10 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-import voluptuous as vol
+try:
+    import probatio as vol
+except ImportError:  # HA releases before 2026.9 ship voluptuous only
+    import voluptuous as vol  # type: ignore[no-redef]
 from aiohttp import ClientConnectorError, ClientResponseError, InvalidUrlClientError
 from homeassistant.config_entries import (
     ConfigEntry,

@@ -8,7 +8,10 @@ import time
 from datetime import timedelta
 from typing import Any
 
-import voluptuous as vol
+try:
+    import probatio as vol
+except ImportError:  # HA releases before 2026.9 ship voluptuous only
+    import voluptuous as vol  # type: ignore[no-redef]
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
