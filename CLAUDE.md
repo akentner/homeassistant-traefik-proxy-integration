@@ -18,7 +18,7 @@ and which TLS certificates are expiring soon.
 
 ### Constraints
 
-- **Tech stack**: Python 3.12+, Home Assistant Core (min version 2025.4.x),
+- **Tech stack**: Python 3.14+, Home Assistant Core (min version 2026.3.x),
   `aiohttp` for HTTP, HACS-compatible.
 - **Distribution**: HACS default repository structure (`hacs.json`,
   `info.md`, `README.md`, version tags via releases).
@@ -40,8 +40,8 @@ and which TLS certificates are expiring soon.
 ### Core Technologies
 | Technology | Version | Purpose | Why |
 |------------|---------|---------|-----|
-| Python | `>=3.12` (HA 2025.4 ships 3.13) | Runtime | PROJECT.md mandate; HA 2025.4 bundles CPython 3.13 |
-| Home Assistant Core | `>=2025.4.0` | Framework | PROJECT.md mandate; gives `ConfigEntry.runtime_data`, PEP-695 syntax, `asyncio.timeout` |
+| Python | `>=3.14.2` (HA 2026.3 ships 3.14) | Runtime | PROJECT.md mandate; HA 2026.3 bundles CPython 3.14 |
+| Home Assistant Core | `>=2026.3.0` | Framework | PROJECT.md mandate; gives `ConfigEntry.runtime_data`, PEP-695 syntax, `asyncio.timeout` |
 | `aiohttp` | `>=3.13` (HA bundles 3.14.x) | HTTP client | HA uses aiohttp everywhere; HA's `async_get_clientsession(hass)` is the Platinum-quality shared session |
 | `voluptuous` | bundled by HA | Config-flow schema | Already required by HA — no manifest entry |
 | `cryptography` (HA-bundled) | bundled by HA | (only if TLS parsing needs more than `ssl`) | HA ships `cryptography==46.0.x` already; no manifest entry unless explicitly imported |
@@ -62,7 +62,7 @@ and which TLS certificates are expiring soon.
 | Field | Value | Rationale |
 |-------|-------|-----------|
 | `name` | `"Traefik Proxy"` | Display name in HACS UI. Required. |
-| `homeassistant` | `"2025.4.0"` | Matches PROJECT.md mandate; HACS will refuse older installs. |
+| `homeassistant` | `"2026.3.0"` | Matches PROJECT.md mandate; HACS will refuse older installs. |
 | `hacs` | `"2.0.5"` | Current HACS minimum as of 2025; matches `gatus` integration. |
 | **No `filename` / `zip_release`** | — | Standard folder-based distribution; HACS will read `custom_components/traefik/`. |
 | **No `country`** | — | Not a regional integration. |
@@ -122,7 +122,7 @@ and which TLS certificates are expiring soon.
 | Async timeout | `asyncio.timeout()` (stdlib, py3.11+) | `async_timeout` PyPI package | HA Core deprecated `async_timeout` in 2024.x; replaced with stdlib. |
 | Runtime data storage | `entry.runtime_data` | `hass.data[DOMAIN][entry_id]` | Deprecated since HA 2024; runtime_data is type-safe with PEP-695 aliases. |
 | Quality scale | **Omit** | Set `quality_scale: "silver"` | hassfest **warns** if a custom integration sets this. Quality scale is a core-integration concept. |
-| Min HA version | `2025.4.0` | `2025.1.0` or `2024.x` | PROJECT.md mandate. Going lower excludes users on HA 2025.4+ who have `runtime_data` available; going higher fragments the install base. |
+| Min HA version | `2026.3.0` | `2025.1.0` or `2024.x` | PROJECT.md mandate. Going lower excludes users on HA 2025.4+ who have `runtime_data` available; going higher fragments the install base. |
 | Discovery | **None** | `zeroconf` / `dhcp` | Traefik doesn't advertise `_traefik._tcp.local.` by default; users configure manually. Adding zeroconf is a Phase-2 stretch. |
 | HACS channel | Default (latest) repo | "Beta" via `hacs.json` `country`/tags | No need for beta channel at v1.0. |
 | Architecture (no TLS file access) | TLS handshake to router hostname | Read `acme.json` from disk | Requires SSH / shared mount / supervisor permissions — out of scope per PROJECT.md ("integration talks only to the Traefik API"). |
@@ -141,7 +141,7 @@ and which TLS certificates are expiring soon.
 | Reading Traefik's `acme.json` from disk | Requires filesystem access the integration does not have; fragile; out of scope | TLS handshake to each router hostname using stdlib `ssl` |
 | `_LOGGER.info("…token…")` or similar | Leaks secrets | Use `_LOGGER.debug("…")` only with redacted tokens; better still, never log the token |
 | Pinning `requirements: ["aiohttp==3.13.5"]` | HA bundles aiohttp; pinning causes dep conflicts; hassfest may reject duplicate | `requirements: []` |
-| Python 3.10 / 3.11 syntax (e.g. `Optional[int]`) | HA 2025.4+ ships Python 3.13; PEP-695 type aliases (`type X = ...`) are available | Modern syntax: `int | None`, `type MyConfigEntry = ConfigEntry[...]` |
+| Python 3.10 / 3.11 syntax (e.g. `Optional[int]`) | HA 2026.3+ ships Python 3.14; PEP-695 type aliases (`type X = ...`) are available | Modern syntax: `int | None`, `type MyConfigEntry = ConfigEntry[...]` |
 | `asyncio.get_event_loop()` | Deprecated in 3.12+; coordinator already has a loop | `asyncio.timeout()` context manager |
 | `homeassistant.helpers.aiohttp_client.async_create_clientsession` | Used for **per-integration** sessions with custom SSL/cookies; we want the shared session | `async_get_clientsession(hass)` |
 ## HACS / Distribution Specifics
@@ -163,13 +163,13 @@ and which TLS certificates are expiring soon.
 ## Version Compatibility
 | Component | Compatible With | Notes |
 |-----------|-----------------|-------|
-| `homeassistant>=2025.4.0` | Python 3.13+ (HA 2025.4 ships 3.13.3) | Use PEP-695 syntax (`type X = ...`, `int | None`) |
+| `homeassistant>=2026.3.0` | Python 3.14.2+ (HA 2026.3 ships 3.14) | Use PEP-695 syntax (`type X = ...`, `int | None`) |
 | `aiohttp>=3.13` (bundled) | HA Core's pinned `aiohttp==3.13.x` | Don't pin in manifest |
 | `pytest-homeassistant-custom-component>=0.13.345` | HA Core 2026.7.1 (latest at fetch time) | Tracks HA daily; pin minimum, let it roll |
 | `pytest-asyncio>=1.4.0` | `asyncio_mode = "auto"` | `asyncio_default_fixture_loop_scope = "function"` matches HA's own test config |
 | Traefik API client | Traefik v2.11+ and v3.x | PROJECT.md mandate; v1.x is EOL, not targeted |
 | `awesomeversion` (HACS validates) | `2025.4.0`, `1.0.0`, `2025.7.0` etc. | Both CalVer and SemVer accepted |
-| `ruff>=0.15.15` | Python 3.13 | Enables `UP` rules targeting modern syntax |
+| `ruff>=0.15.15` | Python 3.14 | Enables `UP` rules targeting modern syntax |
 ## Roadmap Implications (downstream input)
 - Cannot ship TLS features until the TLS-handshake helper is built — keep it isolated.
 - Config Flow must come **before** Options Flow (Options Flow requires an existing config entry).

@@ -112,7 +112,7 @@ read-only access to operational state and one mutate endpoint
 
 ## Constraints
 
-- **Tech stack**: Python 3.12+, Home Assistant Core (min version 2025.4.x),
+- **Tech stack**: Python 3.14+, Home Assistant Core (min version 2026.3.x),
   `aiohttp` for HTTP, HACS-compatible.
 - **Distribution**: HACS default repository structure (`hacs.json`,
   `info.md`, `README.md`, version tags via releases).
