@@ -6,6 +6,8 @@ Covers:
 - service handler returns verified=False after budget exhaustion
 - service handler propagates TraefikProxyApiError on non-2xx POST
 - TraefikProxyReloadButton.async_press dispatches through the service
+- reload_routers is admin-only: non-admin callers get Unauthorized, admin
+  callers reach the handler
 
 Hermetic — uses aioclient_mock + AsyncMock for client.reload_routers so the
 tests don't depend on a live Traefik instance or the 5s polling budget
@@ -18,6 +20,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from homeassistant.core import Context
+from homeassistant.exceptions import Unauthorized
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.api import TraefikProxyApiError
@@ -248,6 +252,64 @@ async def test_reload_button_async_press_calls_service(hass, aioclient_mock) -> 
     assert spy.call_count >= 1, (
         f"Expected client.reload_routers to be called via service dispatch, got {spy.call_count} calls"
     )
+
+
+async def _setup_with_service(hass, aioclient_mock):  # type: ignore[no-untyped-def]
+    """Register the service, load an entry and return its coordinator + reload spy."""
+    from custom_components.traefik_proxy import async_setup
+
+    _stub_all_endpoints(aioclient_mock)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    await async_setup(hass, {})
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    spy = AsyncMock(return_value=None)
+    coordinator.client.reload_routers = spy  # type: ignore[attr-defined]
+    return coordinator, spy
+
+
+async def test_reload_service_rejects_non_admin_user(hass, aioclient_mock, hass_read_only_user) -> None:
+    """A non-admin user calling reload_routers gets Unauthorized; the handler never runs."""
+    _coordinator, spy = await _setup_with_service(hass, aioclient_mock)
+
+    with pytest.raises(Unauthorized):
+        await hass.services.async_call(
+            DOMAIN,
+            "reload_routers",
+            {},
+            blocking=True,
+            context=Context(user_id=hass_read_only_user.id),
+        )
+
+    assert spy.call_count == 0
+
+
+async def test_reload_service_allows_admin_user(hass, aioclient_mock, hass_admin_user) -> None:
+    """An admin user reaches the handler; verification exits on the first attempt."""
+    coordinator, spy = await _setup_with_service(hass, aioclient_mock)
+
+    async def _refresh_with_new_router() -> None:
+        data = dict(coordinator.data)
+        data["http_routers"] = [*data.get("http_routers", []), {"name": "new@docker"}]
+        coordinator.data = data
+
+    coordinator.async_request_refresh = AsyncMock(  # type: ignore[attr-defined]
+        side_effect=_refresh_with_new_router
+    )
+
+    await hass.services.async_call(
+        DOMAIN,
+        "reload_routers",
+        {},
+        blocking=True,
+        context=Context(user_id=hass_admin_user.id),
+    )
+
+    spy.assert_awaited_once()
+    assert coordinator.async_request_refresh.await_count == 1
 
 
 def _make_service_call(hass):  # type: ignore[no-untyped-def]

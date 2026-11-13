@@ -79,5 +79,7 @@ class TraefikProxyReloadButton(TraefikProxyEntity, ButtonEntity):
         surfaces in the HA trace log automatically. ``blocking=True`` so the
         press action awaits the verification loop rather than firing and
         forgetting (keeps button press latency visible to the user).
+        The call carries no user context, so it is not subject to the
+        service's admin check.
         """
         await self._hass.services.async_call(DOMAIN, "reload_routers", blocking=True)

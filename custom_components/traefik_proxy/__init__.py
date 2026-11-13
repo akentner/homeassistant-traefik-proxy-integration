@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.service import async_register_admin_service
 
 from .cert_coordinator import CertCoordinator
 from .const import (
@@ -146,12 +147,17 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
        config entry, but the service is callable regardless of which entry
        is loaded) — module-level registration makes that contract explicit.
 
+    The service is admin-only: calls carrying a non-admin user context raise
+    ``Unauthorized``. Calls without a user context (automations, the Reload
+    button) are not subject to the check.
+
     The ``config`` argument is HA's YAML config (always empty for us — the
     integration is config-flow only). HA's setup machinery calls this with
     ``(hass, config)``; we ignore the second arg.
     """
     del config  # YAML setup not supported — ConfigFlow handles all configuration
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         "reload_routers",
         _async_handle_reload_routers,
