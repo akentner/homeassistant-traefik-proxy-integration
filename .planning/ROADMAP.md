@@ -229,8 +229,7 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
 (the entity rework is Phase 5).
 **Depends on**: Phase 3
 **Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, DATA-07
-(7 requirements; audit A-05, A-06, A-10, A-11, A-15 client part, A-16, P-01,
-P-02, H-11)
+**Audit items**: A-05, A-06, A-10, A-11, A-15 client part, A-16, P-01, P-02, H-11
 **Success Criteria** (what must be TRUE):
 
   1. `tests/fixtures/` contains redacted responses captured from local Docker
@@ -249,15 +248,18 @@ P-02, H-11)
      no platform module performs `isinstance` shape checks on raw API dicts.
   3. With default options, one scan cycle issues exactly **one** HTTP request
      (`GET /api/rawdata`); `/api/version` and `/api/entrypoints` are fetched at
-     setup and re-fetched only when `version.StartDate` changes; when
+     setup; `/api/version` is re-checked at most once per hour and after a
+     failed cycle recovers, and `/api/entrypoints` is re-fetched only when
+     `version.StartDate` changed (Traefik restart); when
      `/api/rawdata` is unavailable the client falls back to the paginated list
      endpoints and follows `X-Next-Page` until exhaustion (no truncation at
      100) — all asserted by request-counting tests.
   4. The client supports auth modes **none / basic / bearer** (header built per
      request, credentials never logged or included in exception text) and
-     raises only `TraefikAuthError` (401/403), `TraefikNotFoundError` (404),
-     `TraefikConnectionError` (any `aiohttp.ClientError`, timeout, OS error) or
-     `TraefikPayloadError` (invalid JSON / unexpected shape); the package
+     raises only subclasses of `TraefikProxyApiError`: `TraefikProxyAuthError`
+     (401/403), `TraefikProxyNotFoundError` (404), `TraefikProxyConnectionError`
+     (any `aiohttp.ClientError`, timeout, OS error) or `TraefikProxyPayloadError`
+     (invalid JSON / unexpected shape); the package
      contains no `assert` statements in production code; the coordinator maps
      these to `ConfigEntryAuthFailed` / `UpdateFailed`.
   5. `entry.runtime_data` is a typed `TraefikRuntimeData` dataclass
@@ -281,9 +283,8 @@ on every change (and only on change), and the entity/device model is readable,
 translated (en/de) and categorised — with the never-working reload feature
 replaced by a "Refresh now" button and existing installs migrated cleanly.
 **Depends on**: Phase 4
-**Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05, ENT-06, ENT-07,
-ENT-08, ENT-09, ENT-10 (10 requirements; audit A-01..A-04, A-07..A-09, A-13,
-A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04..U-08, U-15, S-06, S-08)
+**Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05, ENT-06, ENT-07, ENT-08, ENT-09, ENT-10
+**Audit items**: A-01..A-04, A-07..A-09, A-13, A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04..U-08, U-15, S-06, S-08
 **Success Criteria** (what must be TRUE):
 
   1. In an integration test, changing a router's status `enabled → error`
@@ -334,8 +335,8 @@ from `GET /api/certificates` on Traefik ≥ 3.7 and otherwise from a threadless
 async probe against the Traefik host with SNI; an expired or unprobeable
 certificate is reported as a problem, never as "unavailable".
 **Depends on**: Phase 5
-**Requirements**: CERT-01, CERT-02, CERT-03, CERT-04, CERT-05 (5 requirements;
-audit A-12, P-05..P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02)
+**Requirements**: CERT-01, CERT-02, CERT-03, CERT-04, CERT-05
+**Audit items**: A-12, P-05..P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02
 **Success Criteria** (what must be TRUE):
 
   1. Against a Traefik ≥ 3.7 fixture the cert coordinator reads
@@ -374,10 +375,8 @@ options changes reload the entry without any update listener (HA 2026.12-safe),
 errors are translated and actionable, and support data is available as a
 redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
 **Depends on**: Phase 6
-**Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06,
-FLOW-07, DIAG-04 (8 requirements; audit A-15 flow part, A-17, A-18, A-22, U-03,
-U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`,
-§4.4, §4.5, §4.6)
+**Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, DIAG-04
+**Audit items**: A-15 flow part, A-17, A-18, A-22, U-03, U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (§4.4 moot: services removed in Phase 5)
 **Success Criteria** (what must be TRUE):
 
   1. The user step offers an auth selector (none / basic username+password /
@@ -419,9 +418,8 @@ Marketplace/HACS requirements, shipped code is free of planning references, both
 validators pass locally, and the branch is pushed with a Draft PR — the release,
 tag and catalog PR themselves remain the user's action.
 **Depends on**: Phase 7
-**Requirements**: REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07,
-REL-08, DIST-04, DOCS-02, DOCS-04 (11 requirements; audit A-19, B-01..B-06,
-H-01..H-10, H-12; research §2, §3, §6 Q1/Q7/Q8)
+**Requirements**: REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, DIST-04, DOCS-02, DOCS-04
+**Audit items**: A-19, B-01..B-06, H-01..H-10, H-12; research §2, §3, §6 Q1/Q7/Q8
 **Success Criteria** (what must be TRUE):
 
   1. `manifest.json` declares `"categories": ["computers_network.monitoring"]`

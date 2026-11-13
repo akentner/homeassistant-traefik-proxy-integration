@@ -179,17 +179,20 @@ Requirements for initial release. Each maps to a roadmap phase.
       `StrEnum`; platforms never inspect raw API dicts. (A-10)
 - [ ] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
       (unpaginated; routers, services incl. `serverStatus`, middlewares);
-      `/api/version` and `/api/entrypoints` are fetched at setup and again only
-      when `version.StartDate` changes; if `/api/rawdata` is unavailable the
+      `/api/version` and `/api/entrypoints` are fetched at setup; the version is
+      re-checked at most hourly and after a failed cycle recovers, and
+      entrypoints are re-fetched only when `version.StartDate` changed; if
+      `/api/rawdata` is unavailable the
       client falls back to the paginated list endpoints and follows
       `X-Next-Page`. HTTP objects only; TCP/UDP data is ignored. (A-06, P-01)
 - [ ] **DATA-03**: The client supports auth modes none / basic (username +
       password) / bearer; the `Authorization` header is built per request and
       credentials never appear in logs or exception messages.
-- [ ] **DATA-04**: The client raises exactly one of `TraefikAuthError`
-      (401/403), `TraefikNotFoundError` (404), `TraefikConnectionError` (any
-      `aiohttp.ClientError`, timeout, `OSError`) or `TraefikPayloadError`
-      (invalid JSON or shape); production code contains no `assert`.
+- [ ] **DATA-04**: The client raises only subclasses of `TraefikProxyApiError`:
+      `TraefikProxyAuthError` (401/403), `TraefikProxyNotFoundError` (404),
+      `TraefikProxyConnectionError` (any `aiohttp.ClientError`, timeout,
+      `OSError`) or `TraefikProxyPayloadError` (invalid JSON or shape);
+      production code contains no `assert`.
       (A-15 client part, A-16)
 - [ ] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
       dataclass holding client, coordinator and cert coordinator. (A-11)
