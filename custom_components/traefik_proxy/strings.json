@@ -26,8 +26,11 @@
         "description": "Update the Traefik base URL and/or bearer token \u2014 the integration will reload against the new endpoint.",
         "data": {
           "url": "Traefik base URL",
-          "api_key": "Bearer token (optional \u2014 leave empty for Traefik with no api auth)",
+          "api_key": "Bearer token",
           "verify_ssl": "Verify TLS certificate (disable for self-signed)"
+        },
+        "data_description": {
+          "api_key": "Leave empty to keep the current token."
         }
       }
     },

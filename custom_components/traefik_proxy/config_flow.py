@@ -14,10 +14,12 @@ Implements four flows against the Phase 1 probe-and-validate foundation:
   raises ``ConfigEntryAuthFailed``; the new bearer token is validated against
   ``/api/overview`` and the entry's data is updated in place + reloaded.
 - :class:`TraefikProxyConfigFlow.async_step_reconfigure` — in-place URL + token
-  change (CFG-03, CONTEXT.md D-11). Pre-fills URL / token from ``entry.data``
-  and verify_ssl from the effective value (options, then data), validates,
-  and calls ``async_update_reload_and_abort`` with ``data_updates`` plus the
-  verify_ssl value mirrored into ``options``.
+  change (CFG-03, CONTEXT.md D-11). Pre-fills the URL from ``entry.data`` and
+  verify_ssl from the effective value (options, then data); the token is never
+  pre-filled, and an empty token keeps the stored one. Aborts only when another
+  entry already owns the new host, validates, and calls
+  ``async_update_reload_and_abort`` with ``data_updates`` plus the verify_ssl
+  value mirrored into ``options``.
 """
 
 from __future__ import annotations
@@ -375,8 +377,12 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle in-place URL + token change (CFG-03 / CONTEXT.md D-11).
 
-        Pre-fills URL / token from ``entry.data`` and verify_ssl from the
-        effective value (options, then data). On submit, validates the new
+        Pre-fills the URL from ``entry.data`` and verify_ssl from the
+        effective value (options, then data). The stored token is never sent
+        to the form; an empty or omitted token keeps it (for the probe and
+        storage), a non-empty token replaces it. The same host and a host no
+        other entry owns are accepted; a host owned by another entry aborts
+        with ``already_configured``. On submit, validates the new
         endpoint via ``/api/overview`` and calls
         ``async_update_reload_and_abort`` with ``data_updates`` so HA
         rewrites the entry's data in place and reloads — no delete + re-add
@@ -387,8 +393,23 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
+            # Abort only when ANOTHER entry already owns the new host; this
+            # entry's own host (same-host reconfigure) and unused hosts are
+            # fine. Checked before the probe so a conflicting host is never
+            # contacted.
+            host = urlparse(user_input[CONF_URL]).hostname or user_input[CONF_URL]
+            for other in self._async_current_entries(include_ignore=False):
+                if other.entry_id != entry.entry_id and other.unique_id == host:
+                    return self.async_abort(reason="already_configured")
+            api_key = user_input.get(CONF_API_KEY) or entry.data.get(CONF_API_KEY, "")
+            verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+            probe_data = {
+                CONF_URL: user_input[CONF_URL],
+                CONF_API_KEY: api_key,
+                CONF_VERIFY_SSL: verify_ssl,
+            }
             try:
-                await _validate_input(self.hass, user_input)
+                await _validate_input(self.hass, probe_data)
             except InvalidUrl:
                 errors["base"] = "invalid_url"
             except InvalidAuth:
@@ -398,30 +419,20 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             else:
-                # Re-set the flow's unique_id against the new URL host so we
-                # can abort if another Traefik instance already claims it.
-                host = urlparse(user_input[CONF_URL]).hostname or user_input[CONF_URL]
-                await self.async_set_unique_id(host)
-                # Default ``updates=None`` => abort on conflict with another
-                # entry. We do NOT pass ``updates=`` because we never want to
-                # silently overwrite a different Traefik entry.
-                self._abort_if_unique_id_configured()
-                verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={
                         CONF_URL: user_input[CONF_URL],
-                        CONF_API_KEY: user_input.get(CONF_API_KEY, ""),
+                        CONF_API_KEY: api_key,
                         CONF_VERIFY_SSL: verify_ssl,
                     },
                     options={**entry.options, CONF_VERIFY_SSL: verify_ssl},
                 )
 
-        # Pre-fill defaults so the form shows the currently-saved URL / token
-        # and the effective verify_ssl value.
+        # Pre-fill defaults so the form shows the currently-saved URL and the
+        # effective verify_ssl value. The token is never sent to the frontend.
         defaults = {
             CONF_URL: entry.data.get(CONF_URL, ""),
-            CONF_API_KEY: entry.data.get(CONF_API_KEY, ""),
             CONF_VERIFY_SSL: effective_verify_ssl(entry),
         }
         schema = vol.Schema(
@@ -429,9 +440,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_URL, default=defaults[CONF_URL]): TextSelector(
                     TextSelectorConfig(type=TextSelectorType.URL)
                 ),
-                vol.Optional(CONF_API_KEY, default=defaults[CONF_API_KEY]): TextSelector(
-                    TextSelectorConfig(type=TextSelectorType.PASSWORD)
-                ),
+                vol.Optional(CONF_API_KEY): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
                 vol.Optional(CONF_VERIFY_SSL, default=defaults[CONF_VERIFY_SSL]): BooleanSelector(),
             }
         )
