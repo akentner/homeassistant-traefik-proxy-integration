@@ -487,10 +487,10 @@ exactly one phase (A-15 is split into its client and flow halves).
 
 | Phase | Audit / research items | Requirements |
 |-------|------------------------|--------------|
-| 4 — Data layer | A-05, A-06, A-10, A-11, A-15 (client: `TraefikNotFoundError`), A-16, P-01, P-02, H-11; research §4.2 `always_update=False`, `_async_setup` | DATA-01..07 |
+| 4 — Data layer | A-05, A-06, A-10, A-11, A-15 (client: `TraefikProxyNotFoundError` + flow re-wired to it), A-16, P-01, P-02, H-11; research §4.2 `always_update=False`, `_async_setup` | DATA-01..07 |
 | 5 — Entity model + lifecycle | A-01, A-02, A-03, A-04, A-07, A-08, A-09, A-13, A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04, U-05, U-06, U-07, U-08, U-15, S-06, S-08; research §4.3 (has-entity-name, icon-translations, entity-category, parallel-updates, dynamic/stale devices, DeviceInfo kwargs only), §5 DeviceInfo dataclass / `DeviceEntry.config_entries` | ENT-01..10 |
 | 6 — Certificates | A-12, P-05, P-06, P-07, P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02 | CERT-01..05 |
-| 7 — Config flow / 2026.12 / observability | A-15 (flow: `api_disabled`), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..07, DIAG-04 |
+| 7 — Config flow / 2026.12 / observability | A-15 (flow: full error-path test matrix + translated `api_disabled` text), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..07, DIAG-04 |
 | 8 — Marketplace + release | A-19, B-01, B-02, B-03, B-04, B-05, B-06, H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-08, H-09, H-10, H-12; research §2 (categories, CI triggers, release, catalog PR text, My-link badge), §3 brand, §4.6 `docs-*` rules + coverage gate, §6 Q1 (tag prefix), Q7 (doc URLs), Q8 (`info.md`) | REL-01..08, DIST-04, DOCS-02, DOCS-04 |
 | Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 2026.11-only APIs, `UNDEFINED`, `ATTR_*` constants — not used / not adopted (M4); §4.1 conditional form fields — would raise min HA | — |
 

@@ -100,16 +100,24 @@ types stay exactly as they are in this phase.
   `TraefikProxyConnectionError` (every `aiohttp.ClientError` that is not a
   response-status error, `TimeoutError`, `OSError`) and
   `TraefikProxyPayloadError` (invalid JSON — `ValueError`/`aiohttp.ContentTypeError`
-  — or an unexpected top-level shape). Other non-2xx statuses raise
+  — or an unexpected top-level shape). `TraefikProxyInvalidUrlError` is a
+  subclass of `TraefikProxyConnectionError` (see D-11). To avoid an import
+  cycle, `models.py` parsers raise `ValueError`/`TypeError`/`KeyError` and the
+  client wraps them into `TraefikProxyPayloadError`. Other non-2xx statuses raise
   `TraefikProxyApiError` with the status code. Every `assert` in production
   code is replaced by an explicit shape check raising
   `TraefikProxyPayloadError`. Exception messages contain path and status only —
   never headers, credentials or the full URL with userinfo.
 - **D-11:** `config_flow.py` validation switches from `get_overview()` to
-  `async_get_version()`. In this phase `TraefikProxyNotFoundError` keeps
-  mapping to the existing `cannot_connect` behaviour (the `api_disabled`
-  mapping is Phase 7, FLOW-04); config-flow tests stay green unchanged in
-  behaviour.
+  `async_get_version()` and maps the new taxonomy so no existing branch goes
+  dead: `TraefikProxyAuthError` → `invalid_auth`, `TraefikProxyNotFoundError`
+  → the existing `ApiDisabled`/`api_disabled` branch (this re-wires the branch
+  the old code intended; the full error-path test matrix and the translated
+  text stay Phase 7, FLOW-04), `TraefikProxyInvalidUrlError` (a subclass of
+  `TraefikProxyConnectionError`, raised for `aiohttp.InvalidUrlClientError`) →
+  `invalid_url`, every other `TraefikProxyApiError` → `cannot_connect`.
+  Existing config-flow tests keep passing; adjust only their mocks to the new
+  exception types.
 
 ### Runtime data + coordinator (DATA-05, DATA-06)
 - **D-12:** New `custom_components/traefik_proxy/data.py` with
@@ -118,7 +126,13 @@ types stay exactly as they are in this phase.
   `entry.runtime_data` becomes this dataclass; every
   `getattr(..., "cert_coordinator", None)` and `coordinator.cert_coordinator`
   monkey-attach is removed. `CoordinatorEntity` subclasses receive the
-  coordinator explicitly (`entry.runtime_data.coordinator`).
+  coordinator explicitly (`entry.runtime_data.coordinator`). Setup order:
+  build client and both coordinators, assign `entry.runtime_data` **before**
+  the cert coordinator's first refresh (it reads the main snapshot). The
+  client exists once: the coordinator reads it from `TraefikRuntimeData`
+  (or both reference the same object and the options listener replaces it in
+  one place), so `runtime_data.client` can never drift from the client the
+  coordinator uses.
 - **D-13:** `TraefikProxyCoordinator` is a
   `DataUpdateCoordinator[TraefikSnapshot]` with `always_update=False`.
   `_async_setup()` fetches version and entrypoints once (errors there surface
@@ -191,6 +205,9 @@ types stay exactly as they are in this phase.
   scenario asserts the exact set of URLs requested (setup: version,
   entrypoints, rawdata; steady cycle: rawdata only; hourly / post-failure:
   + version; restart detected: + entrypoints).
+
+- **D-25:** The capture harness must not be collected by pytest (file name
+  without `test_` prefix, or `tests/traefik` in `norecursedirs`).
 
 ### Claude's Discretion
 - Internal helper layout inside `models.py` / `api.py` (classmethods vs. module
