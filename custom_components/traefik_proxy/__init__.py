@@ -26,7 +26,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator
+from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator, build_api_client
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -166,7 +166,9 @@ async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigE
     Options Flow writes the new scan_interval / verify_ssl / tls_warn_days
     into ``entry.options`` and HA fires this listener. We mutate the
     coordinator's ``update_interval`` directly so a scan-interval change
-    takes effect on the next scheduled cycle without a full reload. URL
+    takes effect on the next scheduled cycle without a full reload, and
+    rebuild the API client so a verify_ssl change reaches the running
+    client immediately (cheap: shared session, no network call). URL
     changes (reconfigure flow) come through ``entry.data`` instead of
     ``entry.options`` — HA's standard entry-data-change reload handles those
     by re-running ``async_setup_entry`` with the new URL, which rebuilds
@@ -175,6 +177,7 @@ async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigE
     coordinator: TraefikProxyCoordinator = entry.runtime_data
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     coordinator.update_interval = timedelta(seconds=scan_interval)
+    coordinator.client = build_api_client(hass, entry)
     _LOGGER.debug(
         "Traefik options updated: entry_id=%s scan_interval=%ss",
         entry.entry_id,

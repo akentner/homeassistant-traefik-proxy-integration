@@ -61,6 +61,27 @@ class TraefikProxyData(TypedDict, total=False):
 type TraefikProxyConfigEntry = ConfigEntry["TraefikProxyCoordinator"]
 
 
+def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
+    """Return the verify_ssl value the user set last.
+
+    Precedence: ``entry.options`` -> ``entry.data`` -> ``DEFAULT_VERIFY_SSL``.
+    The options flow writes options only; the reconfigure flow writes both.
+    """
+    if CONF_VERIFY_SSL in entry.options:
+        return bool(entry.options[CONF_VERIFY_SSL])
+    return bool(entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL))
+
+
+def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:
+    """Build the runtime API client from the entry and the shared HA session."""
+    return TraefikProxyApiClient(
+        session=aiohttp_client.async_get_clientsession(hass),
+        base_url=entry.data[CONF_URL],
+        api_key=entry.data[CONF_API_KEY],
+        verify_ssl=effective_verify_ssl(entry),
+    )
+
+
 class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikProxyData]):
     """Single polling point for Traefik state.
 
@@ -86,12 +107,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikProxyData]):
             name=entry.title or "Traefik",
             update_interval=timedelta(seconds=scan_interval),
         )
-        self.client = TraefikProxyApiClient(
-            session=aiohttp_client.async_get_clientsession(hass),
-            base_url=entry.data[CONF_URL],
-            api_key=entry.data[CONF_API_KEY],
-            verify_ssl=entry.options.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
-        )
+        self.client = build_api_client(hass, entry)
 
     async def _async_update_data(self) -> TraefikProxyData:
         """Fetch the six Traefik endpoints in parallel; map errors per CONTEXT.md D-07.

@@ -14,8 +14,10 @@ Implements four flows against the Phase 1 probe-and-validate foundation:
   raises ``ConfigEntryAuthFailed``; the new bearer token is validated against
   ``/api/overview`` and the entry's data is updated in place + reloaded.
 - :class:`TraefikProxyConfigFlow.async_step_reconfigure` — in-place URL + token
-  change (CFG-03, CONTEXT.md D-11). Pre-fills from ``entry.data``, validates,
-  and calls ``async_update_reload_and_abort`` with ``data_updates``.
+  change (CFG-03, CONTEXT.md D-11). Pre-fills URL / token from ``entry.data``
+  and verify_ssl from the effective value (options, then data), validates,
+  and calls ``async_update_reload_and_abort`` with ``data_updates`` plus the
+  verify_ssl value mirrored into ``options``.
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     MIN_TLS_WARN_DAYS,
 )
+from .coordinator import effective_verify_ssl
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -178,9 +181,9 @@ class TraefikProxyOptionsFlow(OptionsFlow):
     - ``scan_interval`` (15..300s, default 15) — applied live by the
       ``_async_options_updated`` listener in ``__init__.py`` so a value
       change does not require an integration reload.
-    - ``verify_ssl`` (bool, default True) — takes effect on the next
-      coordinator cycle (full entry reload via HA's standard data-change
-      trigger when the URL is unchanged).
+    - ``verify_ssl`` (bool, default: the effective value) — the same
+      listener rebuilds the running API client, so the change takes effect
+      on the next request without a reload.
     - ``tls_warn_days`` (1..90d, default 14) — stored as a placeholder for
       Phase 3 TLS binary sensors (CONTEXT.md D-09). Phase 3 picks the value
       up via ``coordinator.tls_warn_days``.
@@ -197,7 +200,7 @@ class TraefikProxyOptionsFlow(OptionsFlow):
         current = self.config_entry.options
         defaults = {
             CONF_SCAN_INTERVAL: current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-            CONF_VERIFY_SSL: current.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            CONF_VERIFY_SSL: effective_verify_ssl(self.config_entry),
             CONF_TLS_WARN_DAYS: current.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS),
         }
 
@@ -338,7 +341,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             probe_data = {
                 CONF_URL: entry.data[CONF_URL],
                 CONF_API_KEY: new_api_key,
-                CONF_VERIFY_SSL: entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                CONF_VERIFY_SSL: effective_verify_ssl(entry),
             }
             try:
                 await _validate_input(self.hass, probe_data)
@@ -372,11 +375,13 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle in-place URL + token change (CFG-03 / CONTEXT.md D-11).
 
-        Pre-fills the form from ``entry.data``. On submit, validates the new
+        Pre-fills URL / token from ``entry.data`` and verify_ssl from the
+        effective value (options, then data). On submit, validates the new
         endpoint via ``/api/overview`` and calls
         ``async_update_reload_and_abort`` with ``data_updates`` so HA
         rewrites the entry's data in place and reloads — no delete + re-add
-        required.
+        required. verify_ssl is also written to ``options`` so the value the
+        user just set stays the effective one.
         """
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
@@ -401,21 +406,23 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 # entry. We do NOT pass ``updates=`` because we never want to
                 # silently overwrite a different Traefik entry.
                 self._abort_if_unique_id_configured()
+                verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates={
                         CONF_URL: user_input[CONF_URL],
                         CONF_API_KEY: user_input.get(CONF_API_KEY, ""),
-                        CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                        CONF_VERIFY_SSL: verify_ssl,
                     },
+                    options={**entry.options, CONF_VERIFY_SSL: verify_ssl},
                 )
 
-        # Pre-fill defaults from current entry data so the form shows the
-        # currently-saved URL / token / verify_ssl.
+        # Pre-fill defaults so the form shows the currently-saved URL / token
+        # and the effective verify_ssl value.
         defaults = {
             CONF_URL: entry.data.get(CONF_URL, ""),
             CONF_API_KEY: entry.data.get(CONF_API_KEY, ""),
-            CONF_VERIFY_SSL: entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+            CONF_VERIFY_SSL: effective_verify_ssl(entry),
         }
         schema = vol.Schema(
             {
