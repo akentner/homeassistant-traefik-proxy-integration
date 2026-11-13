@@ -1,17 +1,20 @@
 ---
-gsd_state_version: 1.0
+gsd_state_version: "1.0"
 milestone: v1.0
-milestone_name: milestone
+current_phase: 3
 status: executing
 stopped_at: Completed Phase 3 plan 03-03 (TEST-04 test surface)
-last_updated: "2026-07-06T08:35:00.000Z"
-last_activity: 2026-07-06 -- Phase 03 plan 03-03 executed (test_tls.py + test_cert_coordinator.py + test_sensor_tls.py + test_binary_sensor_tls_expiring.py + mock_certificate_server fixture; 83 new tests; suite 40 → 123 passing; ruff+mypy+pytest clean)
+last_updated: "2026-11-13T22:38:24.591Z"
+last_activity: 2026-11-13
+last_activity_desc: "Completed quick task 261113-viw: Security fixes (verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat)"
+state_head: 1a07f14a0d1d25c70d6cd411edf1d2d423e61483
 progress:
   total_phases: 4
   completed_phases: 3
   total_plans: 11
   completed_plans: 11
   percent: 75
+milestone_name: milestone
 ---
 
 # Project State
@@ -30,9 +33,9 @@ failing, and which TLS certificates are expiring soon.
 Phase: 3 (complete)
 Plan: 03-03 complete (3/3 plans done for Phase 3)
 Status: In progress
-Last activity: 2026-07-06 -- Phase 03 plan 03-03 executed (TEST-04 test surface: test_tls.py (33) + test_cert_coordinator.py (19) + test_sensor_tls.py (13) + test_binary_sensor_tls_expiring.py (18) + mock_certificate_server async fixture; total suite 40 → 123 passing; all ruff+mypy+pytest gates clean)
+Last activity: 2026-11-13 - Completed quick task 261113-viw: Security fixes (verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat)
 
-Progress: [██████████] 100% (Phase 3)
+Progress: [████████░░] 75% (Phase 3)
 
 ## Performance Metrics
 
@@ -123,6 +126,12 @@ None yet.
   is correct — only the footer is stale. Cosmetic; not a coverage gap.
   Phase 03 closed out TEST-04 — only DIAG-04 + DIST-04/05 + DOCS-02/03/04
   remain pending in Phase 4.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261113-viw | Security fixes: verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat | 2026-11-13 | 1a07f14 | [261113-viw-security-fixes-verify-ssl-single-source-](./quick/261113-viw-security-fixes-verify-ssl-single-source-/) |
 
 - `custom_components/traefik/config_flow.py` ruff-format diff is pre-existing
   from Phase 2-02 (verified via `git stash` before-plan baseline). Out of
