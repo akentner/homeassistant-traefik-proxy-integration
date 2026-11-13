@@ -3,17 +3,16 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 3
 status: executing
-stopped_at: Completed Phase 3 plan 03-03 (TEST-04 test surface)
-last_updated: "2026-11-13T22:38:24.591Z"
-last_activity: 2026-11-13
-last_activity_desc: "Completed quick task 261113-viw: Security fixes (verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat)"
-state_head: 1a07f14a0d1d25c70d6cd411edf1d2d423e61483
+stopped_at: Milestone v1.0 restructured into Phases 4-8; planning Phase 4
+last_updated: "2026-11-13T23:09:46.975Z"
+last_activity: 2026-11-14
+last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
+state_head: 68fdb83c9307861205d44a2a1639dd60171dc179
 progress:
-  total_phases: 4
+  total_phases: 8
   completed_phases: 3
   total_plans: 11
   completed_plans: 11
-  percent: 75
 milestone_name: milestone
 ---
 
@@ -26,16 +25,16 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 3 complete (TLS); next is Phase 4 (Quality + Diagnostics + Polish + HACS)
+**Current focus:** Phase 4 — Data layer (correct + lean). Branch `feat/marketplace-polish`; Phases 4–8 replace the old Phase 4 (see ROADMAP.md).
 
 ## Current Position
 
-Phase: 3 (complete)
-Plan: 03-03 complete (3/3 plans done for Phase 3)
-Status: In progress
-Last activity: 2026-11-13 - Completed quick task 261113-viw: Security fixes (verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat)
+Phase: 4 of 8 (Data layer (correct + lean)) — planning
+Plan: —
+Status: Ready to plan
+Last activity: 2026-11-14 - Milestone v1.0 restructured into Phases 4–8 (marketplace research + code audit)
 
-Progress: [████████░░] 75% (Phase 3)
+Progress: [████░░░░░░] 38% (3 of 8 phases)
 
 ## Performance Metrics
 
@@ -52,7 +51,7 @@ Progress: [████████░░] 75% (Phase 3)
 | 1. Foundation | 4 | 4 | 12m |
 | 2. Core Entities + Options + Reauth + Reload | 2 | 4 | 11m |
 | 3. TLS Certificate Expiry | 3 | 3 | 16m |
-| 4. Quality + Diagnostics + Polish + HACS | 0 | 2 | — |
+| 4. Data layer (correct + lean) | 0 | — | — |
 
 **Recent Trend:**
 
@@ -138,10 +137,18 @@ None yet.
   scope for 03-03 — per deviation rules, only directly-caused reformatting
   is in scope.
 
+### Roadmap Evolution
+
+- Phase 4 added: Data layer (correct + lean) — replaces old Phase 4 (Quality + Diagnostics + Polish + HACS) after marketplace research + code audit (M11)
+- Phase 5 added: Entity model + lifecycle — replaces old Phase 4 (Quality + Diagnostics + Polish + HACS) after marketplace research + code audit (M11)
+- Phase 6 added: Certificates — replaces old Phase 4 (Quality + Diagnostics + Polish + HACS) after marketplace research + code audit (M11)
+- Phase 7 added: Config flow, HA 2026.12 compatibility, observability — replaces old Phase 4 (Quality + Diagnostics + Polish + HACS) after marketplace research + code audit (M11)
+- Phase 8 added: Marketplace + release readiness — replaces old Phase 4 (Quality + Diagnostics + Polish + HACS) after marketplace research + code audit (M11)
+
 ## Session Continuity
 
 Last session: 2026-07-06T08:35:00.000Z
 Stopped at: Completed Phase 3 plan 03-03 (TEST-04 test surface — 83 new tests; suite 40 → 123)
 45/49 v1 requirements complete; 4/6 Phase 3 requirements now mapped (TLS-01..05 ✅ + TEST-04 ✅); 4 remaining pending (DIAG-04 + DIST-04/05 + DOCS-02/03/04 + TEST-02/03 in fact already ✅ — only DIAG-04 + DIST-04/05 + DOCS-02/03/04 are net-pending).
-Resume file: .planning/phases/03-tls-certificate-expiry/03-CONTEXT.md
-Next: Phase 4 (Quality + Diagnostics + Polish + HACS)
+Resume file: .planning/ROADMAP.md (Phase 4 section)
+Next: /gsd-plan-phase 4 (Data layer)

@@ -11,7 +11,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 - [x] **CFG-01**: User can configure the integration via the Home Assistant UI
       config flow by providing the Traefik API URL and a bearer token.
-- [x] **CFG-02**: User can alternatively configure the integration via
+- [~] ~~**CFG-02**~~ _(dropped — the YAML path never worked and is removed in FLOW-07 (audit A-18, U-14))_: User can alternatively configure the integration via
       `configuration.yaml` for users who prefer YAML / pinned releases.
 - [x] **CFG-03**: User can reconfigure the Traefik URL without deleting and
       re-adding the integration entry.
@@ -27,7 +27,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 - [x] **API-01**: The integration connects to Traefik over HTTP using the
       shared HA `aiohttp.ClientSession` (never creates its own).
-- [x] **API-02**: The integration calls `/api/version`, `/api/entrypoints`,
+- [~] ~~**API-02**~~ _(superseded by DATA-02 (one `/api/rawdata` call per cycle))_: The integration calls `/api/version`, `/api/entrypoints`,
       `/api/http/routers`, `/api/http/services`, `/api/http/middlewares`,
       and `/api/overview` in parallel via `asyncio.gather`.
 - [x] **API-03**: All API requests carry the bearer token in an
@@ -35,7 +35,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       on a long-lived session.
 - [x] **API-04**: The API client raises `TraefikAuthError` on HTTP 401 and
       `TraefikApiError` on other non-2xx responses — never logs the token.
-- [x] **API-05**: The API client can trigger `traefik.reload_routers` via
+- [~] ~~**API-05**~~ _(superseded by ENT-07 — Traefik has no refresh endpoint (audit A-04, M12))_: The API client can trigger `traefik.reload_routers` via
       `POST /api/http/routers/refresh` and report whether the refresh
       actually completed (Traefik returns 200 before reload finishes).
 - [x] **API-06**: The API client supports HTTP and HTTPS targets, with
@@ -56,7 +56,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Entities — Routers (CORE-04)
 
-- [x] **ROUTER-01**: A `binary_sensor` exists for each Traefik router,
+- [~] ~~**ROUTER-01**~~ _(superseded by ENT-04 (router ENUM sensor, M13))_: A `binary_sensor` exists for each Traefik router,
       with state `on` when the router is `enabled` and `off` when
       `disabled` or errored — `BinarySensorDeviceClass.RUNNING`.
 - [x] **ROUTER-02**: Each router entity exposes the Traefik router `name`,
@@ -80,9 +80,9 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 - [x] **DIAG-01**: A top-level `binary_sensor` becomes `on` when any
       router is reporting a non-`enabled` status — `BinarySensorDeviceClass.PROBLEM`.
-- [x] **DIAG-02**: A `button` entity triggers the `Reload` button device
+- [~] ~~**DIAG-02**~~ _(superseded by ENT-07 ("Refresh now" button, M12))_: A `button` entity triggers the `Reload` button device
       class and posts a refresh to Traefik when pressed.
-- [x] **DIAG-03**: A `traefik.reload_routers` service is registered
+- [~] ~~**DIAG-03**~~ _(superseded by ENT-07 (service removed, M12))_: A `traefik.reload_routers` service is registered
       during `async_setup` (not `async_setup_entry`) and verifies reload
       completion via polling.
 
@@ -96,7 +96,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       threshold (default 14 days) — `BinarySensorDeviceClass.PROBLEM`.
 - [ ] **TLS-03**: TLS fetches use a separate `CertCoordinator` with a
       6-hour cadence (not the 30s state cycle).
-- [ ] **TLS-04**: TLS handshakes run via stdlib `ssl` inside
+- [~] ~~**TLS-04**~~ _(superseded by CERT-02 (async probe without threads; problem-on instead of unavailable))_: TLS handshakes run via stdlib `ssl` inside
       `asyncio.to_thread`; failures mark the entity as `unavailable`
       rather than crashing the integration.
 - [ ] **TLS-05**: TLS state caches per cycle to avoid hammering ports on
@@ -124,9 +124,9 @@ Requirements for initial release. Each maps to a roadmap phase.
 - [x] **DIST-03**: `manifest.json` deliberately omits `quality_scale`
       (hassfest blocks it for custom integrations).
 - [ ] **DIST-04**: GitHub Actions include `hassfest`, HACS Action, and
-      pytest workflows; the release tag is enforced to match the manifest
-      `version`.
-- [ ] **DIST-05**: The integration targets **Bronze** quality scale for
+      pytest workflows; a release workflow fails when the tag does not equal
+      the manifest `version` (Phase 8).
+- [~] ~~**DIST-05**~~ _(dropped — hassfest ignores quality scale for custom integrations; IQS rules are a checklist only (M10))_: The integration targets **Bronze** quality scale for
       v1.0 and **Silver** as a stretch goal for v1.2.
 
 ### Documentation (DOCS-01)
@@ -137,7 +137,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       "warn me N days before TLS expiry" pattern).
 - [ ] **DOCS-02**: A `CHANGELOG.md` is added for the first release and
       updated on every release tag.
-- [ ] **DOCS-03**: A `info.md` (HACS store card) summarizes the
+- [~] ~~**DOCS-03**~~ _(dropped — `info.md` is not used by the Marketplace; README is the information file (research §6 Q8))_: A `info.md` (HACS store card) summarizes the
       integration for the HACS browse view.
 - [ ] **DOCS-04**: An FAQ addresses the locked-out anti-features
       (config-file edits, ACME in HA, v1 Traefik, etc.) so users do not
@@ -167,8 +167,163 @@ Requirements for initial release. Each maps to a roadmap phase.
 ### Diagnostics (DIAG-04)
 
 - [ ] **DIAG-04**: A `diagnostics.py` exports config-entry diagnostics
-      with `async_redact_data` stripping `api_key`, `token`, `password`,
-      `basic_auth` and any other credential-shaped keys.
+      (entry data, options, current snapshot) with `async_redact_data`
+      stripping token, username, password and any other credential-shaped
+      keys (Phase 7; audit U-16).
+
+### Data layer (DATA) — Phase 4
+
+- [ ] **DATA-01**: API responses are parsed once, in the client, into frozen
+      dataclasses in `models.py` (`Router`, `Service`, `Middleware`,
+      `Entrypoint`, `TraefikVersion`, `TraefikSnapshot`) with a `Status`
+      `StrEnum`; platforms never inspect raw API dicts. (A-10)
+- [ ] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
+      (unpaginated; routers, services incl. `serverStatus`, middlewares);
+      `/api/version` and `/api/entrypoints` are fetched at setup and again only
+      when `version.StartDate` changes; if `/api/rawdata` is unavailable the
+      client falls back to the paginated list endpoints and follows
+      `X-Next-Page`. HTTP objects only; TCP/UDP data is ignored. (A-06, P-01)
+- [ ] **DATA-03**: The client supports auth modes none / basic (username +
+      password) / bearer; the `Authorization` header is built per request and
+      credentials never appear in logs or exception messages.
+- [ ] **DATA-04**: The client raises exactly one of `TraefikAuthError`
+      (401/403), `TraefikNotFoundError` (404), `TraefikConnectionError` (any
+      `aiohttp.ClientError`, timeout, `OSError`) or `TraefikPayloadError`
+      (invalid JSON or shape); production code contains no `assert`.
+      (A-15 client part, A-16)
+- [ ] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
+      dataclass holding client, coordinator and cert coordinator. (A-11)
+- [ ] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
+      `dict[name, Model]` per kind and aggregates (counts per status, problem
+      lists) computed once per cycle; `always_update=False`. (P-02)
+- [ ] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
+      and v3.x, redacted, and regenerable from a committed script; they cover
+      providers, `error[]`, `serverStatus`, TLS domains and >100 items on the
+      paginated path. (A-05, H-11)
+
+### Entity model + lifecycle (ENT) — Phase 5
+
+- [ ] **ENT-01**: One entity manager per entry adds entities for new items on
+      each coordinator update, marks vanished items `missing`, removes them from
+      the registry after a 24 h grace period and re-binds items that reappear;
+      it reads only `er.async_entries_for_config_entry`, never the whole
+      registry. Used for routers, services and (Phase 6) certificates; cert
+      entities are never re-added for known hosts. (A-02, A-03, A-08, A-14, P-04)
+- [ ] **ENT-02**: Per-item entities store only their key and read the current
+      model from the snapshot on every update; state is written only when the
+      entity's model changed; redundant `available` overrides are removed.
+      (A-01, A-20, P-03)
+- [ ] **ENT-03**: Entity bases `TraefikEntity` and `TraefikCertEntity`
+      (subscribed to the cert coordinator) share one `DeviceInfo` factory: main
+      device `Traefik (<host>)` with `entry_type=SERVICE`,
+      `configuration_url=<url>/dashboard/` and `sw_version` kept current;
+      sub-devices Routers / Services / Certificates via `via_device`. (A-07,
+      A-21, U-04)
+- [ ] **ENT-04**: Routers and services are `sensor` entities with
+      `device_class=enum` (`enabled`, `warning`, `error`, `disabled`,
+      `missing`); services expose `servers_up`/`servers_total` (no URLs/IPs);
+      each attribute has one canonical key. (U-07, U-08, S-06, P-09)
+- [ ] **ENT-05**: Problem aggregates `routers_problem`, `services_problem`,
+      `middlewares_problem` (binary_sensor, `problem`) are enabled by default
+      and implemented as one class plus entity descriptions. (U-01, A-13)
+- [ ] **ENT-06**: Counts, version, Traefik start time, entrypoints and an
+      optional healthy-ratio sensor carry `EntityCategory.DIAGNOSTIC`;
+      entrypoints and healthy ratio are disabled by default. (U-05, U-06, U-15)
+- [ ] **ENT-07**: The reload button, the `reload_routers` service,
+      `services.yaml` and the client refresh method are removed; a "Refresh
+      now" button refreshes both coordinators of its own entry and needs no
+      admin bypass. (A-04, A-09, S-08)
+- [ ] **ENT-08**: Static entity names use `translation_key` with entity
+      strings in `en.json` and `de.json`; `icons.json` provides default and
+      state icons; every platform sets `PARALLEL_UPDATES`. (U-02)
+- [ ] **ENT-09**: Upgrading from 0.3.0 removes the old router/service
+      `binary_sensor` and reload-button registry entries in a config-entry
+      migration and shows a non-fixable repair notice (HA 2026.3 API, removed
+      on unload).
+- [ ] **ENT-10**: The option "create per-router/per-service entities"
+      (default on) is honoured; when off, only aggregate and diagnostic entities
+      exist and existing per-item entities are removed.
+
+### Certificates (CERT) — Phase 6
+
+- [ ] **CERT-01**: On Traefik ≥ 3.7 certificate data comes from
+      `GET /api/certificates` (`source=api`, no probing); a 404 or older version
+      falls back to probing. (T-01)
+- [ ] **CERT-02**: The fallback probe is native async
+      (`asyncio.open_connection`, no threads), uses one shared `SSLContext` with
+      `CERT_NONE`, parses the DER certificate with `cryptography`, connects to
+      the Traefik host from the entry URL on the TLS entrypoint port with
+      SNI = router host, reports `verified`, and classifies `ssl` vs `oserror`
+      correctly. (T-01, T-02, P-05, P-06, S-05)
+- [ ] **CERT-03**: `rules.py` `extract_hosts()` handles v2 multi-argument
+      `Host()` and v3 `||` rules and skips regex and wildcard hosts; at most 200
+      hosts are probed; no module-level cache grows without bound. (A-12, P-07,
+      P-08, S-07)
+- [ ] **CERT-04**: Wildcard SAN matching accepts exactly one label
+      (RFC 6125 §6.4.3). (S-04)
+- [ ] **CERT-05**: `days_left` is computed from `not_after` at read time; an
+      expired or repeatedly unprobeable certificate turns `certificate_expiring`
+      and the `certificates_problem` aggregate (enabled by default) on with a
+      `reason`, while the timestamp sensor keeps its last value. (U-09, U-10)
+
+### Config flow, HA 2026.12 compatibility, observability (FLOW) — Phase 7
+
+- [ ] **FLOW-01**: User, reauth and reconfigure steps offer an auth selector
+      (none / basic / bearer) with `PASSWORD` selectors and per-field
+      `data_description`; a minor-version config-entry migration converts 0.3.0
+      data (token → bearer, empty → none); choosing "none" clears credentials.
+      (U-03, U-11, S-03)
+- [ ] **FLOW-02**: No update listener remains; the options flow is an
+      `OptionsFlowWithReload` with `NumberSelector`s (units, box mode) and the
+      per-item-entities toggle. (A-17, S-01, U-12)
+- [ ] **FLOW-03**: Reauth and reconfigure finish through
+      `async_update_reload_and_abort`; the config-entry unique_id is
+      `host:port` (migrated) and follows a reconfigure; the title is the host.
+      (A-22, S-02)
+- [ ] **FLOW-04**: A 404 maps to `api_disabled`; every flow error path is
+      tested (config_flow.py 100 % line coverage). (A-15 flow part)
+- [ ] **FLOW-05**: `ConfigEntryAuthFailed`, `ConfigEntryNotReady` and
+      `UpdateFailed` use `translation_domain`/`translation_key` with an
+      `exceptions` section in the translations. (research §4.2)
+- [ ] **FLOW-06**: A repair issue is raised for an `http://` URL combined with
+      credentials and is deleted when resolved or when the entry unloads, using
+      only HA 2026.3 APIs (M4). (research §4.6)
+- [ ] **FLOW-07**: `strings.json`, the YAML step and its strings, and the dead
+      code from audit A-18 are removed; `translations/en.json` is the single
+      source and `translations/de.json` has full key parity (tested). (A-18,
+      U-13, U-14, M7)
+
+### Marketplace + release readiness (REL) — Phase 8
+
+- [ ] **REL-01**: `manifest.json` has `categories:
+      ["computers_network.monitoring"]` (sorted keys) and version `1.0.0`;
+      `hacs.json` keeps `homeassistant: 2026.3.0`. (research §2)
+- [ ] **REL-02**: Brand icons are re-exported trimmed and centred, `logo.png`
+      / `logo@2x.png` are added, `icon.svg` moves to `docs/`, local brand
+      serving is confirmed for HA 2026.3.0, and the README carries the Traefik
+      trademark note. (B-01..B-06, research §3)
+- [ ] **REL-03**: README is rewritten (Marketplace/My-link badge,
+      prerequisites incl. protecting the Traefik API, install/removal, options,
+      entity table matching the code, automations, troubleshooting, data update
+      cadence, known limitations) with no private hostnames. (H-01, H-02)
+- [ ] **REL-04**: Dev tooling is consistent: pre-commit on Python 3.14 and
+      `traefik_proxy` paths, pyproject project name + coverage target +
+      `fail_under`, Makefile aligned with CI, no test `SyntaxWarning`, no real
+      multi-second sleeps in tests. (H-03, H-04, H-09, H-10, H-12)
+- [ ] **REL-05**: CI runs on push, PR, nightly schedule and manual dispatch,
+      includes a test job against HA 2026.3.x, and pins all actions by tag or
+      SHA. (H-05, M9, M24)
+- [ ] **REL-06**: Shipped code contains no planning references (CONTEXT.md,
+      PITFALLS, D-xx, BLOCKER, phase/plan numbers, `.planning/`, `.claude/`
+      paths); CLAUDE.md stack section and skill routing match the
+      `traefik_proxy` domain and the renamed skill; developer-doc links point
+      at contributors.home-assistant.io. (A-19, H-07, H-08, research §6 Q7)
+- [ ] **REL-07**: Local hassfest and `hacs/action` (no `ignore`) pass;
+      release notes and the `hacs/default` PR text are drafted in `.planning/`.
+      (research §2, M8)
+- [ ] **REL-08**: `feat/marketplace-polish` is pushed and a Draft PR to `main`
+      is open; no tag, release or `hacs/default` PR is created by the assistant.
+      (U1)
 
 ## v2 Requirements
 
@@ -212,10 +367,16 @@ Explicitly excluded. Documented to prevent scope creep.
 | A built-in web UI for editing Traefik routes | Out of scope — Traefik dashboard exists; duplicating UI is wasted effort |
 | Traefik v1 support | EOL since 2021; two API shapes would double the maintenance surface |
 | Traefik Enterprise / cloud-managed Traefik | Only OSS reverse proxy is targeted |
-| Reading `/api/rawdata` dependency graph | API endpoint exists but visualization value is unclear; defer until user feedback |
+| Visualising the `/api/rawdata` dependency graph | `/api/rawdata` is used as the data source (DATA-02), but drawing the router→middleware→service graph has unclear value; defer until user feedback |
 | Reading `acme.json` from disk | Coupling to Traefik's internal file layout; TLS handshake works without it |
 | Per-middleware entities | Middlewares are config-time constructs with no runtime state to expose |
 | TCP/UDP router+service entities | PROJECT.md explicitly HTTP-only; TCP uses a different API surface |
+| Integration service actions (reload or otherwise) | The Traefik API is read-only; the "Refresh now" button covers manual refresh (M12). Research §4.4 (action-setup, response data, action exceptions, service translations) is therefore moot |
+| HA 2026.11-only APIs (`ir` `config_entry_id`, `async_refresh_issues`, `async_unload_platforms_or_raise`, `-> None` setup) | Minimum HA stays 2026.3.0 (M4) |
+| `quality_scale.yaml` / manifest `quality_scale` | hassfest skips it for custom integrations; IQS rules are used as a checklist only (M10) |
+| Probatio migration (`import probatio`) | `voluptuous` is aliased to Probatio since HA 2026.9 with no deprecation; no action needed (research §4.7) |
+| Option "probe certificates via DNS" | Probing via the Traefik host with SNI is the only correct path behind CDNs/split DNS (M19); a DNS mode would re-introduce audit T-02 |
+| Conditional form fields (HA 2026.10+) | Would raise the minimum HA version (M4) |
 
 ## Traceability
 
@@ -224,60 +385,112 @@ Which phases cover which requirements. Updated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CFG-01 | Phase 1 | Complete |
-| CFG-02 | Phase 1 | Complete |
+| CFG-02 | Phase 1 | Superseded |
 | CFG-03 | Phase 2 | Complete |
 | CFG-04 | Phase 2 | Complete |
 | CFG-05 | Phase 2 | Complete |
 | CFG-06 | Phase 1 | Complete |
 | API-01 | Phase 1 | Complete |
-| API-02 | Phase 1 | Complete |
+| API-02 | Phase 1 | Superseded |
 | API-03 | Phase 1 | Complete |
 | API-04 | Phase 1 | Complete |
-| API-05 | Phase 2 | Complete |
+| API-05 | Phase 2 | Superseded |
 | API-06 | Phase 1 | Complete |
 | COORD-01 | Phase 1 | Complete |
 | COORD-02 | Phase 1 | Complete |
 | COORD-03 | Phase 1 | Complete |
 | COORD-04 | Phase 1 | Complete |
-| ROUTER-01 | Phase 1 | Complete |
-| ROUTER-02 | Phase 2 | Complete |
+| ROUTER-01 | Phase 1 | Superseded |
+| ROUTER-02 | Phase 2 | Complete (refined by ENT-04) |
 | ROUTER-03 | Phase 2 | Complete |
 | ROUTER-04 | Phase 1 | Complete |
-| ENTRY-01 | Phase 2 | Complete |
-| ENTRY-02 | Phase 2 | Complete |
-| ENTRY-03 | Phase 2 | Complete |
+| ENTRY-01 | Phase 2 | Complete (refined by ENT-06) |
+| ENTRY-02 | Phase 2 | Complete (refined by ENT-04) |
+| ENTRY-03 | Phase 2 | Complete (refined by ENT-05/06) |
 | DIAG-01 | Phase 2 | Complete |
-| DIAG-02 | Phase 2 | Complete |
-| DIAG-03 | Phase 2 | Complete |
-| DIAG-04 | Phase 4 | Pending |
-| TLS-01 | Phase 3 | Complete |
-| TLS-02 | Phase 3 | Complete |
-| TLS-03 | Phase 3 | Pending |
-| TLS-04 | Phase 3 | Pending |
-| TLS-05 | Phase 3 | Pending |
-| UX-01 | Phase 1 | Complete |
+| DIAG-02 | Phase 2 | Superseded |
+| DIAG-03 | Phase 2 | Superseded |
+| DIAG-04 | Phase 7 | Pending |
+| TLS-01 | Phase 3 | Complete (refined by CERT-01/05) |
+| TLS-02 | Phase 3 | Complete (refined by CERT-05) |
+| TLS-03 | Phase 3 | Complete |
+| TLS-04 | Phase 3 | Superseded |
+| TLS-05 | Phase 3 | Complete |
+| UX-01 | Phase 1 | Complete (refined by ENT-03) |
 | UX-02 | Phase 1 | Complete |
-| UX-03 | Phase 2 | Complete |
+| UX-03 | Phase 2 | Complete (refined by ENT-01) |
 | UX-04 | Phase 2 | Complete |
 | DIST-01 | Phase 1 | Complete |
 | DIST-02 | Phase 1 | Complete |
 | DIST-03 | Phase 1 | Complete |
-| DIST-04 | Phase 4 | Pending |
-| DIST-05 | Phase 4 | Pending |
+| DIST-04 | Phase 8 | Pending |
+| DIST-05 | — | Superseded |
 | DOCS-01 | Phase 1 | Complete |
-| DOCS-02 | Phase 4 | Pending |
-| DOCS-03 | Phase 4 | Pending |
-| DOCS-04 | Phase 4 | Pending |
+| DOCS-02 | Phase 8 | Pending |
+| DOCS-03 | — | Superseded |
+| DOCS-04 | Phase 8 | Pending |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Complete |
-| TEST-03 | Phase 1 | Complete |
+| TEST-03 | Phase 1 | Complete (refined by DATA-07) |
 | TEST-04 | Phase 3 | Complete |
+| DATA-01 | Phase 4 | Pending |
+| DATA-02 | Phase 4 | Pending |
+| DATA-03 | Phase 4 | Pending |
+| DATA-04 | Phase 4 | Pending |
+| DATA-05 | Phase 4 | Pending |
+| DATA-06 | Phase 4 | Pending |
+| DATA-07 | Phase 4 | Pending |
+| ENT-01 | Phase 5 | Pending |
+| ENT-02 | Phase 5 | Pending |
+| ENT-03 | Phase 5 | Pending |
+| ENT-04 | Phase 5 | Pending |
+| ENT-05 | Phase 5 | Pending |
+| ENT-06 | Phase 5 | Pending |
+| ENT-07 | Phase 5 | Pending |
+| ENT-08 | Phase 5 | Pending |
+| ENT-09 | Phase 5 | Pending |
+| ENT-10 | Phase 5 | Pending |
+| CERT-01 | Phase 6 | Pending |
+| CERT-02 | Phase 6 | Pending |
+| CERT-03 | Phase 6 | Pending |
+| CERT-04 | Phase 6 | Pending |
+| CERT-05 | Phase 6 | Pending |
+| FLOW-01 | Phase 7 | Pending |
+| FLOW-02 | Phase 7 | Pending |
+| FLOW-03 | Phase 7 | Pending |
+| FLOW-04 | Phase 7 | Pending |
+| FLOW-05 | Phase 7 | Pending |
+| FLOW-06 | Phase 7 | Pending |
+| FLOW-07 | Phase 7 | Pending |
+| REL-01 | Phase 8 | Pending |
+| REL-02 | Phase 8 | Pending |
+| REL-03 | Phase 8 | Pending |
+| REL-04 | Phase 8 | Pending |
+| REL-05 | Phase 8 | Pending |
+| REL-06 | Phase 8 | Pending |
+| REL-07 | Phase 8 | Pending |
+| REL-08 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 46 total
-- Mapped to phases: 46
+- v1 requirements: 86 rows — 77 active (36 complete, 41 pending) + 9 superseded/dropped
+- Mapped to phases: 77 / 77 active
 - Unmapped: 0 ✓
+
+## Audit traceability
+
+Every finding in `.planning/research/AUDIT-ARCH-PERF-UX.md` and every
+actionable item in `.planning/research/MARKETPLACE-BEST-PRACTICES.md` maps to
+exactly one phase (A-15 is split into its client and flow halves).
+
+| Phase | Audit / research items | Requirements |
+|-------|------------------------|--------------|
+| 4 — Data layer | A-05, A-06, A-10, A-11, A-15 (client: `TraefikNotFoundError`), A-16, P-01, P-02, H-11; research §4.2 `always_update=False`, `_async_setup` | DATA-01..07 |
+| 5 — Entity model + lifecycle | A-01, A-02, A-03, A-04, A-07, A-08, A-09, A-13, A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04, U-05, U-06, U-07, U-08, U-15, S-06, S-08; research §4.3 (has-entity-name, icon-translations, entity-category, parallel-updates, dynamic/stale devices, DeviceInfo kwargs only), §5 DeviceInfo dataclass / `DeviceEntry.config_entries` | ENT-01..10 |
+| 6 — Certificates | A-12, P-05, P-06, P-07, P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02 | CERT-01..05 |
+| 7 — Config flow / 2026.12 / observability | A-15 (flow: `api_disabled`), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..07, DIAG-04 |
+| 8 — Marketplace + release | A-19, B-01, B-02, B-03, B-04, B-05, B-06, H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-08, H-09, H-10, H-12; research §2 (categories, CI triggers, release, catalog PR text, My-link badge), §3 brand, §4.6 `docs-*` rules + coverage gate, §6 Q1 (tag prefix), Q7 (doc URLs), Q8 (`info.md`) | REL-01..08, DIST-04, DOCS-02, DOCS-04 |
+| Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 2026.11-only APIs, `UNDEFINED`, `ATTR_*` constants — not used / not adopted (M4); §4.1 conditional form fields — would raise min HA | — |
 
 ---
 *Requirements defined: 2026-07-05*
-*Last updated: 2026-07-05 after initial definition*
+*Last updated: 2026-11-14 — milestone v1.0 restructured into Phases 4–8 (marketplace research + code audit)*
