@@ -136,6 +136,11 @@
       "certificate_expiring": {
         "name": "{host} expiring"
       }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh now"
+      }
     }
   }
 }

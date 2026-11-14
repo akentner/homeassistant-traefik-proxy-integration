@@ -1,86 +1,43 @@
-"""Button entities for the Traefik integration.
-
-Phase 2 plan 02-03 fills this out with `TraefikProxyReloadButton` on the Diagnostics
-device (CONTEXT.md D-13). The button fires the same handler as the
-`traefik.reload_routers` service registered in `__init__.py` (plan 02-04) —
-going through the service (not `client.reload_routers()` directly) means HA's
-trace log captures the response dict, and the verification loop is shared
-between the service call and the button press.
-"""
+"""Refresh button of the Traefik integration."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
 from homeassistant.components.button import ButtonEntity
-
-try:
-    from homeassistant.components.button.const import ButtonDeviceClass
-except ImportError:  # HA releases before 2026.10 define it in the package
-    from homeassistant.components.button import ButtonDeviceClass  # type: ignore[attr-defined]
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
-from .entity import TraefikProxyEntity
+from .data import TraefikProxyConfigEntry
+from .entity import TraefikEntity
 
-if TYPE_CHECKING:
-    from .coordinator import TraefikProxyCoordinator
-    from .data import TraefikProxyConfigEntry
+# Presses are serialized; the coordinators' request-refresh debouncers absorb bursts.
+PARALLEL_UPDATES = 1
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: TraefikProxyConfigEntry,
-    async_add_entities: Any,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up Traefik button entities for a config entry.
-
-    Always creates exactly one `TraefikProxyReloadButton` (single instance per
-    config entry — never deleted, lives on the Diagnostics device per
-    CONTEXT.md D-14/D-19).
-    """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
-    async_add_entities([TraefikProxyReloadButton(hass, entry, coordinator)])
+    """Add the entry's refresh button."""
+    async_add_entities([TraefikRefreshButton(entry)])
 
 
-class TraefikProxyReloadButton(TraefikProxyEntity, ButtonEntity):
-    """Button that triggers `traefik.reload_routers` (CONTEXT.md D-13/D-14).
+class TraefikRefreshButton(TraefikEntity, ButtonEntity):
+    """Refresh the Traefik data and the certificates of its own entry."""
 
-    Lives on the Diagnostics device. Press action invokes the HA service
-    ``traefik.reload_routers`` (registered in `__init__.py`'s module-level
-    `async_setup`, plan 02-04); the handler's return dict
-    ``{verified, elapsed_ms, attempts, name_diff}`` surfaces in the HA trace
-    log automatically — no extra attributes on this entity (CONTEXT.md D-13
-    explicit "exposes nothing extra").
+    _attr_translation_key = "refresh"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    `device_class=RESTART` so the UI surfaces the standard restart icon and
-    groups the button with other HA restart-class controls.
-    """
+    def __init__(self, entry: TraefikProxyConfigEntry) -> None:
+        super().__init__(entry, f"{entry.entry_id}_refresh")
 
-    _attr_device_class = ButtonDeviceClass.RESTART
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-    ) -> None:
-        super().__init__(entry, category="diagnostics", description_key="reload")
-        self._hass = hass
-        self._attr_unique_id = f"{entry.entry_id}_diagnostics_reload"
-        self.entity_id = "button.traefik_reload"
-        self._attr_name = "Reload"
+    def _state_token(self) -> object:
+        # Only a press changes the state; coordinator updates never do.
+        return None
 
     async def async_press(self) -> None:
-        """Invoke the `traefik.reload_routers` service.
-
-        The actual handler is registered in `__init__.py`'s module-level
-        `async_setup` (NOT here) — this entity just dispatches. The handler
-        returns ``{verified, elapsed_ms, attempts, name_diff}``; the response
-        surfaces in the HA trace log automatically. ``blocking=True`` so the
-        press action awaits the verification loop rather than firing and
-        forgetting (keeps button press latency visible to the user).
-        The call carries no user context, so it is not subject to the
-        service's admin check.
-        """
-        await self._hass.services.async_call(DOMAIN, "reload_routers", blocking=True)
+        """Request a refresh of the entry's main coordinator and cert coordinator."""
+        runtime = self._entry.runtime_data
+        await runtime.coordinator.async_request_refresh()
+        await runtime.cert_coordinator.async_request_refresh()

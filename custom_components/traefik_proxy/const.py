@@ -69,5 +69,5 @@ DEFAULT_TLS_CERT_COOLDOWN: Final = 21600
 VERSION: Final = "1.0.0"
 
 # Platforms forwarded in async_setup_entry.
-# Phase 2 adds sensor (entrypoint/service/aggregate) and button (reload).
+# Phase 2 adds sensor (entrypoint/service/aggregate) and button (refresh).
 PLATFORMS: Final = ["binary_sensor", "sensor", "button"]

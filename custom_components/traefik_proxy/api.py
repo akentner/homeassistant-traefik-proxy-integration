@@ -35,7 +35,6 @@ DEFAULT_PAGE_SIZE = 500
 MAX_PAGES = 100
 
 _RAWDATA_PATH = "/api/rawdata"
-_REFRESH_PATH = "/api/http/routers/refresh"
 
 
 class AuthMode(StrEnum):
@@ -337,36 +336,3 @@ class TraefikProxyApiClient:
         except (ValueError, TypeError, KeyError) as err:
             raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
         return TraefikState(routers=routers, services=services, middlewares=middlewares)
-
-    async def reload_routers(self) -> None:
-        """POST /api/http/routers/refresh and return once Traefik answers 2xx.
-
-        Raises ``TraefikProxyAuthError`` on 401/403, ``TraefikProxyApiError``
-        on any other non-2xx status and ``TraefikProxyConnectionError`` on
-        network failures. Traefik answers before a reload completes, so the
-        caller verifies the effect itself. The empty body needs an explicit
-        ``Content-Length: 0`` header.
-        """
-        path = _REFRESH_PATH
-        url = f"{self._base_url}{path}"
-        try:
-            async with asyncio.timeout(self._request_timeout):
-                async with self._session.post(
-                    url,
-                    headers={**self._auth.header(), "Content-Length": "0"},
-                    ssl=self._verify_ssl,
-                ) as response:
-                    _LOGGER.debug("path=%s status=%s", path, response.status)
-                    status = response.status
-        except aiohttp.InvalidUrlClientError as err:
-            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
-        except (aiohttp.ClientError, TimeoutError, OSError) as err:
-            raise TraefikProxyConnectionError(path, type(err).__name__) from err
-        except ValueError as err:
-            # aiohttp refused to build the request, e.g. URL credentials
-            # combined with an Authorization header.
-            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
-        if status in (401, 403):
-            raise TraefikProxyAuthError(path, f"HTTP {status}", status=status)
-        if not _is_success(status):
-            raise TraefikProxyApiError(path, f"HTTP {status}", status=status)

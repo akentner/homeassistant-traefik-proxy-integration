@@ -1,22 +1,11 @@
-"""The Traefik integration."""
+"""The Traefik integration: config entry setup, unload and removal."""
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from datetime import timedelta
-from typing import Any
 
-try:
-    import probatio as vol
-except ImportError:  # HA releases before 2026.9 ship voluptuous only
-    import voluptuous as vol  # type: ignore[no-redef]
-from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.core import HomeAssistant
 
 from .cert_coordinator import CertCoordinator
 from .const import (
@@ -24,7 +13,6 @@ from .const import (
     CONF_TLS_WARN_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
-    DOMAIN,
     PLATFORMS,
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
@@ -39,137 +27,6 @@ from .entity_manager import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-
-# CONFIG_SCHEMA is required by hassfest whenever ``async_setup`` is implemented.
-# The integration is config-flow only — YAML setup is intentionally unsupported —
-# so this is the canonical empty-marker. See:
-# https://developers.home-assistant.io/docs/config_entries_config_flow_handler/#config_flow-only
-CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
-
-
-# CONTEXT.md D-12: reload_routers takes no parameters — the service is
-# fire-and-forget with a structured return dict. ``vol.Schema({})`` declares an
-# explicit empty schema so HA's service UI shows "no fields" rather than
-# prompting for anything.
-RELOAD_ROUTERS_SCHEMA = vol.Schema({})
-
-
-async def _async_handle_reload_routers(call: ServiceCall) -> dict[str, Any]:
-    """Reload Traefik dynamic config and verify completion via router-set polling.
-
-    CONTEXT.md D-12 / PITFALLS #15: Traefik returns 200/202 from
-    ``/api/http/routers/refresh`` BEFORE providers finish reloading, so we
-    capture the pre-POST router-name set, POST the refresh, then poll
-    the router names of the coordinator snapshot with exponential backoff
-    (``200ms -> 5s``, max 10 attempts, <= 5s budget) and exit early when the
-    name set changes from the snapshot.
-
-    Returns: ``{verified: bool, elapsed_ms: int, attempts: int, name_diff:
-    {"added": [...], "removed": [...]}}``.
-
-    Non-2xx POSTs raise ``TraefikProxyApiError`` -> HA surfaces the service-call
-    failure to the caller. When no Traefik config entry is loaded (shouldn't
-    happen for a sane HA install), we raise ``HomeAssistantError`` so HA's
-    service UI shows a clear error rather than silently no-op'ing.
-    """
-    hass = call.hass
-    t0 = time.monotonic()
-
-    # Find the first loaded Traefik entry. The integration is `service`
-    # type (one Traefik per config entry), so there should be exactly one
-    # loaded entry in normal use.
-    runtimes: list[TraefikRuntimeData] = [
-        entry.runtime_data
-        for entry in hass.config_entries.async_entries(DOMAIN)
-        if entry.state is ConfigEntryState.LOADED
-    ]
-    if not runtimes:
-        raise HomeAssistantError("No loaded Traefik config entry to reload against")
-    runtime = runtimes[0]
-    coordinator = runtime.coordinator
-
-    def _current_router_names() -> set[str]:
-        """Router names from the latest coordinator snapshot."""
-        return set(coordinator.data.routers)
-
-    before = _current_router_names()
-
-    # Trigger the refresh. Raises TraefikProxyApiError -> HA surfaces as
-    # service-call failure (the caller sees the error in the trace log).
-    await runtime.client.reload_routers()
-
-    # Poll the coordinator for an observable change. ``async_request_refresh``
-    # is itself an awaitable that returns once the refresh cycle completes
-    # (it internally calls ``_debounced_refresh.async_call()``), so awaiting
-    # it gives us a clean "refresh finished, check the data" handoff.
-    attempts = 0
-    verified = False
-    backoff_ms = 200
-    max_attempts = 10
-    max_budget_ms = 5000
-    current = before
-    while attempts < max_attempts and (time.monotonic() - t0) * 1000 < max_budget_ms:
-        attempts += 1
-        await coordinator.async_request_refresh()
-        current = _current_router_names()
-        if current != before:
-            verified = True
-            break
-        await asyncio.sleep(backoff_ms / 1000)
-        backoff_ms = min(backoff_ms * 2, 5000)
-
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
-    name_diff = {
-        "added": sorted(current - before) if verified else [],
-        "removed": sorted(before - current) if verified else [],
-    }
-    _LOGGER.debug(
-        "traefik.reload_routers: verified=%s elapsed_ms=%d attempts=%d name_diff=%s",
-        verified,
-        elapsed_ms,
-        attempts,
-        name_diff,
-    )
-    return {
-        "verified": verified,
-        "elapsed_ms": elapsed_ms,
-        "attempts": attempts,
-        "name_diff": name_diff,
-    }
-
-
-async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Register integration-level services (PITFALLS M5: NOT async_setup_entry).
-
-    The Traefik integration exposes one domain-level service:
-    ``traefik.reload_routers``. Service registration lives in the module-level
-    ``async_setup`` (HA's startup hook) rather than per-entry in
-    ``async_setup_entry`` for two reasons:
-
-    1. Per-entry registration causes duplicate registrations and stale
-       handlers after unload (PITFALLS M5).
-    2. The service is conceptually integration-scoped (one Traefik per
-       config entry, but the service is callable regardless of which entry
-       is loaded) — module-level registration makes that contract explicit.
-
-    The service is admin-only: calls carrying a non-admin user context raise
-    ``Unauthorized``. Calls without a user context (automations, the Reload
-    button) are not subject to the check.
-
-    The ``config`` argument is HA's YAML config (always empty for us — the
-    integration is config-flow only). HA's setup machinery calls this with
-    ``(hass, config)``; we ignore the second arg.
-    """
-    del config  # YAML setup not supported — ConfigFlow handles all configuration
-    async_register_admin_service(
-        hass,
-        DOMAIN,
-        "reload_routers",
-        _async_handle_reload_routers,
-        schema=RELOAD_ROUTERS_SCHEMA,
-    )
-    return True
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:

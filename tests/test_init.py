@@ -15,7 +15,6 @@ from __future__ import annotations
 import importlib
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
@@ -24,8 +23,6 @@ from homeassistant.helpers import entity_registry as er
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
-
-pytestmark = pytest.mark.xfail(strict=True, reason="05-06 RED: refresh button not implemented yet")
 
 SECOND_URL = "https://traefik2.example.com:8080"
 
@@ -68,9 +65,15 @@ async def test_refresh_button_registry_entry(hass, aioclient_mock, mock_tls_prob
     assert reg_entry.entity_category is EntityCategory.DIAGNOSTIC
     assert reg_entry.original_device_class is None
 
-    main = dr.async_get(hass).async_get_device(identifiers={device_identifier(entry.entry_id, TraefikDevice.MAIN)})
-    assert main is not None
-    assert reg_entry.device_id == main.id
+    # Lookup by config entry works on HA 2026.3 and on releases that deprecate async_get_device.
+    main_identifier = device_identifier(entry.entry_id, TraefikDevice.MAIN)
+    mains = [
+        device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        if main_identifier in device.identifiers
+    ]
+    assert len(mains) == 1
+    assert reg_entry.device_id == mains[0].id
 
     buttons = [e for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) if e.domain == "button"]
     assert [e.unique_id for e in buttons] == [f"{entry.entry_id}_refresh"]

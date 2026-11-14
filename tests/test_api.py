@@ -8,7 +8,7 @@ through the conftest helper.
 Covered: the three auth modes and their per-request header, the error
 taxonomy for HTTP statuses, network exceptions and payload errors,
 credential secrecy in logs / exception text / reprs, TLS verification on
-every request, request host pinning and the router refresh POST.
+every request and request host pinning.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ from tests.conftest import MOCK_URL, load_fixture, stub_traefik_paginated
 
 API_PATH = Path(__file__).parent.parent / "custom_components" / "traefik_proxy" / "api.py"
 VERSION_PATH = "/api/version"
-REFRESH_PATH = "/api/http/routers/refresh"
 
 TOKEN = "s3cret-token"
 USERNAME = "capture"
@@ -253,7 +252,6 @@ async def test_userinfo_url_with_bearer_token_raises_invalid_url_error() -> None
         calls = [
             (client.async_get_version, "/api/version"),
             (client.async_get_state, "/api/rawdata"),
-            (client.reload_routers, REFRESH_PATH),
         ]
         for call, path in calls:
             with pytest.raises(api.TraefikProxyInvalidUrlError) as err:
@@ -268,25 +266,16 @@ async def test_userinfo_url_with_bearer_token_raises_invalid_url_error() -> None
 CONSTRUCTION_ERROR = "Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"
 
 
-@pytest.mark.parametrize(
-    ("method", "path", "call"),
-    [
-        pytest.param("get", VERSION_PATH, "async_get_version", id="read-path"),
-        pytest.param("post", REFRESH_PATH, "reload_routers", id="reload_routers"),
-    ],
-)
-async def test_request_construction_value_error_maps_to_invalid_url(
-    hass, aioclient_mock, method: str, path: str, call: str
-) -> None:
+async def test_request_construction_value_error_maps_to_invalid_url(hass, aioclient_mock) -> None:
     """A ValueError raised while aiohttp builds the request maps to the invalid-URL error."""
-    getattr(aioclient_mock, method)(f"{MOCK_URL}{path}", exc=ValueError(CONSTRUCTION_ERROR))
+    aioclient_mock.get(f"{MOCK_URL}{VERSION_PATH}", exc=ValueError(CONSTRUCTION_ERROR))
 
     with pytest.raises(api.TraefikProxyInvalidUrlError) as err:
-        await getattr(_client(hass, _auth("bearer")), call)()
+        await _client(hass, _auth("bearer")).async_get_version()
 
     assert isinstance(err.value, api.TraefikProxyConnectionError)
     assert isinstance(err.value, TraefikProxyApiError)
-    assert str(err.value) == f"{path}: ValueError"
+    assert str(err.value) == f"{VERSION_PATH}: ValueError"
 
 
 def test_taxonomy_hierarchy() -> None:
@@ -642,54 +631,6 @@ async def test_one_probe_per_arming_under_overlapping_calls(hass, aioclient_mock
 
     assert _paths(aioclient_mock).count(RAWDATA_PATH) == 1
     assert client._paginated is True
-
-
-# --- Router refresh POST -----------------------------------------------------
-
-
-async def test_reload_routers_success_sends_auth_and_empty_body(hass, aioclient_mock) -> None:
-    """A 202 returns None; the POST carries the Auth header and Content-Length 0."""
-    aioclient_mock.post(f"{MOCK_URL}{REFRESH_PATH}", status=202)
-
-    assert await _client(hass, _auth("basic")).reload_routers() is None
-
-    method, url, _data, headers = aioclient_mock.mock_calls[0]
-    assert method.upper() == "POST"
-    assert str(url) == f"{MOCK_URL}{REFRESH_PATH}"
-    assert headers == {**_auth("basic").header(), "Content-Length": "0"}
-
-
-@pytest.mark.parametrize(
-    ("status", "error_name"),
-    [(401, "TraefikProxyAuthError"), (403, "TraefikProxyAuthError"), (500, "TraefikProxyApiError")],
-)
-async def test_reload_routers_status_errors(hass, aioclient_mock, status: int, error_name: str) -> None:
-    """Refresh failures map to the auth error or the base error with path and status."""
-    aioclient_mock.post(f"{MOCK_URL}{REFRESH_PATH}", status=status)
-
-    with pytest.raises(TraefikProxyApiError) as err:
-        await _client(hass, _auth("bearer")).reload_routers()
-
-    assert type(err.value) is getattr(api, error_name)
-    assert str(err.value) == f"{REFRESH_PATH}: HTTP {status}"
-
-
-async def test_reload_routers_network_error(hass, aioclient_mock) -> None:
-    """A network failure on the refresh POST raises the connection error."""
-    aioclient_mock.post(f"{MOCK_URL}{REFRESH_PATH}", exc=aiohttp.ServerDisconnectedError())
-
-    with pytest.raises(api.TraefikProxyConnectionError, match=r"^/api/http/routers/refresh: ServerDisconnectedError$"):
-        await _client(hass).reload_routers()
-
-
-async def test_reload_routers_verify_ssl(hass, aioclient_mock) -> None:
-    """The refresh POST honours verify_ssl as well."""
-    aioclient_mock.post(f"{MOCK_URL}{REFRESH_PATH}", status=202)
-    session = MagicMock(wraps=async_get_clientsession(hass))
-
-    await TraefikProxyApiClient(session, MOCK_URL, api.Auth(), verify_ssl=False).reload_routers()
-
-    assert session.post.call_args.kwargs["ssl"] is False
 
 
 # --- Module hygiene ----------------------------------------------------------
