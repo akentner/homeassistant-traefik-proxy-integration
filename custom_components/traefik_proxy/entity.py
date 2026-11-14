@@ -76,12 +76,16 @@ def dashboard_url(url: str) -> str | None:
 
 
 @callback
-def async_setup_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> dr.DeviceEntry:
+def async_setup_devices(
+    hass: HomeAssistant, entry: TraefikProxyConfigEntry, *, per_item: bool = True
+) -> dr.DeviceEntry:
     """Register the main device and its sub-devices; return the main device.
 
     Runs before the platforms are set up, so entities attach to named devices.
     Sub-devices are linked to the main device through the registry, the one
-    linking API available on every supported Home Assistant version.
+    linking API available on every supported Home Assistant version. With
+    ``per_item`` off the Routers and Services sub-devices are not registered,
+    and existing ones of this entry are removed.
     """
     device_registry = dr.async_get(hass)
     placeholders = {"host": entry_host(entry)}
@@ -95,7 +99,14 @@ def async_setup_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> 
         configuration_url=dashboard_url(entry.data[CONF_URL]),
         sw_version=entry.runtime_data.coordinator.data.version.version,
     )
-    for device in (TraefikDevice.ROUTERS, TraefikDevice.SERVICES, TraefikDevice.CERTIFICATES):
+    per_item_devices = (TraefikDevice.ROUTERS, TraefikDevice.SERVICES)
+    if not per_item:
+        unwanted = {device_identifier(entry.entry_id, device) for device in per_item_devices}
+        for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+            if device_entry.identifiers & unwanted:
+                device_registry.async_remove_device(device_entry.id)
+    wanted = (*per_item_devices, TraefikDevice.CERTIFICATES) if per_item else (TraefikDevice.CERTIFICATES,)
+    for device in wanted:
         sub = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={device_identifier(entry.entry_id, device)},

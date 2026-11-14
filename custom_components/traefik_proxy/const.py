@@ -12,6 +12,11 @@ CONF_VERIFY_SSL: Final = "verify_ssl"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_TLS_WARN_DAYS: Final = "tls_warn_days"
 
+# Options key: create one entity per router and per service. Large installs
+# turn it off and keep only aggregate, diagnostic and certificate entities.
+CONF_PER_ITEM_ENTITIES: Final = "per_item_entities"
+DEFAULT_PER_ITEM_ENTITIES: Final = True
+
 # Defaults
 DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = 15  # seconds (CONTEXT.md D-12)

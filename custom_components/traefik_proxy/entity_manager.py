@@ -17,6 +17,10 @@ grace period survives reloads and restarts, and a timer of its own removes
 expired keys even when the snapshot never changes. Registry entries of the
 entry whose key is absent from the first snapshot are adopted as missing
 entities at setup, so orphans expire the same way.
+
+With the per-item option off, the router and service kinds are not
+registered and their registry entries are purged at setup, without a grace
+period.
 """
 
 from __future__ import annotations
@@ -37,7 +41,13 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MISSING_CHECK_INTERVAL, MISSING_GRACE_PERIOD
+from .const import (
+    CONF_PER_ITEM_ENTITIES,
+    DEFAULT_PER_ITEM_ENTITIES,
+    DOMAIN,
+    MISSING_CHECK_INTERVAL,
+    MISSING_GRACE_PERIOD,
+)
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
@@ -76,6 +86,12 @@ CERT_EXPIRY = KindSpec("certificate_expiry", "sensor", "tls_cert_")
 CERT_EXPIRING = KindSpec("certificate_expiring", "binary_sensor", "tls_expiring_")
 
 MISSING_STORE_VERSION = 1
+
+
+def per_item_entities_enabled(entry: TraefikProxyConfigEntry) -> bool:
+    """Return whether the entry creates one entity per router and per service."""
+    return bool(entry.options.get(CONF_PER_ITEM_ENTITIES, DEFAULT_PER_ITEM_ENTITIES))
+
 
 # Store data: {kind name: {key: missing since, ISO-8601 UTC}}.
 type MissingData = dict[str, dict[str, str]]
@@ -229,6 +245,31 @@ class TraefikEntityManager:
         kind.known.update(initial)
         async_add_entities([factory(key) for key in initial])
         _LOGGER.debug("Added %d %s entities (%d missing)", len(initial), spec.name, len(kind.missing))
+        self._async_schedule_save()
+
+    @callback
+    def async_purge(self, spec: KindSpec) -> None:
+        """Remove every registry entry of ``spec`` of this entry right away.
+
+        For a kind the user switched off: no grace period, and its stored
+        missing-since times are dropped. Must run after ``async_load`` and
+        before the kind's platform is set up; the kind is then not registered.
+        """
+        registry = er.async_get(self._hass)
+        entry_id = self._entry.entry_id
+        purged = [
+            (domain, unique_id)
+            for domain, unique_id in self._registered
+            if domain == spec.domain and spec.key_of(entry_id, unique_id) is not None
+        ]
+        for domain, unique_id in purged:
+            entity_id = registry.async_get_entity_id(domain, DOMAIN, unique_id)
+            if entity_id is not None:
+                registry.async_remove(entity_id)
+        if purged:
+            self._registered = [item for item in self._registered if item not in purged]
+        self._stored.pop(spec.name, None)
+        _LOGGER.debug("Purged %d %s entities (per-item entities off)", len(purged), spec.name)
         self._async_schedule_save()
 
     @callback

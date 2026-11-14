@@ -30,7 +30,13 @@ from .const import (
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
 from .entity import async_setup_devices
-from .entity_manager import TraefikEntityManager, async_remove_missing_store
+from .entity_manager import (
+    ROUTERS,
+    SERVICES,
+    TraefikEntityManager,
+    async_remove_missing_store,
+    per_item_entities_enabled,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -224,9 +230,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
        ``async_set_updated_data({})`` so the platforms see a defined state
        instead of awaiting an unfinished refresh.
     4. Load the entity manager: stored missing-since times, the entry's
-       registry entries and the deadline timer.
-    5. Register the main device and the Routers / Services / Certificates
-       sub-devices.
+       registry entries and the deadline timer. With the per-item option
+       off, purge the router and service registry entries right away.
+    5. Register the main device and the Certificates sub-device, plus the
+       Routers / Services sub-devices when per-item entities are on.
     6. Forward platforms (sensor, binary_sensor, button).
     """
     client = build_api_client(hass, entry)
@@ -257,10 +264,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         # instead of awaiting an unfinished refresh.
         cert_coordinator.async_set_updated_data({})
 
-    await entry.runtime_data.entity_manager.async_load()
+    entity_manager = entry.runtime_data.entity_manager
+    await entity_manager.async_load()
+    # Read once per setup; a changed option applies on the next reload.
+    per_item = per_item_entities_enabled(entry)
+    if not per_item:
+        entity_manager.async_purge(ROUTERS)
+        entity_manager.async_purge(SERVICES)
 
     # Every device exists, named and linked, before the first entity attaches.
-    async_setup_devices(hass, entry)
+    async_setup_devices(hass, entry, per_item=per_item)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

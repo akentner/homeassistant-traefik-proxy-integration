@@ -2,7 +2,8 @@
 
 Entity count per config entry (after `async_setup_entry` returns):
 - 1 `TraefikRouterSensor` per Traefik HTTP router (Routers device), managed by
-  the entry's entity manager
+  the entry's entity manager; router and service sensors only exist while the
+  per-item option is on
 - 1 `TraefikServiceSensor` per Traefik HTTP service (Services device), managed
   by the entity manager; Traefik-internal ``@internal`` services are not part
   of the snapshot
@@ -37,7 +38,7 @@ from homeassistant.util import slugify
 
 from .const import ITEM_STATE_OPTIONS, STATE_MISSING
 from .entity import TraefikDevice, TraefikEntity, TraefikItemEntity, TraefikProxyCertEntity
-from .entity_manager import ENTRYPOINTS, ROUTERS, SERVICES
+from .entity_manager import ENTRYPOINTS, ROUTERS, SERVICES, per_item_entities_enabled
 from .models import Entrypoint, Router, Service, StatusCounts, TraefikSnapshot
 from .tls import CertError, CertInfo, is_error
 
@@ -147,20 +148,21 @@ async def async_setup_entry(
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
     manager = entry.runtime_data.entity_manager
 
-    manager.async_add_kind(
-        ROUTERS,
-        coordinator=coordinator,
-        keys=lambda: coordinator.data.routers,
-        factory=lambda key: TraefikRouterSensor(entry, key),
-        async_add_entities=async_add_entities,
-    )
-    manager.async_add_kind(
-        SERVICES,
-        coordinator=coordinator,
-        keys=lambda: coordinator.data.services,
-        factory=lambda key: TraefikServiceSensor(entry, key),
-        async_add_entities=async_add_entities,
-    )
+    if per_item_entities_enabled(entry):
+        manager.async_add_kind(
+            ROUTERS,
+            coordinator=coordinator,
+            keys=lambda: coordinator.data.routers,
+            factory=lambda key: TraefikRouterSensor(entry, key),
+            async_add_entities=async_add_entities,
+        )
+        manager.async_add_kind(
+            SERVICES,
+            coordinator=coordinator,
+            keys=lambda: coordinator.data.services,
+            factory=lambda key: TraefikServiceSensor(entry, key),
+            async_add_entities=async_add_entities,
+        )
     manager.async_add_kind(
         ENTRYPOINTS,
         coordinator=coordinator,
