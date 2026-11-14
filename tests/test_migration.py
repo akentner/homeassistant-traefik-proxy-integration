@@ -56,6 +56,7 @@ def _create(
     *,
     object_id: str | None = None,
     disabled_by: er.RegistryEntryDisabler | None = None,
+    device_id: str | None = None,
 ) -> str:
     """Pre-create a registry entry with unique_id ``{entry_id}_{suffix}``; return its entity_id."""
     reg_entry = er.async_get(hass).async_get_or_create(
@@ -65,8 +66,21 @@ def _create(
         config_entry=entry,
         suggested_object_id=object_id,
         disabled_by=disabled_by,
+        device_id=device_id,
     )
     return reg_entry.entity_id
+
+
+def _disabled_legacy_routers_device(hass: HomeAssistant, entry: Any) -> str:
+    """Pre-create the entry's 0.3.0 "HTTP Routers" device, disabled by the user; return its id."""
+    device_registry = dr.async_get(hass)
+    device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"{entry.entry_id}_http_routers")},
+        name="traefik.example.com Traefik Proxy - HTTP Routers",
+    )
+    device_registry.async_update_device(device.id, disabled_by=dr.DeviceEntryDisabler.USER)
+    return device.id
 
 
 def _legacy_registry(hass: HomeAssistant, entry: Any) -> dict[str, str]:
@@ -303,3 +317,113 @@ async def test_user_disabled_router_stays_disabled(hass: HomeAssistant, aioclien
     issue = _get_issue(hass, ENTRY_ID)
     assert issue is not None
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "2"}
+
+
+_STRICT_RED = pytest.mark.xfail(strict=True, reason="RED: only USER-disabled routers are kept disabled")
+
+
+@pytest.mark.parametrize(
+    ("old_disabled_by", "expected"),
+    [
+        pytest.param(er.RegistryEntryDisabler.USER, er.RegistryEntryDisabler.USER, id="user"),
+        pytest.param(er.RegistryEntryDisabler.DEVICE, er.RegistryEntryDisabler.USER, id="device", marks=_STRICT_RED),
+        pytest.param(
+            er.RegistryEntryDisabler.INTEGRATION,
+            er.RegistryEntryDisabler.INTEGRATION,
+            id="integration",
+            marks=_STRICT_RED,
+        ),
+        pytest.param(None, None, id="enabled"),
+    ],
+)
+async def test_disabled_router_replacement_keeps_disabled_state(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    old_disabled_by: er.RegistryEntryDisabler | None,
+    expected: er.RegistryEntryDisabler | None,
+) -> None:
+    """Each way a 0.3.0 router was disabled carries over to its replacement; names do not carry over."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    device_id = (
+        _disabled_legacy_routers_device(hass, entry) if old_disabled_by is er.RegistryEntryDisabler.DEVICE else None
+    )
+    old = _create(
+        hass,
+        entry,
+        "binary_sensor",
+        "http_router_file-ok@file",
+        object_id="traefik_http_router_file_ok_file",
+        disabled_by=old_disabled_by,
+        device_id=device_id,
+    )
+    registry = er.async_get(hass)
+    registry.async_update_entity(old, name="Noisy router")
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    assert registry.async_get(old) is None
+    replacement_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_file-ok@file")
+    replacement = registry.async_get(replacement_id)
+    assert replacement is not None
+    assert replacement.disabled_by is expected
+    assert replacement.name is None
+    if expected is None:
+        assert replacement_id != "sensor.traefik_http_router_file_ok_file"
+        assert hass.states.get(replacement_id) is not None
+    else:
+        assert replacement_id == "sensor.traefik_http_router_file_ok_file"
+        assert hass.states.get(replacement_id) is None
+    if old_disabled_by is er.RegistryEntryDisabler.DEVICE:
+        legacy = (DOMAIN, f"{ENTRY_ID}_http_routers")
+        assert all(
+            legacy not in device.identifiers
+            for device in dr.async_entries_for_config_entry(dr.async_get(hass), ENTRY_ID)
+        )
+
+
+@pytest.mark.xfail(strict=True, reason="RED: DEVICE- and INTEGRATION-disabled routers get no replacement")
+async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant) -> None:
+    """A second run with the disabled replacements present changes no registry entry and keeps one issue."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    legacy_device = _disabled_legacy_routers_device(hass, entry)
+    _create(hass, entry, "binary_sensor", "http_router_file-ok@file", disabled_by=er.RegistryEntryDisabler.USER)
+    _create(
+        hass,
+        entry,
+        "binary_sensor",
+        "http_router_whoami@docker",
+        disabled_by=er.RegistryEntryDisabler.DEVICE,
+        device_id=legacy_device,
+    )
+    _create(hass, entry, "binary_sensor", "http_router_secure@file", disabled_by=er.RegistryEntryDisabler.INTEGRATION)
+    _create(hass, entry, "binary_sensor", "http_router_chain-router@file")
+    registry = er.async_get(hass)
+
+    assert await integration.async_migrate_entry(hass, entry)
+    expected = {
+        "file-ok@file": er.RegistryEntryDisabler.USER,
+        "whoami@docker": er.RegistryEntryDisabler.USER,
+        "secure@file": er.RegistryEntryDisabler.INTEGRATION,
+    }
+    for key, disabled_by in expected.items():
+        entity_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_{key}")
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None
+        assert reg_entry.disabled_by is disabled_by, key
+    assert registry.async_get_entity_id("sensor", DOMAIN, f"{ENTRY_ID}_http_router_chain-router@file") is None
+    after_first = {e.entity_id: e for e in er.async_entries_for_config_entry(registry, ENTRY_ID)}
+    first_issue = _get_issue(hass, ENTRY_ID)
+    assert first_issue is not None
+    assert first_issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "4"}
+
+    hass.config_entries.async_update_entry(entry, minor_version=1)
+    assert await integration.async_migrate_entry(hass, entry)
+
+    after_second = {e.entity_id: e for e in er.async_entries_for_config_entry(registry, ENTRY_ID)}
+    assert after_second == after_first
+    assert len(_own_issues(hass)) == 1
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "4"}

@@ -8,19 +8,24 @@ Covers:
 - with two loaded entries a press refreshes only its own entry's two
   coordinators (D-17, A-09, S-08)
 - setup, refreshes and a real press send only GET requests to Traefik (ENT-07)
+- the options update listener stays registered once across reloads, runs once
+  per options change and is removed on unload (ENT-09)
 """
 
 from __future__ import annotations
 
 import importlib
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
+from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_SCAN_INTERVAL, CONF_URL, CONF_VERIFY_SSL, DOMAIN
+from custom_components.traefik_proxy.coordinator import build_api_client
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
 
@@ -138,3 +143,25 @@ async def test_only_get_requests_reach_traefik(hass, aioclient_mock, mock_tls_pr
     assert len(aioclient_mock.mock_calls) > calls_before_press
     methods = {str(method).upper() for method, _url, _data, _headers in aioclient_mock.mock_calls}
     assert methods == {"GET"}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: the update listener stacks across reloads and survives unload")
+async def test_update_listener_registered_once_across_reloads(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """One update listener after setup and reload, one run per options change, none after unload."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(minor_version=2))
+    assert len(entry.update_listeners) == 1
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert len(entry.update_listeners) == 1
+
+    with patch("custom_components.traefik_proxy.build_api_client", wraps=build_api_client) as spy:
+        hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 45})
+        await hass.async_block_till_done()
+    assert spy.call_count == 1
+    assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=45)
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert len(entry.update_listeners) == 0
