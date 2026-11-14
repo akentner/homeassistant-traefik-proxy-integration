@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 04
 current_phase_name: Data layer (correct + lean)
-status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-11-14T02:21:05.828Z"
+status: verifying
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-11-14T02:29:16.661Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: 73986d3d2b8090421aa493822840d30733a64faa
+state_head: 0d1c776a779240bc07868a70498bdd1a4ee6324c
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 20
-  completed_plans: 19
+  completed_plans: 20
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 04 (Data layer (correct + lean)) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-14 — Phase 04 execution started
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
@@ -83,6 +83,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P06 | 7 min | 3 tasks | 10 files |
 | Phase 04 P07 | 6 min | 2 tasks | 6 files |
 | Phase 04 P08 | 7min | 2 tasks | 6 files |
+| Phase 04 P09 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -140,6 +141,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-07: cert entities bind to the cert coordinator via TraefikProxyCertEntity(_TraefikProxyBaseEntity[CertCoordinator]); availability depends only on the cert cycle; sw_version from the main snapshot
 - [Phase 04]: 04-08: aiohttp request-construction ValueError maps to TraefikProxyInvalidUrlError (setup retries, no traceback)
 - [Phase 04]: 04-08: URL userinfo rejected in user/reconfigure via strict allow_userinfo=False default; reauth_confirm and YAML import opt out (W19)
+- [Phase 04]: 04-09: Paginated fallback revocable (M27, amends D-07): hourly version re-check retries /api/rawdata once while paginated; at most one extra rawdata request per hour
+- [Phase 04]: 04-09: Rawdata probe armed only when the re-check interval elapsed, never by a post-failure re-check inside it
+- [Phase 04]: 04-09: Probe auth errors propagate; other probe failures keep the pages and serve the same cycle
 
 ### Pending Todos
 
@@ -181,7 +185,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T02:21:05.770Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-11-14T02:29:16.609Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
