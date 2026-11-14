@@ -177,3 +177,21 @@ async def test_reconfigure_to_unused_host_succeeds(hass, aioclient_mock) -> None
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_URL] == NEW_URL
+
+
+async def test_reconfigure_rejects_userinfo_url(hass, aioclient_mock) -> None:
+    """A new URL with embedded credentials is refused with invalid_url; nothing is sent or stored."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: "https://u:p@traefik.example.com:8080", CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0

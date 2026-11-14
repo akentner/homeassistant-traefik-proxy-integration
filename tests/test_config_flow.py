@@ -25,7 +25,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.api import (
     Auth,
@@ -52,11 +54,14 @@ from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
     CONF_URL,
     CONF_VERIFY_SSL,
+    DOMAIN,
 )
 from custom_components.traefik_proxy.coordinator import auth_from_entry_data
-from tests.conftest import load_fixture
+from tests.conftest import MOCK_URL, load_fixture, stub_traefik
 
 GOOD_URL = "https://traefik.example.com:8080"
+USERINFO_URL = "https://u:p@traefik.example.com:8080"
+CONSTRUCTION_ERROR = "Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"
 
 
 # ----------------------- schema validation -----------------------
@@ -170,6 +175,28 @@ def test_check_url_shape_raises_on_bad_urls(url: str) -> None:
 def test_check_url_shape_accepts_http_and_https() -> None:
     _check_url_shape("http://traefik.example.com:8080")
     _check_url_shape("https://traefik.local")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://u:p@traefik.example.com:8080",
+        "https://u@traefik.example.com",
+        "https://:p@traefik.example.com",
+        "http://u:@traefik.example.com:8080",
+    ],
+)
+def test_check_url_shape_rejects_userinfo(url: str) -> None:
+    """Credentials embedded in the URL are refused by default."""
+    with pytest.raises(InvalidUrl):
+        _check_url_shape(url)
+
+
+def test_check_url_shape_allows_userinfo_when_opted_in() -> None:
+    """allow_userinfo=True skips only the userinfo rule; the scheme check stays."""
+    _check_url_shape(USERINFO_URL, allow_userinfo=True)
+    with pytest.raises(InvalidUrl):
+        _check_url_shape("ftp://u:p@traefik.example.com", allow_userinfo=True)
 
 
 # ----------------------- _validate_input + aiohttp url-parse failure -----------------------
@@ -306,3 +333,94 @@ async def test_every_auth_mode_round_trips_to_its_header(hass: object, aioclient
 def test_auth_from_entry_data(data: dict[str, Any], expected: Auth) -> None:
     """Entry data maps to bearer for a non-empty token and to no auth otherwise."""
     assert auth_from_entry_data({CONF_URL: GOOD_URL, **data}) == expected
+
+
+# ----------------------- URL userinfo (credentials embedded in the URL) -----------------------
+
+
+def _version_requests(aioclient_mock: Any) -> list[Any]:
+    return [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
+
+
+async def test_validate_input_rejects_userinfo_url_without_request(hass: object, aioclient_mock: Any) -> None:
+    """A userinfo URL is refused by the shape check before any request is sent."""
+    with pytest.raises(InvalidUrl):
+        await _validate_input(hass, {CONF_URL: USERINFO_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+
+    assert aioclient_mock.call_count == 0
+
+
+async def test_validate_input_maps_request_construction_error_to_invalid_url(hass: object, aioclient_mock: Any) -> None:
+    """aiohttp refusing to build the probe request surfaces as invalid_url, never 'unknown'."""
+    aioclient_mock.get(f"{GOOD_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
+
+    with pytest.raises(InvalidUrl):
+        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+
+
+async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) -> None:
+    """The user step answers a userinfo URL with invalid_url and sends no request."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "user"},
+        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert aioclient_mock.call_count == 0
+
+
+def _userinfo_entry(hass: Any) -> MockConfigEntry:
+    """An existing entry whose stored URL carries userinfo (added, not set up)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Traefik",
+        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "old", CONF_VERIFY_SSL: True},
+        unique_id="traefik.example.com",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_reauth_confirm_userinfo_url_with_token_maps_construction_error(hass: Any, aioclient_mock: Any) -> None:
+    """Reauth probes the stored userinfo URL; a token makes aiohttp refuse, mapped to invalid_url."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
+    entry = _userinfo_entry(hass)
+
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: "new"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert len(_version_requests(aioclient_mock)) == 1
+    assert entry.data[CONF_API_KEY] == "old"
+
+
+async def test_reauth_confirm_userinfo_url_without_token_succeeds(hass: Any, aioclient_mock: Any) -> None:
+    """Reauth of a userinfo entry with an empty token completes against a healthy Traefik."""
+    stub_traefik(aioclient_mock, rawdata={})
+    entry = _userinfo_entry(hass)
+
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: ""})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_API_KEY] == ""
+
+
+async def test_yaml_step_userinfo_url_with_token_maps_construction_error(hass: Any, aioclient_mock: Any) -> None:
+    """A YAML import with a userinfo URL reaches the client, which answers with the mapped invalid_url."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "yaml"},
+        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "tok"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert len(_version_requests(aioclient_mock)) == 1
