@@ -73,18 +73,6 @@ async def test_router_sensors(hass, loaded: TraefikSnapshot) -> None:
     assert not [key for domain, key in router_keys if domain == "binary_sensor"]
 
 
-async def test_count_sensors(hass, loaded: TraefikSnapshot) -> None:
-    """The count sensors equal the snapshot totals."""
-    for entity_id, counts in (
-        ("sensor.traefik_routers", loaded.router_counts),
-        ("sensor.traefik_services", loaded.service_counts),
-        ("sensor.traefik_middlewares", loaded.middleware_counts),
-    ):
-        state = hass.states.get(entity_id)
-        assert state is not None, entity_id
-        assert int(state.state) == counts.total, entity_id
-
-
 SERVICE_ATTRIBUTES = {"type", "provider", "servers_up", "servers_total", "used_by", "errors"}
 HA_ATTRIBUTES = {"options", "device_class", "friendly_name"}
 
@@ -198,7 +186,6 @@ async def test_problem_aggregates_enabled_and_on(hass, loaded: TraefikSnapshot) 
 COUNT_ATTRIBUTES = {"enabled", "warning", "error", "disabled"}
 
 
-@pytest.mark.xfail(strict=True, reason="RED: snapshot sensors not implemented yet")
 async def test_snapshot_sensors(hass, loaded: TraefikSnapshot) -> None:
     """Counts, version and start time are diagnostic and enabled; healthy_ratio is diagnostic and disabled."""
     entry = hass.config_entries.async_entries(DOMAIN)[0]
@@ -223,7 +210,8 @@ async def test_snapshot_sensors(hass, loaded: TraefikSnapshot) -> None:
     assert version.attributes["codename"] == loaded.version.codename
     start = hass.states.get(entity_id_for(hass, "sensor", f"{entry.entry_id}_start_time"))
     assert start is not None
-    assert dt_util.parse_datetime(start.state) == loaded.version.start_date
+    # Home Assistant renders timestamp states at second precision.
+    assert dt_util.parse_datetime(start.state) == loaded.version.start_date.replace(microsecond=0)
 
     for suffix in (
         "overview_routers_count",

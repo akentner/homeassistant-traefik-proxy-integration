@@ -100,6 +100,24 @@
           "disabled": "Disabled",
           "missing": "Missing"
         }
+      },
+      "routers_count": {
+        "name": "Routers"
+      },
+      "services_count": {
+        "name": "Services"
+      },
+      "middlewares_count": {
+        "name": "Middlewares"
+      },
+      "version": {
+        "name": "Traefik version"
+      },
+      "start_time": {
+        "name": "Start time"
+      },
+      "healthy_ratio": {
+        "name": "Healthy routers"
       }
     },
     "binary_sensor": {

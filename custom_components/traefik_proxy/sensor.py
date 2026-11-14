@@ -8,28 +8,37 @@ Entity count per config entry (after `async_setup_entry` returns):
   of the snapshot
 - 1 `TraefikEntrypointSensor` per Traefik entrypoint (main device, diagnostic,
   disabled by default), managed by the entity manager
-- 1 each of `TraefikProxyRoutersCountSensor`, `TraefikProxyServicesCountSensor`,
-  `TraefikProxyMiddlewaresCountSensor` on the Overview device
+- 1 `TraefikSnapshotSensor` per `SNAPSHOT_SENSORS` description on the main
+  device: router/service/middleware counts, Traefik version, start time and
+  healthy router ratio (all diagnostic; the ratio is disabled by default)
 - 1 `TraefikProxyCertTimestampSensor` per probed TLS hostname
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
+from homeassistant.const import PERCENTAGE, EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.typing import StateType
 from homeassistant.util import slugify
 
 from .const import ITEM_STATE_OPTIONS, STATE_MISSING
-from .entity import TraefikDevice, TraefikItemEntity, TraefikProxyCertEntity, TraefikProxyEntity
+from .entity import TraefikDevice, TraefikEntity, TraefikItemEntity, TraefikProxyCertEntity
 from .entity_manager import ENTRYPOINTS, ROUTERS, SERVICES
-from .models import Entrypoint, Router, Service, StatusCounts
+from .models import Entrypoint, Router, Service, StatusCounts, TraefikSnapshot
 from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
@@ -38,6 +47,91 @@ if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# Entities read the coordinator snapshot; no per-entity polling.
+PARALLEL_UPDATES = 0
+
+
+def healthy_ratio(counts: StatusCounts) -> float:
+    """Return enabled / (enabled + warning + error) in percent, one decimal.
+
+    Disabled routers are switched off on purpose and do not count; without
+    any other router the ratio is 100.0.
+    """
+    judged = counts.enabled + counts.warning + counts.error
+    if judged == 0:
+        return 100.0
+    return round(counts.enabled / judged * 100, 1)
+
+
+def _count_attributes(counts: StatusCounts) -> dict[str, Any]:
+    return {"enabled": counts.enabled, "warning": counts.warning, "error": counts.error, "disabled": counts.disabled}
+
+
+@dataclass(frozen=True, kw_only=True)
+class TraefikSensorEntityDescription(SensorEntityDescription):
+    """A sensor computed from the whole snapshot."""
+
+    unique_id_suffix: str
+    value_fn: Callable[[TraefikSnapshot], StateType | datetime]
+    attrs_fn: Callable[[TraefikSnapshot], dict[str, Any]] | None = None
+
+
+SNAPSHOT_SENSORS: tuple[TraefikSensorEntityDescription, ...] = (
+    TraefikSensorEntityDescription(
+        key="routers_count",
+        translation_key="routers_count",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+        unique_id_suffix="overview_routers_count",
+        value_fn=lambda snapshot: snapshot.router_counts.total,
+        attrs_fn=lambda snapshot: _count_attributes(snapshot.router_counts),
+    ),
+    TraefikSensorEntityDescription(
+        key="services_count",
+        translation_key="services_count",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+        unique_id_suffix="overview_services_count",
+        value_fn=lambda snapshot: snapshot.service_counts.total,
+        attrs_fn=lambda snapshot: _count_attributes(snapshot.service_counts),
+    ),
+    TraefikSensorEntityDescription(
+        key="middlewares_count",
+        translation_key="middlewares_count",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        state_class=SensorStateClass.MEASUREMENT,
+        unique_id_suffix="overview_middlewares_count",
+        value_fn=lambda snapshot: snapshot.middleware_counts.total,
+        attrs_fn=lambda snapshot: _count_attributes(snapshot.middleware_counts),
+    ),
+    TraefikSensorEntityDescription(
+        key="version",
+        translation_key="version",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        unique_id_suffix="version",
+        value_fn=lambda snapshot: snapshot.version.version,
+        attrs_fn=lambda snapshot: {"codename": snapshot.version.codename},
+    ),
+    TraefikSensorEntityDescription(
+        key="start_time",
+        translation_key="start_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        unique_id_suffix="start_time",
+        value_fn=lambda snapshot: snapshot.version.start_date,
+    ),
+    TraefikSensorEntityDescription(
+        key="healthy_ratio",
+        translation_key="healthy_ratio",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+        unique_id_suffix="healthy_ratio",
+        value_fn=lambda snapshot: healthy_ratio(snapshot.router_counts),
+    ),
+)
 
 
 async def async_setup_entry(
@@ -75,14 +169,7 @@ async def async_setup_entry(
         async_add_entities=async_add_entities,
     )
 
-    # Aggregate counters on the Overview device read the snapshot counts.
-    async_add_entities(
-        [
-            TraefikProxyRoutersCountSensor(entry),
-            TraefikProxyServicesCountSensor(entry),
-            TraefikProxyMiddlewaresCountSensor(entry),
-        ]
-    )
+    async_add_entities([TraefikSnapshotSensor(entry, description) for description in SNAPSHOT_SENSORS])
 
     # --- Cert timestamp sensors (TLS-01) ---
     # The cert coordinator lives next to the main coordinator on the entry's
@@ -285,122 +372,23 @@ class TraefikEntrypointSensor(TraefikItemEntity[Entrypoint], SensorEntity):
         return {"protocol": entrypoint.protocol}
 
 
-class _TraefikProxyAggregateCountSensor(TraefikProxyEntity, SensorEntity):
-    """Shared base for the three Overview device aggregate counters.
+class TraefikSnapshotSensor(TraefikEntity, SensorEntity):
+    """A main-device sensor whose value and attributes come from the snapshot."""
 
-    State and attributes are properties that read the status counts the
-    coordinator precomputes once per snapshot, so the displayed value
-    always reflects the latest Traefik roster.
+    entity_description: TraefikSensorEntityDescription
 
-    ``state_class=MEASUREMENT`` so HA can graph trends over time — users
-    may want to chart how many routers / services / middlewares are
-    configured across deploys.
-
-    Subclasses implement ``_counts`` (which snapshot counts to show) and
-    set ``_HAS_HTTP_COUNT`` when the ``http_count`` attribute applies.
-    """
-
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    _HAS_HTTP_COUNT: ClassVar[bool] = True
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        *,
-        unique_id: str,
-        entity_id: str,
-        name: str,
-    ) -> None:
-        super().__init__(entry, category="overview", description_key=unique_id)
-        self._attr_unique_id = unique_id
-        self.entity_id = entity_id
-        self._attr_name = name
-
-    def _counts(self) -> StatusCounts:
-        """Return the status counts this sensor shows."""
-        raise NotImplementedError
+    def __init__(self, entry: TraefikProxyConfigEntry, description: TraefikSensorEntityDescription) -> None:
+        super().__init__(entry, f"{entry.entry_id}_{description.unique_id_suffix}")
+        self.entity_description = description
 
     @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
+    def native_value(self) -> StateType | datetime:
+        return self.entity_description.value_fn(self.coordinator.data)
 
     @property
-    def native_value(self) -> int:
-        """Total number of items of this kind in the latest snapshot."""
-        return self._counts().total
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Per-status counts, their breakdown and the success percentage.
-
-        ``success_pct`` = success / (success + warning + error) * 100,
-        excluding disabled items (turned off on purpose, not a quality
-        signal), clamped to [0.0, 100.0] and 100.0 when no such item exists.
-        """
-        counts = self._counts()
-        breakdown = {
-            "success": counts.enabled,
-            "warning": counts.warning,
-            "error": counts.error,
-            "disabled": counts.disabled,
-        }
-        attrs: dict[str, Any] = {"filtered_count": counts.total}
-        attrs.update({f"{bucket}_count": count for bucket, count in breakdown.items()})
-        attrs["status_breakdown"] = breakdown
-        non_disabled = counts.enabled + counts.warning + counts.error
-        pct = counts.enabled / non_disabled * 100.0 if non_disabled > 0 else 100.0
-        attrs["success_pct"] = max(0.0, min(100.0, pct))
-        if self._HAS_HTTP_COUNT:
-            attrs["http_count"] = counts.total
-        return attrs
-
-
-class TraefikProxyRoutersCountSensor(_TraefikProxyAggregateCountSensor):
-    """Number of HTTP routers in the latest snapshot."""
-
-    def __init__(self, entry: TraefikProxyConfigEntry) -> None:
-        super().__init__(
-            entry,
-            unique_id=f"{entry.entry_id}_overview_routers_count",
-            entity_id="sensor.traefik_routers",
-            name="Routers",
-        )
-
-    def _counts(self) -> StatusCounts:
-        return self.coordinator.data.router_counts
-
-
-class TraefikProxyServicesCountSensor(_TraefikProxyAggregateCountSensor):
-    """Number of HTTP services in the latest snapshot."""
-
-    def __init__(self, entry: TraefikProxyConfigEntry) -> None:
-        super().__init__(
-            entry,
-            unique_id=f"{entry.entry_id}_overview_services_count",
-            entity_id="sensor.traefik_services",
-            name="Services",
-        )
-
-    def _counts(self) -> StatusCounts:
-        return self.coordinator.data.service_counts
-
-
-class TraefikProxyMiddlewaresCountSensor(_TraefikProxyAggregateCountSensor):
-    """Number of HTTP middlewares in the latest snapshot."""
-
-    _HAS_HTTP_COUNT = False
-
-    def __init__(self, entry: TraefikProxyConfigEntry) -> None:
-        super().__init__(
-            entry,
-            unique_id=f"{entry.entry_id}_overview_middlewares_count",
-            entity_id="sensor.traefik_middlewares",
-            name="Middlewares",
-        )
-
-    def _counts(self) -> StatusCounts:
-        return self.coordinator.data.middleware_counts
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        attrs_fn = self.entity_description.attrs_fn
+        return None if attrs_fn is None else attrs_fn(self.coordinator.data)
 
 
 class TraefikProxyCertTimestampSensor(TraefikProxyCertEntity, SensorEntity):
