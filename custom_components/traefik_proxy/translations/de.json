@@ -74,5 +74,11 @@
         "name": "Jetzt aktualisieren"
       }
     }
+  },
+  "issues": {
+    "entities_migrated": {
+      "title": "Traefik-Entitäten wurden ersetzt",
+      "description": "Die Traefik-Integration „{entry_title}“ wurde aktualisiert. Router-Binärsensoren wurden durch Router-Sensoren mit neuen Entitäts-IDs ersetzt (Zustände: aktiviert, Warnung, Fehler, deaktiviert, fehlt). Der Knopf und der Dienst zum Neuladen wurden entfernt, weil Traefik keine Reload-API hat; nutze stattdessen den Knopf „Jetzt aktualisieren“. {removed_count} alte Entitäten wurden entfernt. Passe Automationen, Skripte und Dashboards an, die sie verwendet haben, und schließe danach diesen Hinweis."
+    }
   }
 }

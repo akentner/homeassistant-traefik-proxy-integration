@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -93,10 +93,6 @@ def _legacy_registry(hass: HomeAssistant, entry: Any) -> dict[str, str]:
     }
 
 
-_RED = pytest.mark.xfail(strict=True, reason="05-07 Task 2 RED: no async_migrate_entry yet")
-
-
-@_RED
 async def test_migration_from_1_1(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """A 0.3.0 entry loses the replaced entries, keeps user choices and gets one repair issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
@@ -104,8 +100,15 @@ async def test_migration_from_1_1(hass: HomeAssistant, aioclient_mock: Any) -> N
     ids = _legacy_registry(hass, entry)
     registry = er.async_get(hass)
     registry.async_update_entity(ids["service"], name="My whoami")
-    # A second, not yet loaded entry with a look-alike router binary_sensor stays untouched.
-    other = make_traefik_entry(entry_id=OTHER_ENTRY_ID, unique_id="other.example.com", version=1, minor_version=1)
+    # A second entry with look-alike entries stays untouched. It is disabled, so
+    # setting up the integration does not set it up (and migrate it) as well.
+    other = make_traefik_entry(
+        entry_id=OTHER_ENTRY_ID,
+        unique_id="other.example.com",
+        version=1,
+        minor_version=1,
+        disabled_by=ConfigEntryDisabler.USER,
+    )
     other.add_to_hass(hass)
     other_router = _create(hass, other, "binary_sensor", "http_router_file-ok@file")
     other_problem = _create(
@@ -152,7 +155,6 @@ async def test_migration_from_1_1(hass: HomeAssistant, aioclient_mock: Any) -> N
     assert _get_issue(hass, OTHER_ENTRY_ID) is None
 
 
-@_RED
 async def test_migration_without_old_entries(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """A 1.1 entry without replaced entries is bumped to 1.2 without a repair issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
@@ -162,7 +164,6 @@ async def test_migration_without_old_entries(hass: HomeAssistant, aioclient_mock
     assert _own_issues(hass) == []
 
 
-@_RED
 async def test_entry_at_1_2_skips_migration(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """An entry created at minor version 2 keeps a look-alike router binary_sensor and gets no issue."""
     assert (TraefikProxyConfigFlow.VERSION, TraefikProxyConfigFlow.MINOR_VERSION) == (1, 2)
@@ -177,7 +178,6 @@ async def test_entry_at_1_2_skips_migration(hass: HomeAssistant, aioclient_mock:
     assert _own_issues(hass) == []
 
 
-@_RED
 async def test_issue_survives_reload_and_is_deleted_on_remove(
     hass: HomeAssistant, aioclient_mock: Any, hass_storage: dict[str, Any]
 ) -> None:
@@ -231,7 +231,6 @@ async def test_downgrade_fails_and_keeps_registry(hass: HomeAssistant, aioclient
     assert _own_issues(hass) == []
 
 
-@_RED
 async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
     """A second migration run on a partially migrated entry removes nothing and keeps one issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)

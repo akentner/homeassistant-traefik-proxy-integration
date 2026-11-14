@@ -142,5 +142,11 @@
         "name": "Refresh now"
       }
     }
+  },
+  "issues": {
+    "entities_migrated": {
+      "title": "Traefik entities were replaced",
+      "description": "The Traefik integration \"{entry_title}\" was updated. Router binary sensors were replaced by router sensors with new entity IDs (states: enabled, warning, error, disabled, missing). The reload button and the reload service were removed because Traefik has no reload API; use the \"Refresh now\" button instead. {removed_count} old entities were removed. Update automations, scripts and dashboards that used them, then dismiss this notice."
+    }
   }
 }

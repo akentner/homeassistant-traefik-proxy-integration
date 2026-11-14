@@ -1,11 +1,14 @@
-"""The Traefik integration: config entry setup, unload and removal."""
+"""The Traefik integration: config entry migration, setup, unload and removal."""
 
 from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Final
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
 from .cert_coordinator import CertCoordinator
 from .const import (
@@ -13,7 +16,11 @@ from .const import (
     CONF_TLS_WARN_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
+    DOMAIN,
     PLATFORMS,
+    UID_MIDDLEWARES_PROBLEM,
+    UID_ROUTERS_PROBLEM,
+    UID_SERVICES_PROBLEM,
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
@@ -27,6 +34,72 @@ from .entity_manager import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Repair issue raised once when the 1.2 migration removed replaced entities (D-19).
+ISSUE_ENTITIES_MIGRATED: Final = "entities_migrated"
+# unique_id suffix of the 0.3.0 reload button, removed by the 1.2 migration.
+_LEGACY_RELOAD_BUTTON_SUFFIX: Final = "diagnostics_reload"
+
+
+def _issue_id(entry_id: str) -> str:
+    return f"{ISSUE_ENTITIES_MIGRATED}_{entry_id}"
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
+    """Migrate a config entry to the current version (D-18).
+
+    1.1 -> 1.2: remove this entry's router binary sensors (replaced by router
+    sensors with new entity IDs) and the reload button, and enable the three
+    problem aggregates where only the old disabled-by-default disabled them.
+    User-disabled entities stay disabled; no surviving entity is renamed or
+    re-IDed. A persistent repair issue explains the change when anything was
+    removed. An entry from a newer major version fails (downgrade).
+    """
+    if entry.version > 1:
+        _LOGGER.debug(
+            "Cannot migrate Traefik entry %s from version %s.%s (downgrade)",
+            entry.entry_id,
+            entry.version,
+            entry.minor_version,
+        )
+        return False
+
+    if entry.minor_version < 2:
+        registry = er.async_get(hass)
+        router_prefix = f"{entry.entry_id}_{ROUTERS.prefix}"
+        reload_unique_id = f"{entry.entry_id}_{_LEGACY_RELOAD_BUTTON_SUFFIX}"
+        aggregate_unique_ids = {
+            f"{entry.entry_id}_{suffix}"
+            for suffix in (UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM, UID_MIDDLEWARES_PROBLEM)
+        }
+        removed = 0
+        for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if (reg_entry.domain == "binary_sensor" and reg_entry.unique_id.startswith(router_prefix)) or (
+                reg_entry.domain == "button" and reg_entry.unique_id == reload_unique_id
+            ):
+                registry.async_remove(reg_entry.entity_id)
+                removed += 1
+            elif (
+                reg_entry.domain == "binary_sensor"
+                and reg_entry.unique_id in aggregate_unique_ids
+                and reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+            ):
+                registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
+        hass.config_entries.async_update_entry(entry, minor_version=2)
+        if removed:
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                _issue_id(entry.entry_id),
+                is_fixable=False,
+                is_persistent=True,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_ENTITIES_MIGRATED,
+                translation_placeholders={"entry_title": entry.title, "removed_count": str(removed)},
+            )
+        _LOGGER.debug("Migrated Traefik entry %s to 1.2: %d entities removed", entry.entry_id, removed)
+
+    return True
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
@@ -159,5 +232,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
-    """Delete the data the entry keeps outside the registries (its missing-since Store)."""
+    """Delete the data the entry keeps outside the registries.
+
+    That is its missing-since Store and its migration repair issue, which
+    unload keeps (M34).
+    """
+    ir.async_delete_issue(hass, DOMAIN, _issue_id(entry.entry_id))
     await async_remove_missing_store(hass, entry.entry_id)
