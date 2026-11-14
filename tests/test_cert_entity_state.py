@@ -1,10 +1,14 @@
-"""HA-state propagation of the TLS certificate entities after a full setup.
+"""HA-state propagation and lifecycle of the TLS certificate entities after a full setup.
 
 The cert entities must follow the cert coordinator: a cert cycle, a
 threshold change and a ``tls_warn_days`` options change reach
 ``hass.states`` without any change of the main Traefik snapshot. The main
 coordinator keeps ``always_update=False``, so these tests fail whenever a
 cert entity only listens to the main coordinator.
+
+The entry's entity manager adds each certificate host once, keeps a host
+that leaves the cert data registered (unavailable) for the grace period and
+the entities write their state only when it changed.
 """
 
 from __future__ import annotations
@@ -19,9 +23,10 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
@@ -30,21 +35,21 @@ from custom_components.traefik_proxy.const import (
     CONF_VERIFY_SSL,
     DOMAIN,
 )
-from custom_components.traefik_proxy.entity_manager import ROUTERS
+from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY, ROUTERS
 from custom_components.traefik_proxy.tls import CertError, CertInfo
-from tests.conftest import MOCK_URL, entity_id_for, load_fixture, stub_traefik
+from tests.conftest import MOCK_URL, entity_id_for, load_fixture, rawdata_copy, restub_traefik, stub_traefik
 
 # TLS hosts of the v3.7 capture (tls.domains and Host(...) rules).
 HOST = "secure.example.com"
 OTHER_HOST = "www.secure.example.com"
 
-EXPIRING = "binary_sensor.traefik_secure_example_com_expiring"
-OTHER_EXPIRING = "binary_sensor.traefik_www_secure_example_com_expiring"
-CERT = "sensor.traefik_secure_example_com_cert"
-OTHER_CERT = "sensor.traefik_www_secure_example_com_cert"
-
 # Fixed reference instant so not_after values are deterministic.
 REFERENCE = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+
+DUPLICATE_ID_MESSAGE = "does not generate unique IDs"
+# The spec values, independent of the constants they are checked against.
+GRACE = timedelta(hours=24)
+CHECK_INTERVAL = timedelta(minutes=5)
 
 
 def _cert(host: str, days: int, *, port: int = 443) -> CertInfo:
@@ -91,37 +96,24 @@ async def _setup(hass: HomeAssistant, aioclient_mock: Any) -> MockConfigEntry:
     return entry
 
 
-async def test_cert_cycle_updates_expiring_binary_sensor_state(
-    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
-) -> None:
-    """A cert cycle inside the warning window turns only that host's alarm on."""
-    entry = await _setup(hass, aioclient_mock)
-    cert_coordinator = entry.runtime_data.cert_coordinator
+def _expiring(hass: HomeAssistant, entry: MockConfigEntry, host: str = HOST) -> str:
+    """Return the entity_id of the expiring binary sensor of ``host``."""
+    return entity_id_for(hass, CERT_EXPIRING.domain, CERT_EXPIRING.unique_id(entry.entry_id, host))
 
-    state = hass.states.get(EXPIRING)
-    assert state is not None
-    assert state.state == "off"
-    assert state.attributes["days_until_expiry"] == 30
 
-    cert_coordinator.async_set_updated_data({HOST: _cert(HOST, 3), OTHER_HOST: _cert(OTHER_HOST, 30)})
-    await hass.async_block_till_done()
+def _expiry(hass: HomeAssistant, entry: MockConfigEntry, host: str = HOST) -> str:
+    """Return the entity_id of the expiry timestamp sensor of ``host``."""
+    return entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, host))
 
-    state = hass.states.get(EXPIRING)
-    assert state is not None
-    assert state.state == "on"
-    assert state.attributes["days_until_expiry"] == 3
-    other = hass.states.get(OTHER_EXPIRING)
-    assert other is not None
-    assert other.state == "off"
-    assert other.attributes["days_until_expiry"] == 30
 
-    # An unchanged main cycle must not bring the old value back.
-    await entry.runtime_data.coordinator.async_refresh()
-    await hass.async_block_till_done()
-    state = hass.states.get(EXPIRING)
-    assert state is not None
-    assert state.state == "on"
-    assert state.attributes["days_until_expiry"] == 3
+def _all_cert_ids(hass: HomeAssistant, entry: MockConfigEntry) -> tuple[str, ...]:
+    """Return the four cert entity_ids of the v3.7 capture."""
+    return (
+        _expiring(hass, entry),
+        _expiry(hass, entry),
+        _expiring(hass, entry, OTHER_HOST),
+        _expiry(hass, entry, OTHER_HOST),
+    )
 
 
 def _state(hass: HomeAssistant, entity_id: str) -> Any:
@@ -131,22 +123,55 @@ def _state(hass: HomeAssistant, entity_id: str) -> Any:
     return state
 
 
+async def test_cert_cycle_updates_expiring_binary_sensor_state(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
+) -> None:
+    """A cert cycle inside the warning window turns only that host's alarm on."""
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    expiring = _expiring(hass, entry)
+    other_expiring = _expiring(hass, entry, OTHER_HOST)
+
+    state = _state(hass, expiring)
+    assert state.state == "off"
+    assert state.attributes["days_until_expiry"] == 30
+
+    cert_coordinator.async_set_updated_data({HOST: _cert(HOST, 3), OTHER_HOST: _cert(OTHER_HOST, 30)})
+    await hass.async_block_till_done()
+
+    state = _state(hass, expiring)
+    assert state.state == "on"
+    assert state.attributes["days_until_expiry"] == 3
+    other = _state(hass, other_expiring)
+    assert other.state == "off"
+    assert other.attributes["days_until_expiry"] == 30
+
+    # An unchanged main cycle must not bring the old value back.
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    state = _state(hass, expiring)
+    assert state.state == "on"
+    assert state.attributes["days_until_expiry"] == 3
+
+
 async def test_cert_cycle_updates_timestamp_sensor_state(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
 ) -> None:
     """A cert cycle with a new notAfter reaches the timestamp sensor's state."""
     entry = await _setup(hass, aioclient_mock)
-    assert dt_util.parse_datetime(_state(hass, CERT).state) == REFERENCE + timedelta(days=30)
+    expiry = _expiry(hass, entry)
+    other_expiry = _expiry(hass, entry, OTHER_HOST)
+    assert dt_util.parse_datetime(_state(hass, expiry).state) == REFERENCE + timedelta(days=30)
 
     renewed = _cert(HOST, 3)
     entry.runtime_data.cert_coordinator.async_set_updated_data({HOST: renewed, OTHER_HOST: _cert(OTHER_HOST, 30)})
     await hass.async_block_till_done()
 
-    state = _state(hass, CERT)
+    state = _state(hass, expiry)
     assert dt_util.parse_datetime(state.state) == renewed.not_after
     # The entity layer adds no rounding: the attribute is the cache integer.
     assert state.attributes["days_until_expiry"] == 3
-    other = _state(hass, OTHER_CERT)
+    other = _state(hass, other_expiry)
     assert dt_util.parse_datetime(other.state) == REFERENCE + timedelta(days=30)
 
 
@@ -156,14 +181,15 @@ async def test_threshold_change_reaches_state_at_the_boundary(
     """Signed ``<=``: on at days == threshold, off one below, on one above."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    state = _state(hass, EXPIRING)
+    expiring = _expiring(hass, entry)
+    state = _state(hass, expiring)
     assert state.state == "off"
     assert state.attributes["threshold_days"] == 14
 
     for threshold, expected in ((30, "on"), (29, "off"), (31, "on")):
         await cert_coordinator.async_set_threshold(threshold)
         await hass.async_block_till_done()
-        state = _state(hass, EXPIRING)
+        state = _state(hass, expiring)
         assert state.state == expected, threshold
         assert state.attributes["threshold_days"] == threshold
         assert state.attributes["days_until_expiry"] == 30
@@ -174,12 +200,13 @@ async def test_tls_warn_days_option_reaches_state(
 ) -> None:
     """Changing ``tls_warn_days`` in the options turns the alarm on."""
     entry = await _setup(hass, aioclient_mock)
-    assert _state(hass, EXPIRING).state == "off"
+    expiring = _expiring(hass, entry)
+    assert _state(hass, expiring).state == "off"
 
     hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_TLS_WARN_DAYS: 30})
     await hass.async_block_till_done()
 
-    state = _state(hass, EXPIRING)
+    state = _state(hass, expiring)
     assert state.state == "on"
     assert state.attributes["threshold_days"] == 30
 
@@ -190,7 +217,8 @@ async def test_cert_availability_follows_cert_coordinator_only(
     """A Traefik API failure never blanks a cert entity; a cert failure does."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    before = {eid: _state(hass, eid).state for eid in (EXPIRING, CERT, OTHER_EXPIRING, OTHER_CERT)}
+    expiring, expiry, other_expiring, other_expiry = _all_cert_ids(hass, entry)
+    before = {eid: _state(hass, eid).state for eid in (expiring, expiry, other_expiring, other_expiry)}
     assert "unavailable" not in before.values()
     router = entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, "secure@file"))
     assert _state(hass, router).state == "enabled"
@@ -220,10 +248,10 @@ async def test_cert_availability_follows_cert_coordinator_only(
     error: CertError = {"host": HOST, "port": 443, "error": "timeout", "detail": "test stub"}
     cert_coordinator.async_set_updated_data({HOST: error, OTHER_HOST: _cert(OTHER_HOST, 30)})
     await hass.async_block_till_done()
-    assert _state(hass, EXPIRING).state == "unavailable"
-    assert _state(hass, CERT).state == "unavailable"
-    assert _state(hass, OTHER_EXPIRING).state == before[OTHER_EXPIRING]
-    assert _state(hass, OTHER_CERT).state == before[OTHER_CERT]
+    assert _state(hass, expiring).state == "unavailable"
+    assert _state(hass, expiry).state == "unavailable"
+    assert _state(hass, other_expiring).state == before[other_expiring]
+    assert _state(hass, other_expiry).state == before[other_expiry]
 
 
 async def test_main_cycles_never_probe_certificates(
@@ -257,7 +285,7 @@ async def test_cert_notifications_do_not_grow_listeners(
     """Rejected duplicate cert entities never subscribe to the cert coordinator."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    # Two platform listeners plus one per cert entity (two hosts, two classes).
+    # Two kind listeners plus one per cert entity (two hosts, two classes).
     listeners_after_setup = len(cert_coordinator._listeners)
     assert listeners_after_setup == 6
 
@@ -268,6 +296,116 @@ async def test_cert_notifications_do_not_grow_listeners(
     await hass.async_block_till_done()
 
     assert len(cert_coordinator._listeners) == listeners_after_setup
+
+
+@pytest.mark.xfail(strict=True, reason="RED: cert entities not on the entity manager yet")
+async def test_known_cert_hosts_are_never_added_again(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cert cycles, a threshold change and an options change add no entity a second time."""
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    assert len(cert_coordinator._listeners) == 6
+
+    for days in (20, 10, 5):
+        cert_coordinator.async_set_updated_data({HOST: _cert(HOST, days), OTHER_HOST: _cert(OTHER_HOST, days)})
+        await hass.async_block_till_done()
+    await cert_coordinator.async_set_threshold(7)
+    await hass.async_block_till_done()
+    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_TLS_WARN_DAYS: 30})
+    await hass.async_block_till_done()
+
+    assert DUPLICATE_ID_MESSAGE not in caplog.text
+    assert len(cert_coordinator._listeners) == 6
+    assert _state(hass, _expiring(hass, entry)).state == "on"
+
+
+@pytest.mark.xfail(strict=True, reason="RED: cert entities not on the entity manager yet")
+async def test_vanished_cert_host_unavailable_then_removed_after_grace(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, freezer: Any
+) -> None:
+    """A host that leaves the cert data is unavailable but registered until the grace period ends."""
+    entry = await _setup(hass, aioclient_mock)
+    registry = er.async_get(hass)
+    other_expiring = _expiring(hass, entry, OTHER_HOST)
+    other_expiry = _expiry(hass, entry, OTHER_HOST)
+
+    rawdata = rawdata_copy()
+    rawdata["routers"]["secure@file"]["tls"]["domains"][0]["sans"] = []
+    restub_traefik(aioclient_mock, rawdata=rawdata)
+    await entry.runtime_data.coordinator.async_refresh()
+    await entry.runtime_data.cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert OTHER_HOST not in entry.runtime_data.cert_coordinator.data
+
+    for entity_id in (other_expiring, other_expiry):
+        assert _state(hass, entity_id).state == "unavailable", entity_id
+        assert registry.async_get(entity_id) is not None, entity_id
+    # The remaining host is untouched.
+    assert _state(hass, _expiring(hass, entry)).state == "off"
+
+    freezer.tick(GRACE - timedelta(seconds=1))
+    async_fire_time_changed(hass, dt_util.utcnow() + CHECK_INTERVAL)
+    await hass.async_block_till_done()
+    for entity_id in (other_expiring, other_expiry):
+        assert registry.async_get(entity_id) is not None, entity_id
+
+    freezer.tick(timedelta(seconds=2))
+    async_fire_time_changed(hass, dt_util.utcnow() + CHECK_INTERVAL)
+    await hass.async_block_till_done()
+    for entity_id in (other_expiring, other_expiry):
+        assert registry.async_get(entity_id) is None, entity_id
+        assert hass.states.get(entity_id) is None, entity_id
+    assert registry.async_get(_expiring(hass, entry)) is not None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: cert entities do not write on change only yet")
+async def test_unchanged_cert_notification_writes_nothing(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, freezer: Any
+) -> None:
+    """A cert notification with unchanged data keeps last_reported of every cert entity."""
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    entity_ids = _all_cert_ids(hass, entry)
+    before = {entity_id: _state(hass, entity_id).last_reported for entity_id in entity_ids}
+
+    freezer.tick(timedelta(seconds=1))
+    cert_coordinator.async_set_updated_data(dict(cert_coordinator.data))
+    await hass.async_block_till_done()
+
+    for entity_id in entity_ids:
+        assert _state(hass, entity_id).last_reported == before[entity_id], entity_id
+
+
+@pytest.mark.xfail(strict=True, reason="RED: cert entities still on the per-category TLS device")
+async def test_cert_entities_on_certificates_sub_device(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
+) -> None:
+    """Cert entities sit on the Certificates sub-device, linked to the main device with the Traefik version."""
+    entry = await _setup(hass, aioclient_mock)
+    # Lookup by config entry works on HA 2026.3 and on releases that deprecate async_get_device.
+    devices = {
+        identifier: device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        for identifier in device.identifiers
+    }
+    main = devices[(DOMAIN, entry.entry_id)]
+    certificates = devices[(DOMAIN, f"{entry.entry_id}_certificates")]
+    assert certificates.via_device_id == main.id
+    assert main.sw_version == entry.runtime_data.coordinator.data.version.version
+    assert main.sw_version
+
+    registry = er.async_get(hass)
+    for entity_id in _all_cert_ids(hass, entry):
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None
+        assert reg_entry.device_id == certificates.id, entity_id
+    assert {registry.async_get(entity_id).unique_id for entity_id in _all_cert_ids(hass, entry)} == {  # type: ignore[union-attr]
+        f"{entry.entry_id}_tls_expiring_{HOST}",
+        f"{entry.entry_id}_tls_cert_{HOST}",
+        f"{entry.entry_id}_tls_expiring_{OTHER_HOST}",
+        f"{entry.entry_id}_tls_cert_{OTHER_HOST}",
+    }
 
 
 async def test_cert_device_keeps_traefik_sw_version(
