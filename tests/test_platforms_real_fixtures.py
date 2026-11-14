@@ -180,3 +180,34 @@ async def test_enabled_entrypoint_sensors(hass, aioclient_mock, mock_tls_probe, 
         assert "transport" not in state.attributes
     udp = hass.states.get(entity_id_for(hass, "sensor", ENTRYPOINTS.unique_id(entry.entry_id, "udp-ep")))
     assert udp is not None and udp.attributes["protocol"] == "udp"
+
+
+PROBLEM_UNIQUE_ID_SUFFIXES = {
+    "diagnostics_any_router_failing": "router_problems",
+    "diagnostics_any_service_failing": "service_problems",
+    "diagnostics_any_middleware_failing": "middleware_problems",
+}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: problem aggregates still disabled by default")
+async def test_problem_aggregates_enabled_and_on(hass, loaded: TraefikSnapshot) -> None:
+    """The three problem aggregates are enabled, uncategorised, on the main device and on for both captures."""
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    registry = er.async_get(hass)
+    main_device = _device_id(hass, entry.entry_id, entry.entry_id)
+    for suffix, field in PROBLEM_UNIQUE_ID_SUFFIXES.items():
+        entity_id = entity_id_for(hass, "binary_sensor", f"{entry.entry_id}_{suffix}")
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None, suffix
+        assert reg_entry.disabled_by is None, suffix
+        assert reg_entry.entity_category is None, suffix
+        assert reg_entry.device_id == main_device, suffix
+        problems = getattr(loaded, field)
+        state = hass.states.get(entity_id)
+        assert state is not None, suffix
+        assert state.state == "on", suffix
+        assert state.attributes["problem_count"] == len(problems), suffix
+        assert state.attributes["problems"] == list(problems), suffix
+    assert "broken-missing-service@file" in loaded.router_problems
+    assert loaded.routers["broken-missing-service@file"].status is Status.error
+    assert "lb-mixed@file" in loaded.service_problems
