@@ -19,7 +19,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .entity import TraefikProxyEntity
+from .entity import TraefikProxyCertEntity, TraefikProxyEntity
 from .models import Entrypoint, Service, StatusCounts
 from .tls import CertError, CertInfo, is_error
 
@@ -407,7 +407,7 @@ class TraefikProxyMiddlewaresCountSensor(_TraefikProxyAggregateCountSensor):
         return self.coordinator.data.middleware_counts
 
 
-class TraefikProxyCertTimestampSensor(TraefikProxyEntity, SensorEntity):
+class TraefikProxyCertTimestampSensor(TraefikProxyCertEntity, SensorEntity):
     """One timestamp sensor per TLS-probed hostname (TLS-01).
 
     Surfaces the leaf cert's ``notAfter`` datetime via HA's standard
@@ -461,7 +461,7 @@ class TraefikProxyCertTimestampSensor(TraefikProxyEntity, SensorEntity):
         # already lowercases, but a cache row populated from a test
         # harness could carry mixed casing — see threat model).
         host = host.lower()
-        super().__init__(entry, category="http_routers_tls", description_key=host)
+        super().__init__(entry, coordinator, category="http_routers_tls", description_key=host)
         self._host = host
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_tls_cert_{host}"
