@@ -345,7 +345,7 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 2/7 plans executed (7 sequential waves)
+**Plans**: 3/7 plans executed (7 sequential waves)
 
 Plans:
 **Wave 1**
@@ -355,7 +355,7 @@ Plans:
 - [x] 05-02-PLAN.md — Router binary_sensor removed and router tests moved to the ENUM sensor; persisted 24 h wall-clock grace period with deadline timer and orphan adoption (ENT-01, ENT-02, ENT-04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 05-03-PLAN.md — Services and entrypoints as manager kinds; problem aggregates as one enabled-by-default class; diagnostic counts/version/start time/healthy ratio; PARALLEL_UPDATES for sensor/binary_sensor (ENT-01, ENT-02, ENT-04, ENT-05, ENT-06, ENT-08)
+- [x] 05-03-PLAN.md — Services and entrypoints as manager kinds; problem aggregates as one enabled-by-default class; diagnostic counts/version/start time/healthy ratio; PARALLEL_UPDATES for sensor/binary_sensor (ENT-01, ENT-02, ENT-04, ENT-05, ENT-06, ENT-08)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 05-04-PLAN.md — Per-item option: no router/service entities and no Routers/Services sub-devices when off, immediate purge on reload (ENT-10)
@@ -518,7 +518,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
-| 5. Entity model + lifecycle | 2/7 | In Progress | - |
+| 5. Entity model + lifecycle | 3/7 | In Progress | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
