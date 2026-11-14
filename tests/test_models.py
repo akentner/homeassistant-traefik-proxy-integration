@@ -4,17 +4,31 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import re
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
 
 from custom_components.traefik_proxy import models
 from custom_components.traefik_proxy.models import (
+    Entrypoint,
+    Middleware,
     Router,
+    Service,
     Status,
+    StatusCounts,
     TlsDomain,
+    TraefikSnapshot,
+    TraefikState,
+    TraefikVersion,
     is_internal,
+    parse_entrypoints,
+    parse_middlewares,
+    parse_rawdata,
     parse_routers,
+    parse_services,
+    parse_version,
     provider_from_name,
 )
 from tests.conftest import FIXTURE_VERSIONS, load_fixture, load_paginated
@@ -37,6 +51,8 @@ _ROUTER_FIELDS = (
     "tls_domains",
     "errors",
 )
+_SERVICE_FIELDS = ("name", "provider", "status", "type", "servers_total", "servers_up")
+_MIDDLEWARE_FIELDS = ("name", "provider", "status", "type")
 
 
 def _project(items: dict[str, Any], kind: str, fields: tuple[str, ...]) -> dict[str, tuple[object, ...]]:
@@ -328,3 +344,381 @@ def test_router_is_frozen_with_tuple_sequences(version: str) -> None:
     assert isinstance(router.tls_domains[0].sans, tuple)
     with pytest.raises(dataclasses.FrozenInstanceError):
         router.tls_domains[0].main = "x"  # type: ignore[misc]
+
+
+# --- Task 2 helpers ------------------------------------------------------------
+
+_IP_LITERAL = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b|\[?[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7}\]?")
+
+
+def _rawdata(version: str) -> dict[str, Any]:
+    raw: dict[str, Any] = load_fixture(version, "rawdata.json")
+    return raw
+
+
+def _snapshot(version: str) -> TraefikSnapshot:
+    return TraefikSnapshot.build(
+        version=parse_version(load_fixture(version, "version.json")),
+        entrypoints=parse_entrypoints(load_fixture(version, "entrypoints.json")),
+        state=parse_rawdata(_rawdata(version)),
+    )
+
+
+def _values(obj: object) -> list[object]:
+    """Flatten every field value of a model (tuples and nested models included)."""
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        out: list[object] = []
+        for field in dataclasses.fields(obj):
+            out.extend(_values(getattr(obj, field.name)))
+        return out
+    if isinstance(obj, tuple):
+        return [v for entry in obj for v in _values(entry)]
+    return [obj]
+
+
+# --- Services / middlewares / state: real captures -----------------------------
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_rawdata_equals_paginated_state(version: str) -> None:
+    """parse_rawdata over rawdata.json equals the state built from the list pages (D-04)."""
+    from_pages = TraefikState(
+        routers=parse_routers(load_paginated(version, "routers")[0]),
+        services=parse_services(load_paginated(version, "services")[0]),
+        middlewares=parse_middlewares(load_paginated(version, "middlewares")[0]),
+    )
+
+    state = parse_rawdata(_rawdata(version))
+
+    assert state.routers and state.services and state.middlewares
+    assert state == from_pages
+
+
+def test_service_projection_equal_across_generations() -> None:
+    old, new = (parse_rawdata(_rawdata(v)).services for v in FIXTURE_VERSIONS)
+
+    assert _project(old, "service", _SERVICE_FIELDS) == _project(new, "service", _SERVICE_FIELDS)
+
+
+def test_middleware_projection_equal_across_generations() -> None:
+    old, new = (parse_rawdata(_rawdata(v)).middlewares for v in FIXTURE_VERSIONS)
+
+    assert _project(old, "middleware", _MIDDLEWARE_FIELDS) == _project(new, "middleware", _MIDDLEWARE_FIELDS)
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_lb_mixed_service_counts_servers(version: str) -> None:
+    services = parse_rawdata(_rawdata(version)).services
+
+    lb = services["lb-mixed@file"]
+    assert lb.servers_total == 2
+    assert lb.servers_up == 1
+    assert lb.status is Status.enabled
+    assert lb.type == "loadbalancer"
+    assert lb.provider == "file"
+    assert lb.used_by == ("lb-router@file",)
+    assert lb.errors == ()
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_services_store_no_backend_url_or_ip(version: str) -> None:
+    services = parse_rawdata(_rawdata(version)).services
+    assert "whoami@docker" in services
+
+    for service in services.values():
+        for value in _values(service):
+            text = str(value)
+            assert "http://" not in text, (service.name, text)
+            assert not _IP_LITERAL.search(text), (service.name, text)
+    field_names = {f.name for f in dataclasses.fields(Service)}
+    assert not field_names & {"url", "urls", "servers", "server_status", "address"}
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_internal_services_and_middlewares_are_dropped(version: str) -> None:
+    state = parse_rawdata(_rawdata(version))
+
+    assert set(state.services) == {"bulk-svc@file", "file-ok-svc@file", "lb-mixed@file", "whoami@docker"}
+    assert set(state.middlewares) == {"api-auth@file", "broken-chain@file"}
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_captured_middlewares(version: str) -> None:
+    middlewares = parse_rawdata(_rawdata(version)).middlewares
+
+    chain = middlewares["broken-chain@file"]
+    assert chain.status is Status.error
+    assert chain.type == "chain"
+    assert chain.used_by == ("chain-router@file",)
+    assert chain.errors
+    auth = middlewares["api-auth@file"]
+    assert auth.status is Status.enabled
+    assert auth.type == "basicauth"
+    assert auth.used_by == ("traefik-api@file",)
+
+
+# --- Services / middlewares: synthetic -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({"status": "enabled", "weighted": {"services": []}}, "weighted"),
+        ({"status": "enabled", "mirroring": {}}, "mirroring"),
+        ({"status": "enabled", "failover": {}}, "failover"),
+        ({"status": "enabled", "loadBalancer": {}, "type": "custom"}, "custom"),
+        ({"status": "enabled"}, ""),
+        ({"status": "enabled", "type": 5}, ""),
+    ],
+)
+def test_service_type(item: dict[str, Any], expected: str) -> None:
+    assert parse_services({"s@file": item})["s@file"].type == expected
+
+
+@pytest.mark.parametrize(
+    ("item", "expected"),
+    [
+        ({"status": "enabled", "stripPrefix": {"prefixes": ["/a"]}}, "stripprefix"),
+        ({"status": "enabled", "headers": {}, "usedBy": ["r@file"], "error": []}, "headers"),
+        ({"status": "enabled", "type": "ratelimit", "rateLimit": {}}, "ratelimit"),
+        ({"status": "enabled"}, ""),
+        ({"status": "enabled", "headers": {}, "compress": {}}, ""),
+    ],
+)
+def test_middleware_type(item: dict[str, Any], expected: str) -> None:
+    assert parse_middlewares({"m@file": item})["m@file"].type == expected
+
+
+@pytest.mark.parametrize(
+    ("server_status", "total", "up"),
+    [
+        ({"a": "UP", "b": "UP", "c": "DOWN"}, 3, 2),
+        ({}, 0, 0),
+        (None, 0, 0),
+        (["UP"], 0, 0),
+    ],
+)
+def test_service_server_counts(server_status: object, total: int, up: int) -> None:
+    item: dict[str, Any] = {"status": "enabled", "loadBalancer": {}}
+    if server_status is not None:
+        item["serverStatus"] = server_status
+
+    service = parse_services({"s@file": item})["s@file"]
+
+    assert (service.servers_total, service.servers_up) == (total, up)
+
+
+@pytest.mark.parametrize("parse", [parse_services, parse_middlewares])
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [("x", TypeError), (["x"], TypeError), ([{"status": "enabled"}], KeyError), ([{"name": 5}], TypeError)],
+)
+def test_service_and_middleware_shape_errors(parse: Any, payload: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        parse(payload)
+
+
+# --- Entrypoints -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_captured_entrypoints(version: str) -> None:
+    entrypoints = parse_entrypoints(load_fixture(version, "entrypoints.json"))
+
+    assert list(entrypoints) == ["traefik", "udp-ep", "web", "websecure"]
+    assert entrypoints["udp-ep"] == Entrypoint(name="udp-ep", address=":9999/udp", protocol="udp")
+    assert entrypoints["web"] == Entrypoint(name="web", address=":80", protocol="tcp")
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ("x", TypeError),
+        ({"web": {"address": ":80"}}, TypeError),
+        (["x"], TypeError),
+        ([{"address": ":80"}], KeyError),
+        ([{"name": "web"}], KeyError),
+        ([{"name": 1, "address": ":80"}], TypeError),
+        ([{"name": "web", "address": 80}], TypeError),
+    ],
+)
+def test_parse_entrypoints_shape_errors(payload: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        parse_entrypoints(payload)
+
+
+def test_parse_entrypoints_empty() -> None:
+    assert parse_entrypoints([]) == {}
+
+
+# --- Version -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("version", "number", "codename"), [("v2.11", "2.11.63", "mimolette"), ("v3.7", "3.7.19", "langres")]
+)
+def test_captured_version(version: str, number: str, codename: str) -> None:
+    parsed = parse_version(load_fixture(version, "version.json"))
+
+    assert parsed.version == number
+    assert parsed.codename == codename
+    assert parsed.start_date.tzinfo is not None
+    assert parsed.start_date.utcoffset() is not None
+    assert parsed.start_date.year == 2026
+
+
+def test_version_naive_start_date_is_utc_and_legacy_key_accepted() -> None:
+    parsed = parse_version({"Version": "3.0.0", "StartDate": "2026-01-02T03:04:05"})
+
+    assert parsed == TraefikVersion(version="3.0.0", codename="", start_date=datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC))
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"Version": "3.0.0", "startDate": "yesterday"}, ValueError),
+        ("x", TypeError),
+        ({"startDate": "2026-01-02T03:04:05Z"}, KeyError),
+        ({"Version": "3.0.0"}, KeyError),
+        ({"Version": 3, "startDate": "2026-01-02T03:04:05Z"}, TypeError),
+        ({"Version": "3.0.0", "startDate": 5}, TypeError),
+    ],
+)
+def test_parse_version_errors(payload: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        parse_version(payload)
+
+
+# --- parse_rawdata shape and empty payloads ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [("x", TypeError), ([], TypeError), ({"routers": ["x"]}, TypeError), ({"services": "x"}, TypeError)],
+)
+def test_parse_rawdata_shape_errors(payload: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        parse_rawdata(payload)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"routers": None, "services": None, "middlewares": None},
+        {"tcpRouters": {"t@file": {"status": "enabled"}}, "udpServices": {"u@file": {"status": "enabled"}}},
+    ],
+)
+def test_parse_rawdata_empty_sections(payload: dict[str, Any]) -> None:
+    assert parse_rawdata(payload) == TraefikState(routers={}, services={}, middlewares={})
+
+
+# --- Immutability ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_every_model_is_frozen(version: str) -> None:
+    snapshot = _snapshot(version)
+    state = parse_rawdata(_rawdata(version))
+    instances: list[object] = [
+        snapshot,
+        state,
+        snapshot.version,
+        snapshot.router_counts,
+        snapshot.entrypoints["web"],
+        snapshot.routers["secure@file"],
+        snapshot.routers["secure@file"].tls_domains[0],
+        snapshot.services["lb-mixed@file"],
+        snapshot.middlewares["api-auth@file"],
+    ]
+    expected = {
+        Router,
+        TlsDomain,
+        Service,
+        Middleware,
+        Entrypoint,
+        TraefikVersion,
+        StatusCounts,
+        TraefikState,
+        TraefikSnapshot,
+    }
+    assert {type(i) for i in instances} == expected
+
+    for instance in instances:
+        assert dataclasses.is_dataclass(instance)
+        first = dataclasses.fields(instance)[0].name
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            setattr(instance, first, None)
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_snapshots_from_equal_content_are_equal(version: str) -> None:
+    assert _snapshot(version) == _snapshot(version)
+
+
+# --- TraefikSnapshot aggregates (D-15) -------------------------------------------------
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_snapshot_aggregates_from_capture(version: str) -> None:
+    snapshot = _snapshot(version)
+
+    for items, counts in (
+        (snapshot.routers, snapshot.router_counts),
+        (snapshot.services, snapshot.service_counts),
+        (snapshot.middlewares, snapshot.middleware_counts),
+    ):
+        assert counts.total == len(items)
+        assert counts.enabled + counts.warning + counts.error + counts.disabled == counts.total
+    assert snapshot.router_counts.total == 128
+    assert snapshot.router_counts.warning == 1
+    assert snapshot.router_counts.error == 2
+    assert snapshot.router_problems == (
+        "broken-missing-service@file",
+        "chain-router@file",
+        "warn-unknown-entrypoint@file",
+    )
+    assert snapshot.router_problems == tuple(
+        sorted(n for n, r in snapshot.routers.items() if r.status is not Status.enabled)
+    )
+    assert snapshot.service_problems == ("lb-mixed@file",)
+    assert snapshot.middleware_problems == ("broken-chain@file",)
+    assert snapshot.middleware_counts == StatusCounts(total=2, enabled=1, warning=0, error=1, disabled=0)
+
+
+def test_snapshot_service_problems_and_sorting() -> None:
+    state = parse_rawdata(
+        {
+            "routers": {
+                "z@file": {"status": "warning"},
+                "a@file": {"status": "disabled"},
+                "m@file": {"status": "enabled"},
+            },
+            "services": {
+                "ok@file": {"status": "enabled", "serverStatus": {"u1": "UP", "u2": "UP"}},
+                "down@file": {"status": "enabled", "serverStatus": {"u1": "UP", "u2": "DOWN"}},
+                "off@file": {"status": "disabled"},
+                "bad@file": {"status": "disabled", "error": ["x"]},
+            },
+        }
+    )
+    version = TraefikVersion(version="3.7.19", codename="", start_date=datetime(2026, 1, 1, tzinfo=UTC))
+
+    snapshot = TraefikSnapshot.build(version=version, entrypoints={}, state=state)
+
+    assert snapshot.router_problems == ("a@file", "z@file")
+    assert snapshot.router_counts == StatusCounts(total=3, enabled=1, warning=1, error=0, disabled=1)
+    assert snapshot.service_problems == ("bad@file", "down@file", "off@file")
+    assert snapshot.service_counts == StatusCounts(total=4, enabled=2, warning=0, error=1, disabled=1)
+    assert snapshot.middleware_problems == ()
+
+
+def test_snapshot_of_empty_state() -> None:
+    version = TraefikVersion(version="2.11.0", codename="", start_date=datetime(2026, 1, 1, tzinfo=UTC))
+
+    snapshot = TraefikSnapshot.build(version=version, entrypoints={}, state=parse_rawdata({}))
+
+    zero = StatusCounts(total=0, enabled=0, warning=0, error=0, disabled=0)
+    assert (snapshot.router_counts, snapshot.service_counts, snapshot.middleware_counts) == (zero, zero, zero)
+    assert (snapshot.router_problems, snapshot.service_problems, snapshot.middleware_problems) == ((), (), ())
+    assert snapshot.routers == {} and snapshot.services == {} and snapshot.middlewares == {}

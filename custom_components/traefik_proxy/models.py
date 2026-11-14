@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
@@ -169,3 +170,119 @@ def _router(name: str, item: Mapping[str, Any]) -> Router:
 def parse_routers(payload: object) -> dict[str, Router]:
     """Parse HTTP routers from the rawdata map or a list page."""
     return {name: _router(name, item) for name, item in _iter_items(payload)}
+
+
+# --- Interface stubs (implementation pending) ---------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Service:
+    """An HTTP service (stub)."""
+
+    name: str
+    provider: str
+    status: Status
+    type: str
+    servers_total: int
+    servers_up: int
+    used_by: tuple[str, ...]
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Middleware:
+    """An HTTP middleware (stub)."""
+
+    name: str
+    provider: str
+    status: Status
+    type: str
+    used_by: tuple[str, ...]
+    errors: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Entrypoint:
+    """An entrypoint (stub)."""
+
+    name: str
+    address: str
+    protocol: str
+
+
+@dataclass(frozen=True, slots=True)
+class TraefikVersion:
+    """Version payload (stub)."""
+
+    version: str
+    codename: str
+    start_date: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StatusCounts:
+    """Per-status counts (stub)."""
+
+    total: int
+    enabled: int
+    warning: int
+    error: int
+    disabled: int
+
+
+@dataclass(frozen=True, slots=True)
+class TraefikState:
+    """Routers, services and middlewares (stub)."""
+
+    routers: dict[str, Router]
+    services: dict[str, Service]
+    middlewares: dict[str, Middleware]
+
+
+@dataclass(frozen=True, slots=True)
+class TraefikSnapshot:
+    """Coordinator payload (stub)."""
+
+    version: TraefikVersion
+    entrypoints: dict[str, Entrypoint]
+    routers: dict[str, Router]
+    services: dict[str, Service]
+    middlewares: dict[str, Middleware]
+    router_counts: StatusCounts
+    service_counts: StatusCounts
+    middleware_counts: StatusCounts
+    router_problems: tuple[str, ...]
+    service_problems: tuple[str, ...]
+    middleware_problems: tuple[str, ...]
+
+    @classmethod
+    def build(
+        cls, *, version: TraefikVersion, entrypoints: dict[str, Entrypoint], state: TraefikState
+    ) -> TraefikSnapshot:
+        """Stub."""
+        raise NotImplementedError
+
+
+def parse_services(payload: object) -> dict[str, Service]:
+    """Stub."""
+    return {}
+
+
+def parse_middlewares(payload: object) -> dict[str, Middleware]:
+    """Stub."""
+    return {}
+
+
+def parse_entrypoints(payload: object) -> dict[str, Entrypoint]:
+    """Stub."""
+    return {}
+
+
+def parse_version(payload: object) -> TraefikVersion:
+    """Stub."""
+    raise NotImplementedError
+
+
+def parse_rawdata(payload: object) -> TraefikState:
+    """Stub."""
+    return TraefikState(routers={}, services={}, middlewares={})
