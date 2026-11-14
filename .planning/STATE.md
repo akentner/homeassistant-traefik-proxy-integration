@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Entity model + lifecycle
 status: executing
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-11-14T05:03:27.036Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-11-14T09:28:05.227Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 03ad0573e7f51a9cce0c240c1e8014ec88e27be3
+state_head: 9a5674a774fa982f41aa4b7d80a676b2bde60620
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 27
-  completed_plans: 21
+  completed_plans: 22
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 05 (Entity model + lifecycle) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -86,6 +86,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | Phase 04 P08 | 7min | 2 tasks | 6 files |
 | Phase 04 P09 | 6min | 2 tasks | 5 files |
 | Phase 05 P01 | 12min | 2 tasks | 11 files |
+| Phase 05 P02 | 261min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -148,6 +149,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-09: Probe auth errors propagate; other probe failures keep the pages and serve the same cycle
 - [Phase 05]: 05-01: RED commit of a tdd task carries xfail(strict=True) markers so every commit stays green (D-20/W42); GREEN removes them
 - [Phase 05]: 05-01: TraefikEntityManager on runtime_data; kind listener registered before entities; new keys added once in sorted order; vanished keys stamped missing; registry link via async_update_device(via_device_id)
+- [Phase 05]: 05-02: missing_since persisted per entry in a helpers.storage.Store (traefik_proxy.missing.<entry_id>); stored times of kinds not registered yet are carried through every write
+- [Phase 05]: 05-02: deadline check by async_track_time_interval every 5 min (cancel_on_shutdown); deadline inclusive (>= 24 h); removal lands within one interval
+- [Phase 05]: 05-02: future stored missing_since values are clamped to now at load; the Store is created in async_load
 
 ### Pending Todos
 
@@ -189,7 +193,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T05:03:26.952Z
-Stopped at: Completed 05-01-PLAN.md
+Last session: 2026-11-14T09:28:05.150Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
