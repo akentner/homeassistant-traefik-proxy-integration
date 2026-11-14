@@ -156,22 +156,32 @@ LEGACY_DEVICE_SUFFIXES: Final = (
 
 
 @callback
+def async_legacy_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> list[dr.DeviceEntry]:
+    """Return this entry's 0.3.0 per-category devices.
+
+    Only devices of this entry are considered, and only those carrying exactly
+    one legacy identifier and none of the current device identifiers.
+    """
+    legacy = {(DOMAIN, f"{entry.entry_id}_{suffix}") for suffix in LEGACY_DEVICE_SUFFIXES}
+    current = {device_identifier(entry.entry_id, device) for device in TraefikDevice}
+    return [
+        device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        if len(device.identifiers & legacy) == 1 and not device.identifiers & current
+    ]
+
+
+@callback
 def async_remove_legacy_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
     """Remove this entry's 0.3.0 per-category devices that no entity uses any more.
 
     Runs after the platforms are set up, so every entity they add has been
     re-pointed to its new device. A legacy device is removed only while no
-    registry entry references it; otherwise it is kept. Only devices of this
-    entry are considered, and only those carrying exactly one legacy
-    identifier and none of the current device identifiers.
+    registry entry references it; otherwise it is kept.
     """
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
-    legacy = {(DOMAIN, f"{entry.entry_id}_{suffix}") for suffix in LEGACY_DEVICE_SUFFIXES}
-    current = {device_identifier(entry.entry_id, device) for device in TraefikDevice}
-    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
-        if len(device.identifiers & legacy) != 1 or device.identifiers & current:
-            continue
+    for device in async_legacy_devices(hass, entry):
         _async_remove_device_if_unreferenced(device_registry, entity_registry, device)
 
 

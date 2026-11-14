@@ -24,7 +24,12 @@ from .const import (
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
-from .entity import async_remove_legacy_devices, async_setup_devices, async_track_sw_version
+from .entity import (
+    async_legacy_devices,
+    async_remove_legacy_devices,
+    async_setup_devices,
+    async_track_sw_version,
+)
 from .entity_manager import (
     ROUTERS,
     SERVICES,
@@ -68,8 +73,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     A router binary sensor disabled by the user, through its device or by the
     entry's "disable new entities" preference is replaced by a disabled router
     sensor with the same unique_id and the old object id (user- and
-    device-disabled ones as user-disabled). User-disabled entities stay
-    disabled; no surviving entity is renamed or re-IDed. A persistent repair issue explains the change when anything was
+    device-disabled ones as user-disabled). Every other entity of this entry
+    that was disabled through one of its 0.3.0 devices becomes user-disabled.
+    User-disabled entities stay disabled; no surviving entity is renamed or
+    re-IDed. A persistent repair issue explains the change when anything was
     removed. An entry from a newer major version fails (downgrade).
     """
     if entry.version > 1:
@@ -112,6 +119,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 and reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
             ):
                 registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
+        # An entity disabled through a 0.3.0 device moves to an enabled new
+        # device, and Home Assistant clears a DEVICE disabler on the next
+        # update of that device. Read again so removed entries are skipped.
+        legacy_device_ids = {device.id for device in async_legacy_devices(hass, entry)}
+        for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+            if reg_entry.disabled_by is er.RegistryEntryDisabler.DEVICE and reg_entry.device_id in legacy_device_ids:
+                registry.async_update_entity(reg_entry.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
         # Only the disabled state and the object id carry over; the platform
         # attaches the replacement to its device when it adds the router.
         for unique_id, disabled_by, object_id in replacements:

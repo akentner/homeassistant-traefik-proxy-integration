@@ -448,7 +448,6 @@ async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "4"}
 
 
-@pytest.mark.xfail(strict=True, reason="CR-02: DEVICE disabler of surviving entities is not mapped yet")
 async def test_device_disabled_entities_stay_disabled_after_device_updates(
     hass: HomeAssistant, aioclient_mock: Any, freezer: Any
 ) -> None:
@@ -522,7 +521,6 @@ async def test_device_disabled_entities_stay_disabled_after_device_updates(
         assert hass.states.get(entity_id) is None, name
 
 
-@pytest.mark.xfail(strict=True, reason="CR-02: DEVICE disabler of surviving entities is not mapped yet")
 async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssistant) -> None:
     """Only this entry's entities on its legacy devices change; other entries and devices keep DEVICE; a rerun is a no-op."""
     by_device = er.RegistryEntryDisabler.DEVICE
