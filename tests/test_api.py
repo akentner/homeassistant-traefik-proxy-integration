@@ -476,6 +476,30 @@ async def test_list_endpoint_404_in_paginated_mode_raises_not_found(hass, aiocli
     assert _paths(aioclient_mock) == [RAWDATA_PATH, "/api/http/routers"]
 
 
+@pytest.mark.parametrize(
+    "page",
+    [{"status": 404}, {"status": 500}, {"exc": aiohttp.ClientConnectionError()}],
+    ids=["http-404", "http-500", "connection-error"],
+)
+async def test_failed_fallback_keeps_rawdata_mode(hass, aioclient_mock, page: dict[str, Any]) -> None:
+    """A rawdata 404 whose page reads fail too leaves the mode unchanged; the next call tries rawdata first."""
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", status=404)
+    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", **page)
+    client = _client(hass)
+
+    with pytest.raises(TraefikProxyApiError):
+        await client.async_get_state()
+    assert client._paginated is False
+
+    payload = load_fixture("v3.7", "rawdata.json")
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", json=payload)
+
+    assert await client.async_get_state() == parse_rawdata(payload)
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+    assert client._paginated is False
+
+
 # --- Rawdata probe while paginated -------------------------------------------
 
 

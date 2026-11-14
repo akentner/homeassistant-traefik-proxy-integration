@@ -331,7 +331,8 @@ async def test_request_budget_matrix(
     paginated fallback after a rawdata 404 and its hourly rawdata re-probe:
     no probe before the re-check interval, and a probe that succeeds
     switches the client back to one rawdata request per cycle. Recurring
-    failures cannot starve the probe: it keeps its own hourly clock.
+    failures cannot starve the probe: it keeps its own hourly clock. A cycle
+    in which rawdata and the pages both fail does not switch to the pages.
     """
     assert timedelta(hours=1) == VERSION_RECHECK_INTERVAL
     index = load_fixture("v3.7", "pages/index.json")
@@ -483,6 +484,26 @@ async def test_request_budget_matrix(
     assert coordinator.last_update_success is True
 
     # (17) Back in rawdata mode: one request per cycle.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+
+    # (18) Traefik restarts and its API router is not loaded yet: rawdata and
+    # the first page both answer 404. The cycle fails without switching modes.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=404)
+    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", status=404)
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=404)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", "/api/http/routers"]
+    assert coordinator.last_update_success is False
+
+    # (19) Traefik is back: the post-failure re-check reads rawdata, not the pages.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", json=load_fixture("v3.7", "rawdata.json"))
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (20) Steady: one rawdata request per cycle.
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
 
 
