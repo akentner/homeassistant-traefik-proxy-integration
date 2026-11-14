@@ -50,6 +50,16 @@ created: "2026-11-14"
 | T-04-15 | Denial of service | Request volume against the user's Traefik | medium | mitigate | One rawdata request per steady cycle; `VERSION_RECHECK_INTERVAL` 1 h; `test_request_budget_matrix` (tests/test_coordinator.py:280) | closed |
 | T-04-16 | Tampering / Denial of service | Fallback switch on 404 | low | mitigate | Only `TraefikProxyNotFoundError` on /api/rawdata flips to pages; 401/500 propagate; MAX_PAGES kept on paginated path | closed |
 | T-04-SC (04-02..04-06) | Tampering | Package installs | low | accept | No new dependencies (see Accepted Risks Log) | closed |
+| T-04-17 | Denial of service (alert suppression) | Cert entity state propagation | high | mitigate | `TraefikProxyCertEntity` binds cert entities to the cert coordinator (entity.py:120-136; binary_sensor.py:357,415; sensor.py:410,464); availability from the cert coordinator only (sensor.py:542-571); tests/test_cert_entity_state.py:95,154,173,188 | closed |
+| T-04-18 | Denial of service | `update_entity` on a cert entity triggers a cert refresh | low | accept | AR-04-02 | closed |
+| T-04-19 | Repudiation (log noise) | Duplicate unique-ID log per cert notification (WR-05) | low | accept | AR-04-03 | closed |
+| T-04-20 | Information disclosure | Credentials in a newly entered URL | medium | mitigate | `_check_url_shape` rejects userinfo unless `allow_userinfo` (config_flow.py:157); strict in user step (:285) and reconfigure (:435), opt-out only for yaml (:318) and reauth (:372); tests/test_config_flow.py:189,361; tests/test_reconfigure.py:182 | closed |
+| T-04-21 | Denial of service / Repudiation | Bare ValueError from aiohttp request construction | medium | mitigate | `except ValueError` -> `TraefikProxyInvalidUrlError` at both session call sites (api.py:206-209, 361-364); tests/test_coordinator.py:98, tests/test_api.py:239,278 | closed |
+| T-04-22 | Information disclosure | Message of the mapped error | low | mitigate | Message is `<path>: ValueError` (api.py:209,364); test_credentials_never_leak[request-construction-*] (tests/test_api.py:345) | closed |
+| T-04-23 | Denial of service | Request volume in paginated mode | medium | mitigate | Rawdata re-probe armed only after an elapsed hourly re-check (coordinator.py:168-171), one-shot flag cleared before await (api.py:304-306); test_request_budget_matrix rows (6)-(13), test_one_probe_per_arming_under_overlapping_calls (tests/test_api.py:602) | closed |
+| T-04-24 | Tampering | Probe outcome switching the client back | low | mitigate | `_paginated = False` only after `parse_rawdata` succeeds (api.py:286-290); test_rawdata_probe_other_failures_read_pages (tests/test_api.py:589) | closed |
+| T-04-25 | Spoofing / Information disclosure | Rejected credentials on the probe | low | mitigate | `TraefikProxyAuthError` re-raised before the broad except (api.py:280-281), no page request; test_rawdata_probe_auth_error_propagates (tests/test_api.py:566) | closed |
+| T-04-SC (04-07..04-09) | Tampering | Package installs | low | accept | AR-04-04 | closed |
 
 *Status: open · closed · open — below high threshold (non-blocking)*
 *Severity: critical > high > medium > low — only open threats at or above workflow.security_block_on count toward threats_open*
@@ -62,6 +72,9 @@ created: "2026-11-14"
 | Risk ID | Threat Ref | Rationale | Accepted By | Date |
 |---------|------------|-----------|-------------|------|
 | AR-04-01 | T-04-SC (04-02, 04-03, 04-04, 04-05, 04-06) | No npm/pip/cargo installs and no new runtime dependencies; aiohttp, cryptography, pytest-freezer are already provided by HA / the dev environment | Plan threat model (plan time) | 2026-11-14 |
+| AR-04-02 | T-04-18 | Cert refresh via `update_entity` is bounded by HA's default refresh debouncer (10 s cooldown, no custom debouncer in cert_coordinator.py), `TLS_SEMAPHORE = 4` and a 5 s handshake timeout; only authenticated HA users can call services; main cycles never probe (test_main_cycles_never_probe_certificates) | Plan threat model (plan time), verified by security audit | 2026-11-14 |
+| AR-04-03 | T-04-19 | Log noise only; no new add path in 04-07 (2 add calls per platform), listener count stays stable (test_cert_notifications_do_not_grow_listeners); fixed by the Phase 5 entity manager (M28) | Plan threat model (plan time), verified by security audit | 2026-11-14 |
+| AR-04-04 | T-04-SC (04-07, 04-08, 04-09) | No package installs; no change to pyproject.toml, uv.lock, manifest.json or hacs.json since fd3bd07 | Plan threat model (plan time), verified by security audit | 2026-11-14 |
 
 *Accepted risks do not resurface in future audit runs.*
 
@@ -72,6 +85,7 @@ created: "2026-11-14"
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-11-14 | 18 | 18 | 0 | execute-phase orchestrator (secure-phase, ASVS L1 grep-depth short-circuit) |
+| 2026-11-14 | 10 (gap plans 04-07..04-09: T-04-17..T-04-25, T-04-SC) | 10 | 0 | gsd-security-auditor (ASVS L1, 50 named tests run at a747f59); 3 low accept rows closed via AR-04-02..04 |
 
 ---
 
@@ -83,3 +97,11 @@ created: "2026-11-14"
 - [x] `status: verified` set in frontmatter
 
 **Approval:** verified 2026-11-14
+
+## Security Audit 2026-11-14
+
+| Metric | Count |
+|---|---|
+| Threats found | 10 |
+| Closed | 10 |
+| Open | 0 |
