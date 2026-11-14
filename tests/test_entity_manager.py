@@ -1,4 +1,4 @@
-"""Lifecycle of per-item entities through the entity manager (router kind).
+"""Lifecycle of per-item entities through the entity manager (routers, services, entrypoints).
 
 Full setups are served from the real captures; a router changes, appears or
 vanishes between two coordinator cycles by re-serving a modified rawdata.
@@ -23,7 +23,13 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.traefik_proxy.const import DOMAIN, ITEM_STATE_OPTIONS
-from custom_components.traefik_proxy.entity_manager import ROUTERS, KindSpec, TraefikEntityManager
+from custom_components.traefik_proxy.entity_manager import (
+    ENTRYPOINTS,
+    ROUTERS,
+    SERVICES,
+    KindSpec,
+    TraefikEntityManager,
+)
 from tests.conftest import (
     FIXTURE_VERSIONS,
     MOCK_URL,
@@ -560,12 +566,9 @@ SERVICE = "file-ok-svc@file"
 
 
 def _service_entity_id(hass: HomeAssistant, entry: Any, key: str = SERVICE) -> str:
-    from custom_components.traefik_proxy.entity_manager import SERVICES
-
     return entity_id_for(hass, SERVICES.domain, SERVICES.unique_id(entry.entry_id, key))
 
 
-@pytest.mark.xfail(strict=True, reason="RED: service sensor attributes not yet canonical")
 @pytest.mark.parametrize("version", FIXTURE_VERSIONS)
 async def test_service_server_down_reaches_sensor_next_cycle(
     hass, aioclient_mock, mock_tls_probe, version: str
@@ -597,8 +600,9 @@ async def test_service_server_down_reaches_sensor_next_cycle(
     assert state.attributes["errors"] == ["boom"]
 
 
-@pytest.mark.xfail(strict=True, reason="RED: services not yet managed by the entity manager")
-async def test_new_service_appears_and_vanished_service_goes_missing(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+async def test_new_service_appears_and_vanished_service_goes_missing(
+    hass, aioclient_mock, mock_tls_probe, freezer
+) -> None:  # type: ignore[no-untyped-def]
     """A new service gets its sensor without reload; a vanished one stays registered with state missing."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
     entity_id = _service_entity_id(hass, entry)
@@ -616,11 +620,8 @@ async def test_new_service_appears_and_vanished_service_goes_missing(hass, aiocl
     assert er.async_get(hass).async_get(entity_id) is not None
 
 
-@pytest.mark.xfail(strict=True, reason="RED: entrypoints not yet managed by the entity manager")
-async def test_vanished_entrypoint_goes_missing(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+async def test_vanished_entrypoint_goes_missing(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
     """An enabled entrypoint sensor whose entrypoint vanished reads missing with missing_since."""
-    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
-
     entry = make_traefik_entry()
     entry.add_to_hass(hass)
     unique_id = ENTRYPOINTS.unique_id(entry.entry_id, "web")
@@ -641,11 +642,8 @@ async def test_vanished_entrypoint_goes_missing(hass, aioclient_mock, mock_tls_p
     assert er.async_get(hass).async_get(entity_id) is not None
 
 
-@pytest.mark.xfail(strict=True, reason="RED: services not yet on the Services sub-device")
 async def test_router_and_service_with_same_name_are_separate(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
     """A router and a service both named dup@file are two sensors on the Routers and Services sub-devices."""
-    from custom_components.traefik_proxy.entity_manager import SERVICES
-
     rawdata = rawdata_copy()
     rawdata["routers"]["dup@file"] = copy.deepcopy(rawdata["routers"][ROUTER])
     rawdata["services"]["dup@file"] = copy.deepcopy(rawdata["services"][SERVICE])

@@ -1,6 +1,6 @@
 """Unit tests for the sensor platform entities.
 
-Covers TraefikProxyEntrypointSensor, TraefikProxyServiceSensor, and the three
+Covers TraefikServiceSensor, TraefikEntrypointSensor, and the three
 TraefikProxyXxxCountSensor aggregate counters. The coordinator is a MagicMock
 whose ``data`` is a real TraefikSnapshot built through the model parsers
 (``make_snapshot`` / ``snapshot_from_fixture``), so the assertions run on the
@@ -16,16 +16,15 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import EntityCategory
-from homeassistant.util import slugify
 
 from custom_components.traefik_proxy.const import DOMAIN, ITEM_STATE_OPTIONS, STATE_MISSING
 from custom_components.traefik_proxy.models import TraefikSnapshot
 from custom_components.traefik_proxy.sensor import (
-    TraefikProxyEntrypointSensor,
+    TraefikEntrypointSensor,
     TraefikProxyMiddlewaresCountSensor,
     TraefikProxyRoutersCountSensor,
     TraefikProxyServicesCountSensor,
-    TraefikProxyServiceSensor,
+    TraefikServiceSensor,
 )
 from tests.conftest import FIXTURE_VERSIONS, make_snapshot, snapshot_from_fixture
 
@@ -34,7 +33,8 @@ def _entry_with_snapshot(snapshot: TraefikSnapshot) -> tuple[MagicMock, MagicMoc
     """Build a (entry, coordinator) pair whose coordinator publishes ``snapshot``.
 
     The entry's ``runtime_data.coordinator`` slot holds the coordinator so
-    ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to it.
+    the entity base resolves ``self.coordinator`` to it; the entity manager
+    reports every item as present unless a test sets ``missing_since``.
     """
     entry = MagicMock()
     entry.entry_id = "test-entry"
@@ -53,76 +53,7 @@ def _routers(*statuses: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Entrypoint sensors
-# ---------------------------------------------------------------------------
-
-
-def test_entrypoint_sensor_state_from_address() -> None:
-    """TraefikProxyEntrypointSensor.native_value is the entrypoint address."""
-    snapshot = make_snapshot(entrypoints=[{"name": "websecure", "address": ":443"}])
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
-    assert entity.native_value == ":443"
-
-
-def test_entrypoint_sensor_entity_id_and_unique_id() -> None:
-    """Entrypoint entity_id follows the traefik_http_entrypoint_<slug> convention."""
-    snapshot = make_snapshot(entrypoints=[{"name": "websecure", "address": ":443"}])
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
-    assert entity.entity_id == f"sensor.traefik_http_entrypoint_{slugify('websecure')}"
-    assert entity.unique_id == "test-entry_http_entrypoint_websecure"
-
-
-def test_entrypoint_sensor_attributes_include_name_address_transport() -> None:
-    """Attributes expose name, address, the transport protocol and the name alias."""
-    snapshot = make_snapshot(
-        entrypoints=[{"name": "websecure", "address": ":443"}, {"name": "udp-ep", "address": ":9999/udp"}]
-    )
-    entry, coord = _entry_with_snapshot(snapshot)
-    tcp = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
-    udp = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["udp-ep"])
-    assert tcp.extra_state_attributes == {
-        "name": "websecure",
-        "address": ":443",
-        "transport": "tcp",
-        "entrypoint_name": "websecure",
-    }
-    assert udp.extra_state_attributes["transport"] == "udp"
-
-
-@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
-def test_entrypoint_sensors_from_capture(version: str) -> None:
-    """Every captured entrypoint yields its address and protocol."""
-    snapshot = snapshot_from_fixture(version)
-    entry, coord = _entry_with_snapshot(snapshot)
-    states = {
-        name: (
-            TraefikProxyEntrypointSensor(entry, coord, ep).native_value,
-            TraefikProxyEntrypointSensor(entry, coord, ep).extra_state_attributes["transport"],
-        )
-        for name, ep in snapshot.entrypoints.items()
-    }
-    assert states == {
-        "traefik": (":8080", "tcp"),
-        "udp-ep": (":9999/udp", "udp"),
-        "web": (":80", "tcp"),
-        "websecure": (":443", "tcp"),
-    }
-
-
-def test_entrypoint_sensor_reads_latest_snapshot() -> None:
-    """The entity resolves its model from the current snapshot on every read."""
-    snapshot = make_snapshot(entrypoints=[{"name": "web", "address": ":80"}])
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["web"])
-
-    coord.data = make_snapshot(entrypoints=[{"name": "web", "address": ":8081"}])
-    assert entity.native_value == ":8081"
-
-
-# ---------------------------------------------------------------------------
-# Service sensors
+# Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -136,76 +67,6 @@ def _lb_service(name: str, status: str, server_status: dict[str, str]) -> dict[s
         "loadBalancer": {"servers": [{"url": url} for url in server_status]},
         "serverStatus": server_status,
     }
-
-
-def test_service_sensor_state_is_service_status() -> None:
-    """TraefikProxyServiceSensor.native_value is the parsed service status."""
-    snapshot = make_snapshot(
-        services=[
-            _lb_service("ok@file", "enabled", {"http://192.0.2.1:80": "UP"}),
-            {"name": "broken@file", "status": "disabled", "error": ["boom"]},
-        ]
-    )
-    entry, coord = _entry_with_snapshot(snapshot)
-    ok = TraefikProxyServiceSensor(entry, coord, snapshot.services["ok@file"])
-    broken = TraefikProxyServiceSensor(entry, coord, snapshot.services["broken@file"])
-    assert ok.native_value == "enabled"
-    assert broken.native_value == "error"
-
-
-def test_service_sensor_server_counts_from_server_status() -> None:
-    """server_count counts every server, servers_up only the ones reported UP."""
-    snapshot = make_snapshot(
-        services=[
-            _lb_service(
-                "mixed@file",
-                "enabled",
-                {"http://192.0.2.10:80": "DOWN", "http://backend.example.com:80": "UP"},
-            )
-        ]
-    )
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["mixed@file"])
-    assert entity.extra_state_attributes == {
-        "name": "mixed@file",
-        "status": "enabled",
-        "type": "loadbalancer",
-        "server_count": 2,
-        "servers_up": 1,
-        "service_name": "mixed@file",
-    }
-
-
-@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
-def test_service_sensor_attributes_expose_no_backend_url(version: str) -> None:
-    """No service attribute carries the server list or any backend URL."""
-    snapshot = snapshot_from_fixture(version)
-    entry, coord = _entry_with_snapshot(snapshot)
-    for service in snapshot.services.values():
-        attrs = TraefikProxyServiceSensor(entry, coord, service).extra_state_attributes
-        assert "servers" not in attrs
-        assert not any("://" in str(value) for value in attrs.values()), service.name
-    mixed = TraefikProxyServiceSensor(entry, coord, snapshot.services["lb-mixed@file"]).extra_state_attributes
-    assert (mixed["server_count"], mixed["servers_up"]) == (2, 1)
-
-
-def test_service_sensor_entity_id_and_unique_id() -> None:
-    """Service entity_id follows the traefik_http_service_<slug> convention."""
-    snapshot = make_snapshot(services=[{"name": "whoami@docker", "status": "enabled"}])
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["whoami@docker"])
-    assert entity.entity_id == f"sensor.traefik_http_service_{slugify('whoami@docker')}"
-    assert entity.unique_id == "test-entry_http_service_whoami@docker"
-
-
-def test_service_sensor_reads_latest_snapshot() -> None:
-    """The service state follows the current snapshot without re-instantiation."""
-    snapshot = make_snapshot(services=[{"name": "svc@file", "status": "enabled"}])
-    entry, coord = _entry_with_snapshot(snapshot)
-    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["svc@file"])
-
-    coord.data = make_snapshot(services=[{"name": "svc@file", "status": "warning"}])
-    assert entity.native_value == "warning"
 
 
 # ---------------------------------------------------------------------------
@@ -401,11 +262,8 @@ SERVICE_ATTRIBUTES = {"type", "provider", "servers_up", "servers_total", "used_b
 MISSING_SINCE = datetime(2026, 11, 14, 8, 0, tzinfo=UTC)
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikServiceSensor not implemented yet")
 def test_service_sensor_shape() -> None:
     """ENUM sensor on the Services sub-device, translation_key service, unique_id kept, no explicit entity_id."""
-    from custom_components.traefik_proxy.sensor import TraefikServiceSensor
-
     entry, _coord = _entry_with_snapshot(make_snapshot(services=[{"name": "whoami@docker", "status": "enabled"}]))
     entity = TraefikServiceSensor(entry, "whoami@docker")
     assert entity.unique_id == "test-entry_http_service_whoami@docker"
@@ -417,14 +275,11 @@ def test_service_sensor_shape() -> None:
     assert entity.name == "whoami@docker"
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikServiceSensor not implemented yet")
 def test_service_sensor_state_and_attributes() -> None:
     """State is the Traefik status; attributes are exactly the canonical service keys."""
-    from custom_components.traefik_proxy.sensor import TraefikServiceSensor
-
     snapshot = make_snapshot(
         services=[
-            {**_lb_service("mixed@file", "enabled", {"http://192.0.2.10:80": "DOWN", "http://b.example.com:80": "UP"})},
+            _lb_service("mixed@file", "enabled", {"http://192.0.2.10:80": "DOWN", "http://b.example.com:80": "UP"}),
             {"name": "broken@file", "status": "disabled", "error": ["boom"], "usedBy": ["r@file"]},
         ]
     )
@@ -446,11 +301,8 @@ def test_service_sensor_state_and_attributes() -> None:
     assert broken.extra_state_attributes["used_by"] == ["r@file"]
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikServiceSensor not implemented yet")
 def test_service_without_server_status_reads_zero_of_zero() -> None:
     """No serverStatus: 0/0 servers, empty lists, and no service problem (all servers up, adjacency)."""
-    from custom_components.traefik_proxy.sensor import TraefikServiceSensor
-
     snapshot = make_snapshot(
         services=[
             {"name": "bare@file", "status": "enabled"},
@@ -464,12 +316,9 @@ def test_service_without_server_status_reads_zero_of_zero() -> None:
     assert snapshot.service_problems == ()
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikServiceSensor not implemented yet")
 @pytest.mark.parametrize("version", FIXTURE_VERSIONS)
 def test_service_sensor_attributes_are_private(version: str) -> None:
     """On both captures no service attribute carries a backend URL or address."""
-    from custom_components.traefik_proxy.sensor import TraefikServiceSensor
-
     snapshot = snapshot_from_fixture(version)
     entry, _coord = _entry_with_snapshot(snapshot)
     assert snapshot.services
@@ -483,11 +332,8 @@ def test_service_sensor_attributes_are_private(version: str) -> None:
     assert (mixed["servers_up"], mixed["servers_total"]) == (1, 2)
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikServiceSensor not implemented yet")
 def test_service_sensor_missing_and_latest_snapshot() -> None:
     """A service absent from the snapshot reads missing with missing_since; a present one follows the snapshot."""
-    from custom_components.traefik_proxy.sensor import TraefikServiceSensor
-
     entry, coord = _entry_with_snapshot(make_snapshot(services=[{"name": "svc@file", "status": "enabled"}]))
     entity = TraefikServiceSensor(entry, "svc@file")
     coord.data = make_snapshot(services=[{"name": "svc@file", "status": "warning"}])
@@ -499,11 +345,8 @@ def test_service_sensor_missing_and_latest_snapshot() -> None:
     assert entity.extra_state_attributes == {"missing_since": MISSING_SINCE.isoformat()}
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikEntrypointSensor not implemented yet")
 def test_entrypoint_sensor_shape() -> None:
     """Diagnostic, disabled by default, on the main device, unique_id kept, no explicit entity_id."""
-    from custom_components.traefik_proxy.sensor import TraefikEntrypointSensor
-
     entry, _coord = _entry_with_snapshot(make_snapshot(entrypoints=[{"name": "websecure", "address": ":443"}]))
     entity = TraefikEntrypointSensor(entry, "websecure")
     assert entity.unique_id == "test-entry_http_entrypoint_websecure"
@@ -514,12 +357,9 @@ def test_entrypoint_sensor_shape() -> None:
     assert entity.entity_id is None
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikEntrypointSensor not implemented yet")
 @pytest.mark.parametrize("version", FIXTURE_VERSIONS)
 def test_entrypoint_sensor_from_capture(version: str) -> None:
     """Every captured entrypoint reads its address with the single attribute protocol."""
-    from custom_components.traefik_proxy.sensor import TraefikEntrypointSensor
-
     snapshot = snapshot_from_fixture(version)
     entry, _coord = _entry_with_snapshot(snapshot)
     states = {
@@ -537,11 +377,8 @@ def test_entrypoint_sensor_from_capture(version: str) -> None:
     }
 
 
-@pytest.mark.xfail(strict=True, reason="RED: TraefikEntrypointSensor not implemented yet")
 def test_entrypoint_sensor_missing_and_latest_snapshot() -> None:
     """An entrypoint follows the snapshot and reads missing with missing_since once it is gone."""
-    from custom_components.traefik_proxy.sensor import TraefikEntrypointSensor
-
     entry, coord = _entry_with_snapshot(make_snapshot(entrypoints=[{"name": "web", "address": ":80"}]))
     entity = TraefikEntrypointSensor(entry, "web")
     coord.data = make_snapshot(entrypoints=[{"name": "web", "address": ":8081"}])

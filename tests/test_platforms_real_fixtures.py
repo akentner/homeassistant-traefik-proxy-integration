@@ -13,11 +13,10 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN, ITEM_STATE_OPTIONS
-from custom_components.traefik_proxy.entity_manager import ROUTERS
+from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS, ROUTERS, SERVICES
 from custom_components.traefik_proxy.models import Status, TraefikSnapshot
 from tests.conftest import (
     FIXTURE_VERSIONS,
@@ -79,31 +78,6 @@ async def test_router_sensors(hass, loaded: TraefikSnapshot) -> None:
     assert not [key for domain, key in router_keys if domain == "binary_sensor"]
 
 
-async def test_entrypoint_sensors(hass, loaded: TraefikSnapshot) -> None:
-    """Each entrypoint sensor shows its address; ``transport`` is the protocol."""
-    assert loaded.entrypoints
-    for name, entrypoint in loaded.entrypoints.items():
-        state = hass.states.get(f"sensor.traefik_http_entrypoint_{slugify(name)}")
-        assert state is not None, name
-        assert state.state == entrypoint.address
-        assert state.attributes["transport"] == entrypoint.protocol
-    assert {ep.protocol for ep in loaded.entrypoints.values()} == {"tcp", "udp"}
-
-
-async def test_service_sensors(hass, loaded: TraefikSnapshot) -> None:
-    """Each service sensor shows its status and the server counts from serverStatus."""
-    assert loaded.services
-    for name, service in loaded.services.items():
-        state = hass.states.get(f"sensor.traefik_http_service_{slugify(name)}")
-        assert state is not None, name
-        assert state.state == str(service.status)
-        assert state.attributes["server_count"] == service.servers_total
-        assert state.attributes["servers_up"] == service.servers_up
-    mixed = hass.states.get(f"sensor.traefik_http_service_{slugify('lb-mixed@file')}")
-    assert mixed is not None
-    assert (mixed.attributes["server_count"], mixed.attributes["servers_up"]) == (2, 1)
-
-
 async def test_count_sensors(hass, loaded: TraefikSnapshot) -> None:
     """The count sensors equal the snapshot totals."""
     for entity_id, counts in (
@@ -143,11 +117,8 @@ def _device_id(hass, entry_id: str, identifier: str) -> str:  # type: ignore[no-
     return matches[0]
 
 
-@pytest.mark.xfail(strict=True, reason="RED: service sensors not yet managed ENUM sensors")
 async def test_service_enum_sensors(hass, loaded: TraefikSnapshot) -> None:
     """Each service is an ENUM sensor on the Services sub-device with the canonical, private attributes."""
-    from custom_components.traefik_proxy.entity_manager import SERVICES
-
     assert loaded.services
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     registry = er.async_get(hass)
@@ -173,11 +144,8 @@ async def test_service_enum_sensors(hass, loaded: TraefikSnapshot) -> None:
     assert (mixed.attributes["servers_total"], mixed.attributes["servers_up"]) == (2, 1)
 
 
-@pytest.mark.xfail(strict=True, reason="RED: entrypoint sensors not yet diagnostic and disabled by default")
 async def test_entrypoint_sensors_diagnostic_and_disabled(hass, loaded: TraefikSnapshot) -> None:
     """Every entrypoint sensor is registered disabled by the integration, diagnostic, on the main device."""
-    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
-
     assert loaded.entrypoints
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     registry = er.async_get(hass)
@@ -191,12 +159,9 @@ async def test_entrypoint_sensors_diagnostic_and_disabled(hass, loaded: TraefikS
         assert hass.states.get(reg_entry.entity_id) is None, name
 
 
-@pytest.mark.xfail(strict=True, reason="RED: entrypoint sensors not yet address + protocol only")
 @pytest.mark.parametrize("version", FIXTURE_VERSIONS)
 async def test_enabled_entrypoint_sensors(hass, aioclient_mock, mock_tls_probe, version: str) -> None:  # type: ignore[no-untyped-def]
     """Entrypoint sensors enabled before setup show the address and the protocol."""
-    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
-
     expected = snapshot_from_fixture(version)
     entry = make_traefik_entry()
     entry.add_to_hass(hass)

@@ -3,9 +3,11 @@
 Entity count per config entry (after `async_setup_entry` returns):
 - 1 `TraefikRouterSensor` per Traefik HTTP router (Routers device), managed by
   the entry's entity manager
-- 1 `TraefikProxyEntrypointSensor` per Traefik entrypoint (HTTP Entrypoints device)
-- 1 `TraefikProxyServiceSensor` per Traefik HTTP service (HTTP Services device;
-  Traefik-internal ``@internal`` services are not part of the snapshot)
+- 1 `TraefikServiceSensor` per Traefik HTTP service (Services device), managed
+  by the entity manager; Traefik-internal ``@internal`` services are not part
+  of the snapshot
+- 1 `TraefikEntrypointSensor` per Traefik entrypoint (main device, diagnostic,
+  disabled by default), managed by the entity manager
 - 1 each of `TraefikProxyRoutersCountSensor`, `TraefikProxyServicesCountSensor`,
   `TraefikProxyMiddlewaresCountSensor` on the Overview device
 - 1 `TraefikProxyCertTimestampSensor` per probed TLS hostname
@@ -18,6 +20,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -25,7 +28,7 @@ from homeassistant.util import slugify
 
 from .const import ITEM_STATE_OPTIONS, STATE_MISSING
 from .entity import TraefikDevice, TraefikItemEntity, TraefikProxyCertEntity, TraefikProxyEntity
-from .entity_manager import ROUTERS
+from .entity_manager import ENTRYPOINTS, ROUTERS, SERVICES
 from .models import Entrypoint, Router, Service, StatusCounts
 from .tls import CertError, CertInfo, is_error
 
@@ -48,27 +51,38 @@ async def async_setup_entry(
     their state from the latest snapshot on every access.
     """
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
-    snapshot = coordinator.data
+    manager = entry.runtime_data.entity_manager
 
-    entry.runtime_data.entity_manager.async_add_kind(
+    manager.async_add_kind(
         ROUTERS,
         coordinator=coordinator,
         keys=lambda: coordinator.data.routers,
         factory=lambda key: TraefikRouterSensor(entry, key),
         async_add_entities=async_add_entities,
     )
-
-    entrypoint_entities = [TraefikProxyEntrypointSensor(entry, coordinator, ep) for ep in snapshot.entrypoints.values()]
-    service_entities = [TraefikProxyServiceSensor(entry, coordinator, svc) for svc in snapshot.services.values()]
+    manager.async_add_kind(
+        SERVICES,
+        coordinator=coordinator,
+        keys=lambda: coordinator.data.services,
+        factory=lambda key: TraefikServiceSensor(entry, key),
+        async_add_entities=async_add_entities,
+    )
+    manager.async_add_kind(
+        ENTRYPOINTS,
+        coordinator=coordinator,
+        keys=lambda: coordinator.data.entrypoints,
+        factory=lambda key: TraefikEntrypointSensor(entry, key),
+        async_add_entities=async_add_entities,
+    )
 
     # Aggregate counters on the Overview device read the snapshot counts.
-    aggregate_entities = [
-        TraefikProxyRoutersCountSensor(entry),
-        TraefikProxyServicesCountSensor(entry),
-        TraefikProxyMiddlewaresCountSensor(entry),
-    ]
-
-    async_add_entities([*entrypoint_entities, *service_entities, *aggregate_entities])
+    async_add_entities(
+        [
+            TraefikProxyRoutersCountSensor(entry),
+            TraefikProxyServicesCountSensor(entry),
+            TraefikProxyMiddlewaresCountSensor(entry),
+        ]
+    )
 
     # --- Cert timestamp sensors (TLS-01) ---
     # The cert coordinator lives next to the main coordinator on the entry's
@@ -159,43 +173,6 @@ async def async_setup_entry(
     # Register the combined listener for future cycles.
     entry.async_on_unload(cert_coordinator.async_add_listener(_cert_update_listener))
 
-    # Stale entity cleanup: entrypoints and services that disappear from the
-    # snapshot are removed from the entity registry on the next refresh cycle.
-    # Aggregate counters on the Overview device are never deleted — their
-    # unique_id prefix is ``_overview_`` and is skipped below.
-    registry = er.async_get(hass)
-
-    def _remove_stale_entrypoints() -> None:
-        if not coordinator.last_update_success:
-            return
-        current = set(coordinator.data.entrypoints)
-        prefix = f"{entry.entry_id}_http_entrypoint_"
-        for reg_entry in list(registry.entities.values()):
-            unique_id = reg_entry.unique_id or ""
-            if not unique_id.startswith(prefix):
-                continue
-            ep_name = unique_id.removeprefix(prefix)
-            if ep_name and ep_name not in current:
-                _LOGGER.debug("Removing stale entrypoint entity: %s", reg_entry.entity_id)
-                registry.async_remove(reg_entry.entity_id)
-
-    def _remove_stale_services() -> None:
-        if not coordinator.last_update_success:
-            return
-        current = set(coordinator.data.services)
-        prefix = f"{entry.entry_id}_http_service_"
-        for reg_entry in list(registry.entities.values()):
-            unique_id = reg_entry.unique_id or ""
-            if not unique_id.startswith(prefix):
-                continue
-            svc_name = unique_id.removeprefix(prefix)
-            if svc_name and svc_name not in current:
-                _LOGGER.debug("Removing stale service entity: %s", reg_entry.entity_id)
-                registry.async_remove(reg_entry.entity_id)
-
-    entry.async_on_unload(coordinator.async_add_listener(_remove_stale_entrypoints))
-    entry.async_on_unload(coordinator.async_add_listener(_remove_stale_services))
-
 
 class TraefikRouterSensor(TraefikItemEntity[Router], SensorEntity):
     """One ENUM sensor per Traefik HTTP router.
@@ -238,108 +215,74 @@ class TraefikRouterSensor(TraefikItemEntity[Router], SensorEntity):
         }
 
 
-class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
-    """One sensor per Traefik entrypoint.
+class TraefikServiceSensor(TraefikItemEntity[Service], SensorEntity):
+    """One ENUM sensor per Traefik HTTP service.
 
-    State = the entrypoint's listening address (e.g. ``":443"``); attributes
-    expose the raw ``name`` and the ``transport`` protocol (``tcp`` or
-    ``udp``) so dashboards can group by protocol. The model is looked up by
-    name in the latest snapshot on every read.
+    State = the service status, or ``missing`` while the service is absent
+    from the snapshot. A DOWN backend server shows in ``servers_up`` and in
+    the services problem aggregate; backend URLs are never exposed.
     """
 
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-        entrypoint: Entrypoint,
-    ) -> None:
-        entrypoint_name = entrypoint.name
-        super().__init__(entry, category="http_entrypoints", description_key=entrypoint_name)
-        self._item_name = entrypoint_name
-        self._initial_entrypoint = entrypoint
-        self._attr_unique_id = f"{entry.entry_id}_http_entrypoint_{entrypoint_name}"
-        self.entity_id = f"sensor.traefik_http_entrypoint_{slugify(entrypoint_name)}"
-        self._attr_name = entrypoint_name
+    _spec = SERVICES
+    _traefik_device = TraefikDevice.SERVICES
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "service"
 
-    @property
-    def _entrypoint(self) -> Entrypoint:
-        """Return the current model, or the last known one when it is not in the snapshot."""
-        return self.coordinator.data.entrypoints.get(self._item_name, self._initial_entrypoint)
+    def __init__(self, entry: TraefikProxyConfigEntry, key: str) -> None:
+        super().__init__(entry, key)
+        self._attr_options = list(ITEM_STATE_OPTIONS)
+
+    def _model(self) -> Service | None:
+        return self.coordinator.data.services.get(self._key)
 
     @property
     def native_value(self) -> str:
-        """Return the listening address (e.g., ``":443"``).
-
-        Kept raw including the leading ``:`` — this matches Traefik's own
-        display format and avoids ambiguity when the bind host is included
-        (``"0.0.0.0:443"`` vs ``":443"``).
-        """
-        return self._entrypoint.address
+        """Return the service status, or ``missing``."""
+        service = self._model()
+        return STATE_MISSING if service is None else str(service.status)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        ep = self._entrypoint
+        service = self._model()
+        if service is None:
+            return self._missing_attributes()
         return {
-            "name": ep.name,
-            "address": ep.address,
-            "transport": ep.protocol,
-            "entrypoint_name": ep.name,
+            "type": service.type,
+            "provider": service.provider,
+            "servers_up": service.servers_up,
+            "servers_total": service.servers_total,
+            "used_by": list(service.used_by),
+            "errors": list(service.errors),
         }
 
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
 
+class TraefikEntrypointSensor(TraefikItemEntity[Entrypoint], SensorEntity):
+    """One diagnostic sensor per Traefik entrypoint, disabled by default.
 
-class TraefikProxyServiceSensor(TraefikProxyEntity, SensorEntity):
-    """One sensor per Traefik HTTP service.
-
-    State = the service status (``enabled``, ``warning``, ``error`` or
-    ``disabled``). Attributes expose the service ``type`` and the backend
-    server counts from Traefik's health status (``server_count`` = all
-    servers, ``servers_up`` = servers reported ``UP``). The model is looked
-    up by name in the latest snapshot on every read.
+    State = the listening address as Traefik reports it (e.g. ``":443"``),
+    or ``missing`` while the entrypoint is absent from the snapshot.
     """
 
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-        service: Service,
-    ) -> None:
-        service_name = service.name
-        super().__init__(entry, category="http_services", description_key=service_name)
-        self._item_name = service_name
-        self._initial_service = service
-        self._attr_unique_id = f"{entry.entry_id}_http_service_{service_name}"
-        self.entity_id = f"sensor.traefik_http_service_{slugify(service_name)}"
-        self._attr_name = service_name
+    _spec = ENTRYPOINTS
+    _attr_translation_key = "entrypoint"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
 
-    @property
-    def _service(self) -> Service:
-        """Return the current model, or the last known one when it is not in the snapshot."""
-        return self.coordinator.data.services.get(self._item_name, self._initial_service)
+    def _model(self) -> Entrypoint | None:
+        return self.coordinator.data.entrypoints.get(self._key)
 
     @property
     def native_value(self) -> str:
-        """Return the service status."""
-        return str(self._service.status)
+        """Return the listening address, or ``missing``."""
+        entrypoint = self._model()
+        return STATE_MISSING if entrypoint is None else entrypoint.address
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        svc = self._service
-        return {
-            "name": svc.name,
-            "status": str(svc.status),
-            "type": svc.type,
-            "server_count": svc.servers_total,
-            "servers_up": svc.servers_up,
-            "service_name": svc.name,
-        }
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
+        entrypoint = self._model()
+        if entrypoint is None:
+            return self._missing_attributes()
+        return {"protocol": entrypoint.protocol}
 
 
 class _TraefikProxyAggregateCountSensor(TraefikProxyEntity, SensorEntity):

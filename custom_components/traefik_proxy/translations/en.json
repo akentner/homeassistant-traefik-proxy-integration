@@ -91,6 +91,15 @@
           "disabled": "Disabled",
           "missing": "Missing"
         }
+      },
+      "service": {
+        "state": {
+          "enabled": "Enabled",
+          "warning": "Warning",
+          "error": "Error",
+          "disabled": "Disabled",
+          "missing": "Missing"
+        }
       }
     }
   }
