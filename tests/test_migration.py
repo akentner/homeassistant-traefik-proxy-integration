@@ -319,19 +319,15 @@ async def test_user_disabled_router_stays_disabled(hass: HomeAssistant, aioclien
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "2"}
 
 
-_STRICT_RED = pytest.mark.xfail(strict=True, reason="RED: only USER-disabled routers are kept disabled")
-
-
 @pytest.mark.parametrize(
     ("old_disabled_by", "expected"),
     [
         pytest.param(er.RegistryEntryDisabler.USER, er.RegistryEntryDisabler.USER, id="user"),
-        pytest.param(er.RegistryEntryDisabler.DEVICE, er.RegistryEntryDisabler.USER, id="device", marks=_STRICT_RED),
+        pytest.param(er.RegistryEntryDisabler.DEVICE, er.RegistryEntryDisabler.USER, id="device"),
         pytest.param(
             er.RegistryEntryDisabler.INTEGRATION,
             er.RegistryEntryDisabler.INTEGRATION,
             id="integration",
-            marks=_STRICT_RED,
         ),
         pytest.param(None, None, id="enabled"),
     ],
@@ -382,7 +378,6 @@ async def test_disabled_router_replacement_keeps_disabled_state(
         )
 
 
-@pytest.mark.xfail(strict=True, reason="RED: DEVICE- and INTEGRATION-disabled routers get no replacement")
 async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant) -> None:
     """A second run with the disabled replacements present changes no registry entry and keeps one issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)

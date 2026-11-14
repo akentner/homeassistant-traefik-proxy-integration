@@ -18,7 +18,6 @@ import importlib
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
@@ -145,7 +144,6 @@ async def test_only_get_requests_reach_traefik(hass, aioclient_mock, mock_tls_pr
     assert methods == {"GET"}
 
 
-@pytest.mark.xfail(strict=True, reason="RED: the update listener stacks across reloads and survives unload")
 async def test_update_listener_registered_once_across_reloads(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
     """One update listener after setup and reload, one run per options change, none after unload."""
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(minor_version=2))

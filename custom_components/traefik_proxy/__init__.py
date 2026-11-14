@@ -40,10 +40,18 @@ ISSUE_ENTITIES_MIGRATED: Final = "entities_migrated"
 # unique_id suffix of the 0.3.0 reload button, removed by the 1.2 migration.
 _LEGACY_RELOAD_BUTTON_SUFFIX: Final = "diagnostics_reload"
 # Maps the disabled_by of a removed 0.3.0 router binary sensor to the one its
-# router sensor replacement is created with. Enabled router binary sensors get
-# no entry here: the platform creates their replacement as usual.
+# router sensor replacement is created with.
+# - DEVICE becomes USER: the user disabled the old "HTTP Routers" device, which
+#   is removed after setup, and Home Assistant clears a DEVICE disabler on the
+#   next update of the enabled Routers sub-device.
+# - INTEGRATION could only come from the entry's "disable new entities"
+#   preference and is kept as it is.
+# Enabled and CONFIG_ENTRY-disabled router binary sensors get no entry here:
+# the platform creates their replacement as usual.
 _ROUTER_REPLACEMENT_DISABLED_BY: Final[dict[er.RegistryEntryDisabler, er.RegistryEntryDisabler]] = {
     er.RegistryEntryDisabler.USER: er.RegistryEntryDisabler.USER,
+    er.RegistryEntryDisabler.DEVICE: er.RegistryEntryDisabler.USER,
+    er.RegistryEntryDisabler.INTEGRATION: er.RegistryEntryDisabler.INTEGRATION,
 }
 
 
@@ -57,9 +65,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     1.1 -> 1.2: remove this entry's router binary sensors (replaced by router
     sensors with new entity IDs) and the reload button, and enable the three
     problem aggregates where only the old disabled-by-default disabled them.
-    A disabled router binary sensor is replaced by a disabled router sensor
-    with the same unique_id and the old object id. User-disabled entities
-    stay disabled; no surviving entity is renamed or re-IDed. A persistent repair issue explains the change when anything was
+    A router binary sensor disabled by the user, through its device or by the
+    entry's "disable new entities" preference is replaced by a disabled router
+    sensor with the same unique_id and the old object id (user- and
+    device-disabled ones as user-disabled). User-disabled entities stay
+    disabled; no surviving entity is renamed or re-IDed. A persistent repair issue explains the change when anything was
     removed. An entry from a newer major version fails (downgrade).
     """
     if entry.version > 1:
@@ -243,17 +253,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Safe order (D-15): the platforms have re-pointed every entity they add
-    # to the new devices, so only legacy devices nothing references are removed.
+    # Safe order: the platforms have re-pointed every entity they add to the
+    # new devices, so only legacy devices nothing references are removed.
     async_remove_legacy_devices(hass, entry)
     entry.async_on_unload(async_track_sw_version(hass, entry, main.id))
 
-    # Bind the Options-update listener. HA fires it whenever entry.options
-    # (Options Flow submit) OR entry.data (reconfigure flow / reauth flow)
-    # changes. The listener mutates coordinator.update_interval live; HA's
-    # standard data-change handling takes care of full reloads for URL
-    # changes (see async_setup_entry being re-invoked).
-    entry.add_update_listener(_async_options_updated)
+    # HA fires the update listener whenever entry.options (Options Flow) or
+    # entry.data (reconfigure / reauth flow) changes. HA does not clear update
+    # listeners on unload by itself, so the remover is registered through
+    # entry.async_on_unload: unload removes it and a reload adds exactly one.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     _LOGGER.debug(
         "Traefik integration ready: entry_id=%s, scan_interval=%ss",
@@ -266,8 +275,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
 async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
     """Unload a Traefik config entry.
 
-    HA removes the update listener automatically as part of entry unload,
-    so we do not need explicit teardown here.
+    Unloads the platforms. Home Assistant then runs every callback the setup
+    registered through ``entry.async_on_unload`` (the update listener remover,
+    timers and coordinator listeners).
     """
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
