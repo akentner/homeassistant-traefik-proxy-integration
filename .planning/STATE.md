@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 05
 current_phase_name: Entity model + lifecycle
-status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-11-14T22:47:56.495Z"
+status: verifying
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-11-14T22:57:35.417Z"
 last_activity: 2026-11-14
-last_activity_desc: Phase 05 execution started
-state_head: 3ede5f7098c7bb06406c87ea3d7062167ff6fc3f
+last_activity_desc: 05-08 gap closure executed
+state_head: 19cbb4272c9089e5036803bfcffea0f747432e31
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 28
-  completed_plans: 27
+  completed_plans: 28
 milestone_name: milestone
 ---
 
@@ -30,10 +30,10 @@ failing, and which TLS certificates are expiring soon.
 
 ## Current Position
 
-Phase: 05 (Entity model + lifecycle) — READY TO EXECUTE
-Plan: 7 of 7
-Status: Ready to execute
-Last activity: 2026-11-14 — Phase 05 execution started
+Phase: 05 (Entity model + lifecycle) — EXECUTED, READY FOR VERIFICATION
+Plan: 8 of 8
+Status: Phase complete — ready for verification
+Last activity: 2026-11-14 — 05-08 gap closure executed (CR-01, WR-01, WR-02)
 
 Progress: [█████░░░░░] 50% (3 of 8 phases)
 
@@ -91,6 +91,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | Phase 05 P05 | 7min | 1 tasks | 9 files |
 | Phase 05 P06 | 13min | 1 tasks | 9 files |
 | Phase 05 P07 | 14min | 3 tasks | 11 files |
+| Phase 05 P08 | 8min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -164,6 +165,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: async_remove_legacy_devices removes only devices with exactly one legacy identifier and no current identifier, and only while no registry entry (disabled included) references them
 - [Phase 05]: 05-07: cross-entry tests use a user-disabled second entry, because setting up the integration sets up every enabled entry of the domain
 - [Phase 05]: 05-07: zero-write tests snapshot State.last_reported values; HA updates last_reported in place
+- [Phase 05]: 05-08: Disabled 0.3.0 router binary sensors are replaced by disabled router sensors (USER->USER, DEVICE->USER, INTEGRATION->INTEGRATION) seeded with the old object id; name/area/icon not carried over
+- [Phase 05]: 05-08: Update listener registered via entry.async_on_unload(entry.add_update_listener(...))
+- [Phase 05]: 05-08: _async_remove_device_if_unreferenced is the single device-removal path in entity.py (per-item off and legacy cleanup)
 
 ### Pending Todos
 
@@ -205,7 +209,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T22:01:41.569Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-11-14T22:57:35.327Z
+Stopped at: Completed 05-08-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)

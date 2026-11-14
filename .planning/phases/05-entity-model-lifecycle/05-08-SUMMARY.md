@@ -205,3 +205,7 @@ None.
 ## Next Phase Readiness
 
 Gap G6 and review findings CR-01, WR-01, WR-02 are closed; Phase 5 is ready for re-verification. ENT requirements stay Pending in REQUIREMENTS.md until phase completion (phase convention).
+
+## Self-Check: PASSED
+
+All 7 task commits (50bcc4c, 09241f2, 98602c2, c265fa5, 6ba969e, db2762c, 8c77e32) are ancestors of HEAD; all modified files exist.

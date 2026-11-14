@@ -345,7 +345,7 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 7/8 plans executed (7 sequential waves; 1 gap-closure plan)
+**Plans**: 8/8 plans executed (7 sequential waves; 1 gap-closure plan)
 
 Plans:
 **Wave 1**
@@ -368,7 +368,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 - [x] 05-07-PLAN.md — de.json + icons.json; 0.3.0 migration with persistent repair notice; legacy device cleanup, live sw_version, old bases removed, zero-write invariant (ENT-02, ENT-03, ENT-08, ENT-09)
-- [ ] 05-08-PLAN.md — Gap closure: migration keeps user-disabled routers disabled (CR-01/G6); update listener released on unload (WR-01); sub-device removal only when unreferenced (WR-02) (ENT-03, ENT-09, ENT-10)
+- [x] 05-08-PLAN.md — Gap closure: migration keeps user-disabled routers disabled (CR-01/G6); update listener released on unload (WR-01); sub-device removal only when unreferenced (WR-02) (ENT-03, ENT-09, ENT-10)
 
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task of this plan; no HA 2026.11-only API is used (D-20)
@@ -519,7 +519,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
-| 5. Entity model + lifecycle | 7/7 | In Progress | - |
+| 5. Entity model + lifecycle | 8/8 | In Progress | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
