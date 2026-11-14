@@ -1,7 +1,7 @@
 ---
 phase: 05-entity-model-lifecycle
 verified: 2026-11-14T23:24:07Z
-status: human_needed
+status: passed
 score: 90/90 must-haves verified
 covered_files:
   - ".planning/phases/05-entity-model-lifecycle/05-01-PLAN.md"
@@ -50,7 +50,20 @@ covered_files:
   - "tests/test_translations.py"
 covered_digest: "v4:sha256:8250352d818ee52c8daf327f8ec43c5a538a15653bc0f25c37f28d32742d8ae7"
 behavior_unverified: 0
-overrides_applied: 0
+overrides_applied: 3
+overrides:
+  - must_have: "05-02 prohibition ENT-01 (judgment tier): MUST NOT delete a registry entry on any path other than grace-period expiry, the per-item opt-out, the 0.3.0 migration or entry removal"
+    reason: "Verifier verdict HOLDS: entity-registry removals only at entity_manager.py:268 (async_purge), :335 (grace expiry), __init__.py:116/:119 (migration); the only device removal is guarded by _async_remove_device_if_unreferenced (entity.py:95)"
+    accepted_by: "manager (user sign-off, phase-5 execution)"
+    accepted_at: "2026-11-14T23:27:28Z"
+  - must_have: "05-06 prohibition ENT-07 (judgment tier): MUST NOT send any non-GET request to the Traefik API"
+    reason: "Verifier verdict HOLDS: api.py:185 is the only HTTP call (session.get); test_only_get_requests_reach_traefik green on HA 2026.3 and dev"
+    accepted_by: "manager (user sign-off, phase-5 execution)"
+    accepted_at: "2026-11-14T23:27:28Z"
+  - must_have: "05-07 prohibition ENT-09 (judgment tier): MUST NOT re-enable an entity the user disabled, rename or re-ID a surviving entity, or touch another config entry while migrating or cleaning up legacy devices"
+    reason: "Verifier verdict HOLDS on all three clauses after 05-08 (CR-01) and the review fix (CR-02, IN-05); covered by the green test-tier ENT-09 prohibitions of 05-08"
+    accepted_by: "manager (user sign-off, phase-5 execution)"
+    accepted_at: "2026-11-14T23:27:28Z"
 re_verification:
   previous_status: gaps_found
   previous_score: 76/79
@@ -73,20 +86,13 @@ advisory:
     category: other
     reason: "Raised by the re-review after the gap-closure round (reviewer scratch probe on HA 2026.3). Nothing is enabled, renamed or re-IDed; the state only arises from hand-edited storage or a crash between the two registry saves. Resolve with 'if device.disabled' in the legacy_device_ids comprehension (__init__.py:130)"
     evidence_status: "reproduced by the reviewer, but no goal clause or prohibition is violated (stricter than HA, never less strict)"
-human_verification:
-  - test: "Judgment-tier prohibition ENT-01 (05-02, verification: null, flagged): MUST NOT delete a registry entry on any path other than grace-period expiry, the per-item opt-out, the 0.3.0 migration or entry removal"
-    expected: "Confirm the non-authoritative verifier verdict: HOLDS. The only entity-registry removals in custom_components/traefik_proxy are entity_manager.py:268 (async_purge, per-item opt-out), entity_manager.py:335 (_async_remove_registry_entry, grace expiry), __init__.py:116 and :119 (0.3.0 router binary sensors and reload button in async_migrate_entry). The only device removal is entity.py:95 inside _async_remove_device_if_unreferenced, which returns early while any registry entry references the device, so a device removal cannot cascade into an entity removal. entity_manager.py:111 removes the missing-since Store (not a registry entry) on entry removal."
-    why_human: "Judgment-tier prohibition: by design (ADR-550 D4, probe-core dispositionForProhibition) never green from the verifier, whatever the evidence. Blocks the goal: no (verdict holds). To close: confirm, or add an override."
-  - test: "Judgment-tier prohibition ENT-07 (05-06, verification: null, flagged): MUST NOT send any non-GET request to the Traefik API"
-    expected: "Confirm the non-authoritative verifier verdict: HOLDS. api.py:185 is the only HTTP call (self._session.get). A grep for .post/.put/.patch/.delete/.request( in custom_components/traefik_proxy finds nothing. tests/test_init.py::test_only_get_requests_reach_traefik (setup, both coordinator refreshes, a real button press) asserts the recorded methods are exactly {GET} and passes on HA 2026.3 and the dev venv."
-    why_human: "Judgment-tier prohibition, never green by design. Blocks the goal: no. Wired enforcement exists, so you could also re-tier it to verification: test in 05-06-PLAN.md."
-  - test: "Judgment-tier prohibition ENT-09 (05-07, verification: null, flagged): MUST NOT re-enable an entity the user disabled, rename or re-ID a surviving entity, or touch another config entry's registry entries or devices while migrating or cleaning up legacy devices"
-    expected: "Confirm the non-authoritative verifier verdict: now HOLDS on all three clauses (it was VIOLATED on the re-enable clause before 05-08). Re-enable: router replacements keep the disabled and hidden state (USER/DEVICE -> USER, INTEGRATION kept); survivors on disabled legacy devices go DEVICE -> USER so async_device_modified cannot clear them; the only enabling write is aggregates with INTEGRATION -> None (the old disabled-by-default, D-18). Rename/re-ID and cross-entry: both loops iterate er.async_entries_for_config_entry(registry, entry.entry_id), async_legacy_devices lists only this entry's devices, and the DEVICE -> USER update passes only disabled_by. Tests: test_migration_from_1_1, test_device_disabled_mapping_is_scoped_and_idempotent (foreign entities on own and foreign legacy devices keep DEVICE), test_devices_of_other_entry_untouched, plus the 05-08 test-tier prohibitions, which are green."
-    why_human: "Judgment-tier prohibition, never green by design. Its content is now also covered by the 05-08 test-tier ENT-09 prohibitions (green). Blocks the goal: no."
-  - test: "Optional visual check in a real HA (2026.3 and 2026.10+) with an upgraded 0.3.0 entry, UI language German and English"
-    expected: "Device page shows 'Traefik (<host>)' with nested Routers/Services/Certificates sub-devices; router/service ENUM state labels and state icons render translated; the repair notice reads correctly; 'Refresh now' is under Diagnostic"
-    why_human: "Only frontend rendering is left. The backend side is proven by tests: device names in de and en (test_german_device_names), via_device_id links, translation key and placeholder parity, icons.json key coverage, entity_category. Blocks the goal: no (nice to confirm)."
+deferred:
+  - item: "Optional visual check in a real HA (2026.3 and 2026.10+), German and English, upgraded 0.3.0 entry: device nesting, translated ENUM state labels and icons, repair notice text, Refresh now under Diagnostic"
+    reason: "Non-blocking; backend side proven by tests. User decision: visual check later (Phase 8 or before release); tracked as UAT test 4 (skipped/deferred)"
+    accepted_by: "manager (user sign-off, phase-5 execution)"
 ---
+
+> **Closed (2026-11-14T23:27:28Z):** status set to `passed` after the manager signed off the three judgment-tier prohibitions (overrides in frontmatter). The optional visual check is deferred (UAT test 4).
 
 # Phase 5: Entity model + lifecycle Verification Report
 
