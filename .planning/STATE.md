@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
-status: executing
-stopped_at: Completed 04-05-PLAN.md
-last_updated: "2026-11-14T01:06:58.345Z"
+status: verifying
+stopped_at: Completed 04-06-PLAN.md
+last_updated: "2026-11-14T01:16:51.401Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: e5a554ddf3de8731fa997855c612489f4971e3b6
+state_head: 308f6693f39978be65271a84ec94e1aeabd7876b
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 16
+  completed_plans: 17
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
@@ -80,6 +80,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P03 | 7 min | 2 tasks | 3 files |
 | Phase 04 P04 | 9min | 3 tasks | 14 files |
 | Phase 04 P05 | 8min | 2 tasks | 14 files |
+| Phase 04 P06 | 7 min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -131,6 +132,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-05: Basic Authorization header built in api.py (base64 of UTF-8 user:password); aiohttp 3.14 deprecates BasicAuth and HA 2026.3's aiohttp 3.13 lacks encode_basic_auth
 - [Phase 04]: 04-05: Auth rejects credentials its mode does not use and control characters; config flow maps that ValueError to invalid_auth
 - [Phase 04]: 04-05: TraefikProxyApiError(path, detail, *, status) — messages are '<path>: HTTP <status>' / '<path>: <ExceptionType>' / fixed description; reload_routers keeps 401/403 -> Auth, other non-2xx -> base error until Phase 5
+- [Phase 04]: 04-06: One GET /api/rawdata per steady cycle; a rawdata 404 switches the client to the paginated list endpoints for its lifetime; 401/500/shape errors do not fall back
+- [Phase 04]: 04-06: /api/version re-checked hourly and after a failed cycle; /api/entrypoints only when version or start date changed; stored version replaced only after the entrypoint fetch succeeded
+- [Phase 04]: 04-06: A failing version re-check fails the whole cycle with the D-16 mapping (auth -> reauth, else UpdateFailed keeping the previous snapshot)
 
 ### Pending Todos
 
@@ -172,7 +176,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T01:06:58.298Z
-Stopped at: Completed 04-05-PLAN.md
+Last session: 2026-11-14T01:16:51.351Z
+Stopped at: Completed 04-06-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)

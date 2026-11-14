@@ -177,7 +177,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       dataclasses in `models.py` (`Router`, `Service`, `Middleware`,
       `Entrypoint`, `TraefikVersion`, `TraefikSnapshot`) with a `Status`
       `StrEnum`; platforms never inspect raw API dicts. (A-10)
-- [ ] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
+- [x] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
       (unpaginated; routers, services incl. `serverStatus`, middlewares);
       `/api/version` and `/api/entrypoints` are fetched at setup; the version is
       re-checked at most hourly and after a failed cycle recovers, and
@@ -199,7 +199,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 - [x] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
       `dict[name, Model]` per kind and aggregates (counts per status, problem
       lists) computed once per cycle; `always_update=False`. (P-02)
-- [ ] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
+- [x] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
       and v3.x, redacted, and regenerable from a committed script; they cover
       providers, `error[]`, `serverStatus`, TLS domains and >100 items on the
       paginated path. (A-05, H-11)
@@ -437,12 +437,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-03 | Phase 1 | Complete (refined by DATA-07) |
 | TEST-04 | Phase 3 | Complete |
 | DATA-01 | Phase 4 | Complete |
-| DATA-02 | Phase 4 | Pending |
+| DATA-02 | Phase 4 | Complete |
 | DATA-03 | Phase 4 | Complete |
 | DATA-04 | Phase 4 | Complete |
 | DATA-05 | Phase 4 | Complete |
 | DATA-06 | Phase 4 | Complete |
-| DATA-07 | Phase 4 | Pending |
+| DATA-07 | Phase 4 | Complete |
 | ENT-01 | Phase 5 | Pending |
 | ENT-02 | Phase 5 | Pending |
 | ENT-03 | Phase 5 | Pending |
