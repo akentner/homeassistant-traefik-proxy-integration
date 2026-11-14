@@ -27,12 +27,6 @@ from tests.conftest import (
     stub_traefik,
 )
 
-FAILING_ENTITIES = (
-    "binary_sensor.traefik_any_router_failing",
-    "binary_sensor.traefik_any_service_failing",
-    "binary_sensor.traefik_any_middleware_failing",
-)
-
 
 @pytest.fixture(params=FIXTURE_VERSIONS)
 async def loaded(request, hass, aioclient_mock, mock_tls_probe) -> TraefikSnapshot:  # type: ignore[no-untyped-def]
@@ -88,18 +82,6 @@ async def test_count_sensors(hass, loaded: TraefikSnapshot) -> None:
         state = hass.states.get(entity_id)
         assert state is not None, entity_id
         assert int(state.state) == counts.total, entity_id
-
-
-async def test_failing_aggregates_registered_and_problems_present(hass, loaded: TraefikSnapshot) -> None:
-    """The any-*-failing entities are registered but disabled; the captures carry real problems."""
-    registry = er.async_get(hass)
-    for entity_id in FAILING_ENTITIES:
-        reg_entry = registry.async_get(entity_id)
-        assert reg_entry is not None, entity_id
-        assert reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
-    assert "broken-missing-service@file" in loaded.router_problems
-    assert loaded.routers["broken-missing-service@file"].status is Status.error
-    assert "lb-mixed@file" in loaded.service_problems
 
 
 SERVICE_ATTRIBUTES = {"type", "provider", "servers_up", "servers_total", "used_by", "errors"}
@@ -189,7 +171,6 @@ PROBLEM_UNIQUE_ID_SUFFIXES = {
 }
 
 
-@pytest.mark.xfail(strict=True, reason="RED: problem aggregates still disabled by default")
 async def test_problem_aggregates_enabled_and_on(hass, loaded: TraefikSnapshot) -> None:
     """The three problem aggregates are enabled, uncategorised, on the main device and on for both captures."""
     entry = hass.config_entries.async_entries(DOMAIN)[0]

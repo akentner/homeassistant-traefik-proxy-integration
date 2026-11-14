@@ -28,6 +28,15 @@ ITEM_STATE_OPTIONS: Final = ("enabled", "warning", "error", "disabled", STATE_MI
 MISSING_GRACE_PERIOD: Final = timedelta(hours=24)
 MISSING_CHECK_INTERVAL: Final = timedelta(minutes=5)
 
+# Problem aggregates list at most this many names; problem_count carries the full number.
+MAX_PROBLEM_NAMES: Final = 50
+
+# Unique_id suffixes (after "<entry_id>_") of the problem aggregates. They keep
+# the historical "any_*_failing" form so existing entity_ids survive.
+UID_ROUTERS_PROBLEM: Final = "diagnostics_any_router_failing"
+UID_SERVICES_PROBLEM: Final = "diagnostics_any_service_failing"
+UID_MIDDLEWARES_PROBLEM: Final = "diagnostics_any_middleware_failing"
+
 # Clamps for Options Flow (Phase 2 — Plan 02-02 fills these in).
 # MIN_SCAN_INTERVAL/MAX_SCAN_INTERVAL bound the scan-interval knob
 # (CONTEXT.md D-09 — 15s lower bound keeps the API polite; 300s upper bound

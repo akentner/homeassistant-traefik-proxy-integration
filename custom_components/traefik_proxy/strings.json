@@ -101,6 +101,17 @@
           "missing": "Missing"
         }
       }
+    },
+    "binary_sensor": {
+      "routers_problem": {
+        "name": "Router problems"
+      },
+      "services_problem": {
+        "name": "Service problems"
+      },
+      "middlewares_problem": {
+        "name": "Middleware problems"
+      }
     }
   }
 }

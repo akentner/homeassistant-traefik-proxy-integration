@@ -8,9 +8,8 @@ Phase-3-specific contract pins:
   or a ``CertError`` so HA renders 'unknown' rather than 'off'.
 - ``threshold_days`` mutations flip the state IMMEDIATELY (D-08 live
   re-eval — no re-handshake needed).
-- ``_attr_entity_registry_enabled_default`` is ``True`` (D-03) — the
-  intentional inversion from Phase 2's M-12 default-off for
-  ``TraefikProxyAnyRouterFailingBinarySensor``.
+- ``_attr_entity_registry_enabled_default`` is ``True`` (D-03): the
+  certificate alarm is visible on a fresh install.
 - ``days_until_expiry`` + ``threshold_days`` are ALWAYS present in
   ``extra_state_attributes`` (D-04 + D-08).
 - ``device_class == PROBLEM`` (D-14).
@@ -26,10 +25,7 @@ import pytest
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass
 from homeassistant.util import slugify
 
-from custom_components.traefik_proxy.binary_sensor import (
-    TraefikProxyAnyRouterFailingBinarySensor,
-    TraefikProxyCertExpiryBinarySensor,
-)
+from custom_components.traefik_proxy.binary_sensor import TraefikProxyCertExpiryBinarySensor
 from custom_components.traefik_proxy.tls import CertError, CertInfo
 
 # ---------------------------------------------------------------------------
@@ -267,30 +263,3 @@ def test_state_transitions_when_threshold_changes() -> None:
     coord.threshold_days = 14
     coord.get_threshold = MagicMock(return_value=14)
     assert entity.is_on is True  # 10 <= 14 — alarm ON (live re-eval proven both ways)
-
-
-# ---------------------------------------------------------------------------
-# D-03 inversion pin vs. Phase 2's M-12
-# ---------------------------------------------------------------------------
-
-
-def test_distinct_from_any_router_failing_enabled_default() -> None:
-    """Phase 3 inverts Phase 2's default — pin the intentional divergence.
-
-    ``TraefikProxyAnyRouterFailingBinarySensor`` (Phase 2 M-12) is opt-in via
-    ``entity_registry_enabled_default=False`` because the
-    router-failure alarm is noisy. ``TraefikProxyCertExpiryBinarySensor``
-    (Phase 3 D-03) is ALWAYS ON by default because cert expiry is a
-    security-impacting event. The two classes MUST invert.
-    """
-    any_router_default: Any = TraefikProxyAnyRouterFailingBinarySensor.__dict__.get(
-        "__attr_entity_registry_enabled_default"
-    )
-    cert_expiry_default: Any = TraefikProxyCertExpiryBinarySensor.__dict__.get("__attr_entity_registry_enabled_default")
-    assert any_router_default is False, (
-        f"Phase 2 TraefikProxyAnyRouterFailingBinarySensor default must stay False; got {any_router_default!r}"
-    )
-    assert cert_expiry_default is True, (
-        f"Phase 3 TraefikProxyCertExpiryBinarySensor default must be True; got {cert_expiry_default!r}"
-    )
-    assert any_router_default is not cert_expiry_default  # explicit: inverted

@@ -1,15 +1,17 @@
 """Binary sensor entities for the Traefik integration.
 
-The platform provides the three any-*-failing aggregates on the diagnostics
-device and one certificate-expiring binary sensor per probed TLS host.
+The platform provides the router, service and middleware problem aggregates on
+the main device and one certificate-expiring binary sensor per probed TLS host.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorEntityDescription
 
 try:
     from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
@@ -18,16 +20,53 @@ except ImportError:  # HA releases before 2026.10 define it in the package
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .entity import TraefikProxyCertEntity, TraefikProxyEntity
+from .const import MAX_PROBLEM_NAMES, UID_MIDDLEWARES_PROBLEM, UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM
+from .entity import TraefikEntity, TraefikProxyCertEntity
+from .models import TraefikSnapshot
 from .sensor import _cert_cache_availability
 from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
     from .cert_coordinator import CertCoordinator
-    from .coordinator import TraefikProxyCoordinator
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# Entities read the coordinator snapshot; no per-entity polling.
+PARALLEL_UPDATES = 0
+
+
+@dataclass(frozen=True, kw_only=True)
+class TraefikProblemEntityDescription(BinarySensorEntityDescription):
+    """A problem aggregate: unique_id suffix and the snapshot problem names it reads."""
+
+    unique_id_suffix: str
+    problems_fn: Callable[[TraefikSnapshot], tuple[str, ...]]
+
+
+PROBLEM_SENSORS: tuple[TraefikProblemEntityDescription, ...] = (
+    TraefikProblemEntityDescription(
+        key="routers_problem",
+        translation_key="routers_problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        unique_id_suffix=UID_ROUTERS_PROBLEM,
+        problems_fn=lambda snapshot: snapshot.router_problems,
+    ),
+    TraefikProblemEntityDescription(
+        key="services_problem",
+        translation_key="services_problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        unique_id_suffix=UID_SERVICES_PROBLEM,
+        problems_fn=lambda snapshot: snapshot.service_problems,
+    ),
+    TraefikProblemEntityDescription(
+        key="middlewares_problem",
+        translation_key="middlewares_problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        unique_id_suffix=UID_MIDDLEWARES_PROBLEM,
+        problems_fn=lambda snapshot: snapshot.middleware_problems,
+    ),
+)
 
 
 async def async_setup_entry(
@@ -37,27 +76,11 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Traefik binary sensors of a config entry.
 
-    Adds the any-router-, any-service- and any-middleware-failing aggregates
-    (one each per entry, disabled by default; never removed, they fall to off
-    when nothing is failing) and one certificate-expiring binary sensor per
-    host in the certificate cache.
+    Adds the three problem aggregates (one each per entry, enabled by default;
+    they fall to off when nothing is wrong) and one certificate-expiring
+    binary sensor per host in the certificate cache.
     """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
-
-    any_failing_entity = TraefikProxyAnyRouterFailingBinarySensor(entry, coordinator)
-    # v0.2.0: parallel aggregates for services + middlewares so users get
-    # the same any-X-failing alarm pattern across all three Traefik
-    # categories. Single-instance (D-19), PROBLEM device_class, opt-in
-    # (entity_registry_enabled_default=False, PITFALLS M-12).
-    any_service_failing_entity = TraefikProxyAnyServiceFailingBinarySensor(entry, coordinator)
-    any_middleware_failing_entity = TraefikProxyAnyMiddlewareFailingBinarySensor(entry, coordinator)
-    async_add_entities(
-        [
-            any_failing_entity,
-            any_service_failing_entity,
-            any_middleware_failing_entity,
-        ]
-    )
+    async_add_entities([TraefikProblemBinarySensor(entry, description) for description in PROBLEM_SENSORS])
 
     # --- Cert expiry binary sensors (TLS-02) ---
     # The cert coordinator lives next to the main coordinator on the entry's
@@ -136,119 +159,30 @@ async def async_setup_entry(
     entry.async_on_unload(cert_coordinator.async_add_listener(_on_cert_update))
 
 
-class TraefikProxyAnyRouterFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """ON when at least one HTTP router is not ``enabled``.
+class TraefikProblemBinarySensor(TraefikEntity, BinarySensorEntity):
+    """On while the snapshot lists at least one problem item of the description's kind.
 
-    Reads the snapshot's precomputed router problems (status ``warning``,
-    ``error`` or ``disabled``). Traefik-internal routers are not part of the
-    snapshot. Single instance per config entry on the Diagnostics device,
-    disabled by default so the diagnostic entity does not clutter the
-    States panel until the user opts in.
+    Attributes: ``problems`` (sorted names, at most ``MAX_PROBLEM_NAMES``) and
+    ``problem_count`` (all of them).
     """
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_registry_enabled_default = False
+    entity_description: TraefikProblemEntityDescription
 
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-    ) -> None:
-        super().__init__(entry, category="diagnostics", description_key="any_router_failing")
-        self._attr_unique_id = f"{entry.entry_id}_diagnostics_any_router_failing"
-        self.entity_id = "binary_sensor.traefik_any_router_failing"
-        self._attr_name = "Any router failing"
+    def __init__(self, entry: TraefikProxyConfigEntry, description: TraefikProblemEntityDescription) -> None:
+        super().__init__(entry, f"{entry.entry_id}_{description.unique_id_suffix}")
+        self.entity_description = description
+
+    def _problems(self) -> tuple[str, ...]:
+        return self.entity_description.problems_fn(self.coordinator.data)
 
     @property
     def is_on(self) -> bool:
-        return bool(self.coordinator.data.router_problems)
+        return bool(self._problems())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        problems = self.coordinator.data.router_problems
-        return {
-            "failing_router_count": len(problems),
-            "failing_router_names": list(problems),
-        }
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
-
-
-class TraefikProxyAnyServiceFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """ON when at least one HTTP service is not ``enabled`` or has a server down.
-
-    Reads the snapshot's precomputed service problems. Traefik-internal
-    services are not part of the snapshot. Same diagnostic placement and
-    disabled-by-default registration as the router aggregate.
-    """
-
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-    ) -> None:
-        super().__init__(entry, category="diagnostics", description_key="any_service_failing")
-        self._attr_unique_id = f"{entry.entry_id}_diagnostics_any_service_failing"
-        self.entity_id = "binary_sensor.traefik_any_service_failing"
-        self._attr_name = "Any service failing"
-
-    @property
-    def is_on(self) -> bool:
-        return bool(self.coordinator.data.service_problems)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        problems = self.coordinator.data.service_problems
-        return {
-            "failing_service_count": len(problems),
-            "failing_service_names": list(problems),
-        }
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
-
-
-class TraefikProxyAnyMiddlewareFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """ON when at least one HTTP middleware is not ``enabled``.
-
-    Reads the snapshot's precomputed middleware problems. Same diagnostic
-    placement and disabled-by-default registration as the router aggregate.
-    """
-
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-    ) -> None:
-        super().__init__(entry, category="diagnostics", description_key="any_middleware_failing")
-        self._attr_unique_id = f"{entry.entry_id}_diagnostics_any_middleware_failing"
-        self.entity_id = "binary_sensor.traefik_any_middleware_failing"
-        self._attr_name = "Any middleware failing"
-
-    @property
-    def is_on(self) -> bool:
-        return bool(self.coordinator.data.middleware_problems)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        problems = self.coordinator.data.middleware_problems
-        return {
-            "failing_middleware_count": len(problems),
-            "failing_middleware_names": list(problems),
-        }
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
+        problems = self._problems()
+        return {"problems": list(problems[:MAX_PROBLEM_NAMES]), "problem_count": len(problems)}
 
 
 class TraefikProxyCertExpiryBinarySensor(TraefikProxyCertEntity, BinarySensorEntity):
@@ -269,14 +203,6 @@ class TraefikProxyCertExpiryBinarySensor(TraefikProxyCertEntity, BinarySensorEnt
     still opt out per-entity via Settings → Devices & Services. The
     cert entity lives on the new "HTTP Routers TLS" device — the
     always-on default does NOT enable entities on any other device.
-
-    CONTEXT.md PITFALLS M-12 — this divergence is intentional: the user
-    wants the cert alarm always visible because cert expiry is a
-    security-impacting event that should not require opt-in. The
-    Phase 2 ``TraefikProxyAnyRouterFailingBinarySensor`` keeps the
-    ``entity_registry_enabled_default = False`` default because the
-    router-failure aggregate is a noisier "any router is non-enabled"
-    alarm that often reflects deployment churn (not a real outage).
 
     ``available`` DELEGATES to the shared
     ``sensor.py._cert_cache_availability`` helper (SUGGESTION #1 fix —
