@@ -106,9 +106,9 @@ recorded: 2026-11-14T02:42:06.836Z
 | IN-09 | info | open | - |
 | IN-10 | info | open | - |
 | IN-11 | info | open | - |
-| CR-01 | critical | open | - (not in the current review) |
-| WR-01 | warning | open | - (not in the current review) |
-| WR-02 | warning | open | - (not in the current review) |
+| CR-01 | critical | fixed | Plan 04-07 (a845757..90af13a); confirmed resolved by re-review cc26dfc |
+| WR-01 | warning | fixed | Plan 04-09 (87061f6..a93762a); confirmed resolved as scoped by re-review cc26dfc, follow-ups WR-09/WR-10 |
+| WR-02 | warning | fixed | Plan 04-08 (6890f51..73986d3); confirmed resolved by re-review cc26dfc, follow-ups IN-08/IN-09 |
 | WR-03 | warning | open | - (not in the current review) |
 | WR-04 | warning | deferred | Phase 5 (M28): entity manager with grace period (not in the current review) |
 | WR-05 | warning | deferred | Phase 5 (M28): entity manager adds only new unique_ids (not in the current review) |
