@@ -132,8 +132,8 @@ async def test_reload_service_verified_true_when_routers_change(hass, aioclient_
     await hass.async_block_till_done()
 
     # Stub client.reload_routers to do nothing extra (the POST is mocked above).
-    coordinator = entry.runtime_data
-    coordinator.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
+    runtime = entry.runtime_data
+    runtime.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
         return_value=None
     )
 
@@ -164,8 +164,8 @@ async def test_reload_service_verified_false_when_no_change_within_budget(hass, 
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = entry.runtime_data
-    coordinator.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
+    runtime = entry.runtime_data
+    runtime.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
         return_value=None
     )
 
@@ -208,7 +208,7 @@ async def test_reload_button_async_press_calls_service(hass, aioclient_mock) -> 
     """TraefikProxyReloadButton.async_press dispatches via hass.services.async_call.
 
     Proof of dispatch chain (button -> service -> handler -> client):
-    1. Replace ``coordinator.client.reload_routers`` with an AsyncMock spy.
+    1. Replace ``entry.runtime_data.client.reload_routers`` with an AsyncMock spy.
     2. Press the button.
     3. Assert the spy was called -> the handler ran -> the button dispatched
        via the service (NOT a direct client call).
@@ -230,11 +230,12 @@ async def test_reload_button_async_press_calls_service(hass, aioclient_mock) -> 
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = entry.runtime_data
+    runtime = entry.runtime_data
+    coordinator = runtime.coordinator
     # Spy on the handler's downstream effect: ``client.reload_routers`` is
     # only called from inside the service handler.
     spy = AsyncMock(return_value=None)
-    coordinator.client.reload_routers = spy  # type: ignore[attr-defined]
+    runtime.client.reload_routers = spy  # type: ignore[attr-defined]
     # Make the polling loop's ``async_request_refresh`` instant so the press
     # doesn't wait for the 5s budget. The router set never changes (mocked
     # routers are stable) so the handler still returns verified=False.
@@ -265,9 +266,10 @@ async def _setup_with_service(hass, aioclient_mock):  # type: ignore[no-untyped-
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = entry.runtime_data
+    runtime = entry.runtime_data
     spy = AsyncMock(return_value=None)
-    coordinator.client.reload_routers = spy  # type: ignore[attr-defined]
+    runtime.client.reload_routers = spy  # type: ignore[attr-defined]
+    coordinator = runtime.coordinator
     return coordinator, spy
 
 

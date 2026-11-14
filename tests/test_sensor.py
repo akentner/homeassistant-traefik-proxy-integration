@@ -30,7 +30,7 @@ def _entry(name: str = "traefik.example.com") -> MagicMock:
 
     Note: ``runtime_data`` is left unset — for sensors that read state
     from the coordinator, use :func:`_entry_with_data` instead which
-    wires the coordinator into ``entry.runtime_data`` so that
+    wires the coordinator into ``entry.runtime_data.coordinator`` so that
     ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to the
     data-bearing mock.
     """
@@ -51,14 +51,14 @@ def _coordinator_with(data: dict[str, Any] | None) -> MagicMock:
 def _entry_with_data(data: dict[str, Any] | None) -> tuple[MagicMock, MagicMock]:
     """Build a (entry, coordinator) pair wired together for entity tests.
 
-    The entry's ``runtime_data`` slot holds the coordinator so
+    The entry's ``runtime_data.coordinator`` slot holds the coordinator so
     ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to the mock
     that owns the data dict. Required for the v0.1.4+ property-based
     state derivation on the aggregate count sensors.
     """
     entry = _entry()
     coord = _coordinator_with(data)
-    entry.runtime_data = coord
+    entry.runtime_data = MagicMock(coordinator=coord)
     return entry, coord
 
 
@@ -208,7 +208,7 @@ def test_aggregate_count_updates_on_coordinator_cycle() -> None:
     assert entity.native_value == 0
 
     # Coordinator refresh brings new data
-    entry.runtime_data.data = {"http_routers": [{"name": "new"}, {"name": "another"}]}
+    entry.runtime_data.coordinator.data = {"http_routers": [{"name": "new"}, {"name": "another"}]}
     assert entity.native_value == 2  # updated without re-instantiation
 
 
@@ -223,7 +223,7 @@ def test_aggregate_attributes_refresh_with_coordinator_data() -> None:
     entity = TraefikProxyRoutersCountSensor(entry)
     assert entity.extra_state_attributes["http_count"] == 0
 
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [{"name": "a"}],
         "overview": {"http": {"routers": 1}},
     }
@@ -234,7 +234,7 @@ def test_aggregate_attributes_refresh_with_coordinator_data() -> None:
 def test_aggregate_returns_zero_when_coordinator_data_missing() -> None:
     """Cold-start case (coordinator.data is None): all counts 0, breakdown 0."""
     entry, _coord = _entry_with_data(None)
-    entry.runtime_data.last_update_success = False
+    entry.runtime_data.coordinator.last_update_success = False
     entity = TraefikProxyRoutersCountSensor(entry)
     assert entity.native_value == 0
     assert entity.extra_state_attributes["filtered_count"] == 0
@@ -474,7 +474,7 @@ def test_aggregate_breakdown_refreshes_on_coordinator_cycle() -> None:
     assert entity.extra_state_attributes["warning_count"] == 0
 
     # Coordinator refresh: warning shows up.
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {"name": "ok-1", "status": "enabled"},
             {"name": "ok-2", "status": "warning"},
@@ -488,7 +488,7 @@ def test_aggregate_breakdown_refreshes_on_coordinator_cycle() -> None:
 def test_aggregate_breakdown_handles_missing_data() -> None:
     """Cold start: coordinator.data is None → all breakdown attrs are 0."""
     entry, _coord = _entry_with_data(None)
-    entry.runtime_data.last_update_success = False
+    entry.runtime_data.coordinator.last_update_success = False
     entity = TraefikProxyRoutersCountSensor(entry)
     attrs = entity.extra_state_attributes
     assert attrs["filtered_count"] == 0

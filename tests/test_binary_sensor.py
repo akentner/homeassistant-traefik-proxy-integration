@@ -105,7 +105,7 @@ def test_ison_derives_from_status(status, expected):
     mock_entry = MagicMock()
     mock_entry.entry_id = "test-entry"
     mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = mock_coordinator
+    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
 
     entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
     assert entity.is_on is expected
@@ -126,7 +126,7 @@ def test_entity_id_uses_traefik_http_router_prefix():
     mock_entry = MagicMock()
     mock_entry.entry_id = "test-entry"
     mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = mock_coordinator
+    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
 
     entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
     assert entity.entity_id == f"binary_sensor.traefik_http_router_{slugify('my-router')}"
@@ -147,7 +147,7 @@ def test_extra_state_attributes_include_status_and_friendly_rule():
     mock_entry = MagicMock()
     mock_entry.entry_id = "test-entry"
     mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = mock_coordinator
+    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
 
     entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
     attrs = entity.extra_state_attributes
@@ -172,7 +172,7 @@ def test_extra_state_attributes_exposes_raw_name_for_dashboards():
     mock_entry = MagicMock()
     mock_entry.entry_id = "test-entry"
     mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = mock_coordinator
+    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
 
     entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
     attrs = entity.extra_state_attributes
@@ -196,7 +196,7 @@ def test_device_info_uses_per_category_identifier():
     mock_entry = MagicMock()
     mock_entry.entry_id = "test-entry"
     mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = mock_coordinator
+    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
 
     entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
     info = entity.device_info
@@ -216,7 +216,7 @@ def _entry_with_data(data: Any) -> MagicMock:
     """Helper: build a MagicMock entry with the given coordinator data.
 
     Mirrors ``_entry_with_data`` in test_sensor.py — wiring the coordinator
-    into ``entry.runtime_data`` so ``TraefikProxyEntity.__init__`` resolves
+    into ``entry.runtime_data.coordinator`` so ``TraefikProxyEntity.__init__`` resolves
     ``self.coordinator`` to the data-bearing mock.
     """
     coord = MagicMock()
@@ -225,7 +225,7 @@ def _entry_with_data(data: Any) -> MagicMock:
     entry = MagicMock()
     entry.entry_id = "test-entry"
     entry.data = {"url": "https://traefik.example.com:8080"}
-    entry.runtime_data = coord
+    entry.runtime_data = MagicMock(coordinator=coord)
     return entry
 
 
@@ -239,7 +239,7 @@ def test_any_service_failing_aggregates_status() -> None:
             ],
         }
     )
-    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data)
+    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data.coordinator)
     assert entity.is_on is True
     attrs = entity.extra_state_attributes
     assert attrs["failing_service_count"] == 1
@@ -256,7 +256,7 @@ def test_any_service_failing_disabled_when_all_enabled() -> None:
             ],
         }
     )
-    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data)
+    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data.coordinator)
     assert entity.is_on is False
     assert entity.extra_state_attributes["failing_service_count"] == 0
     assert entity.extra_state_attributes["failing_service_names"] == []
@@ -275,7 +275,7 @@ def test_any_middleware_failing_aggregates_status() -> None:
             ],
         }
     )
-    entity = TraefikProxyAnyMiddlewareFailingBinarySensor(entry, entry.runtime_data)
+    entity = TraefikProxyAnyMiddlewareFailingBinarySensor(entry, entry.runtime_data.coordinator)
     assert entity.is_on is True
     attrs = entity.extra_state_attributes
     assert attrs["failing_middleware_count"] == 2
@@ -285,12 +285,12 @@ def test_any_middleware_failing_aggregates_status() -> None:
 def test_any_failing_handles_missing_data() -> None:
     """Cold start: coordinator.data is None → is_on=None, attributes empty."""
     entry = _entry_with_data(None)
-    entry.runtime_data.last_update_success = False
+    entry.runtime_data.coordinator.last_update_success = False
     for cls in (
         TraefikProxyAnyServiceFailingBinarySensor,
         TraefikProxyAnyMiddlewareFailingBinarySensor,
     ):
-        entity = cls(entry, entry.runtime_data)
+        entity = cls(entry, entry.runtime_data.coordinator)
         assert entity.is_on is None
         # attributes always return a safe default
         attrs = entity.extra_state_attributes

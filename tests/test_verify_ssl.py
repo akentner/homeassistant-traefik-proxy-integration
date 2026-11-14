@@ -145,12 +145,14 @@ async def test_options_form_defaults_to_effective_value(hass, aioclient_mock) ->
 
 
 async def test_options_change_reaches_running_client(hass, aioclient_mock) -> None:
-    """(d) An options verify_ssl change rebuilds the client without a reload."""
+    """(d) An options verify_ssl change rebuilds the one client without a reload."""
     _stub_all_endpoints(aioclient_mock, MOCK_URL)
     entry = _make_entry(verify_ssl=True)
     await _setup_entry(hass, entry)
-    coordinator = entry.runtime_data
-    assert coordinator.client._verify_ssl is True
+    runtime = entry.runtime_data
+    old_client = runtime.client
+    assert runtime.coordinator.client is runtime.client
+    assert runtime.client._verify_ssl is True
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
@@ -161,8 +163,12 @@ async def test_options_change_reaches_running_client(hass, aioclient_mock) -> No
     await hass.async_block_till_done()
 
     assert entry.state is ConfigEntryState.LOADED
-    assert entry.runtime_data is coordinator
-    assert entry.runtime_data.client._verify_ssl is False
+    # Same runtime container (no reload), new client, and the coordinator
+    # uses exactly that client (no drift between the two).
+    assert entry.runtime_data is runtime
+    assert runtime.client is not old_client
+    assert runtime.client._verify_ssl is False
+    assert runtime.coordinator.client is runtime.client
 
 
 async def test_reauth_probe_uses_effective_value(hass, aioclient_mock) -> None:
