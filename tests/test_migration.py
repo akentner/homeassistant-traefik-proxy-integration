@@ -402,6 +402,60 @@ async def test_disabled_router_replacement_keeps_disabled_state(
         )
 
 
+@pytest.mark.xfail(strict=True, reason="IN-05: hidden_by of router binary sensors is not carried over yet")
+@pytest.mark.parametrize(
+    ("old_disabled_by", "hidden_by"),
+    [
+        pytest.param(None, er.RegistryEntryHider.USER, id="enabled-user"),
+        pytest.param(er.RegistryEntryDisabler.USER, er.RegistryEntryHider.USER, id="disabled-user"),
+        pytest.param(None, er.RegistryEntryHider.INTEGRATION, id="enabled-integration"),
+    ],
+)
+async def test_hidden_router_replacement_stays_hidden(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    old_disabled_by: er.RegistryEntryDisabler | None,
+    hidden_by: er.RegistryEntryHider,
+) -> None:
+    """A hidden 0.3.0 router comes back hidden with the old object id; a visible one stays visible."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    hidden_old = _create(
+        hass,
+        entry,
+        "binary_sensor",
+        "http_router_file-ok@file",
+        object_id="traefik_http_router_file_ok_file",
+        disabled_by=old_disabled_by,
+    )
+    registry = er.async_get(hass)
+    registry.async_update_entity(hidden_old, hidden_by=hidden_by)
+    _create(hass, entry, "binary_sensor", "http_router_whoami@docker", object_id="traefik_http_router_whoami_docker")
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    assert registry.async_get(hidden_old) is None
+    replacement_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_file-ok@file")
+    assert replacement_id == "sensor.traefik_http_router_file_ok_file"
+    replacement = registry.async_get(replacement_id)
+    assert replacement is not None
+    assert replacement.hidden_by is hidden_by
+    assert replacement.disabled_by is old_disabled_by
+    assert replacement.device_id == _device(hass, ENTRY_ID, TraefikDevice.ROUTERS).id
+    assert (hass.states.get(replacement_id) is None) is (old_disabled_by is not None)
+
+    visible_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_whoami@docker")
+    assert visible_id != "sensor.traefik_http_router_whoami_docker"
+    visible = registry.async_get(visible_id)
+    assert visible is not None
+    assert visible.hidden_by is None
+    assert visible.disabled_by is None
+
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "2"}
+
+
 async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant) -> None:
     """A second run with the disabled replacements present changes no registry entry and keeps one issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
