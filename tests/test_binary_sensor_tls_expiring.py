@@ -97,6 +97,15 @@ def _entity(
     return TraefikProxyCertExpiryBinarySensor(_entry(), coord, host, cache_value)
 
 
+def test_entity_is_bound_to_cert_coordinator() -> None:
+    """The entity subscribes to the cert coordinator, not the main coordinator."""
+    entry = _entry()
+    coord = _coord()
+    entity = TraefikProxyCertExpiryBinarySensor(entry, coord, "api.example.com", _cert_info())
+    assert entity.coordinator is coord
+    assert entity.coordinator is not entry.runtime_data.coordinator
+
+
 # ---------------------------------------------------------------------------
 # is_on — D-03 signed-int semantics
 # ---------------------------------------------------------------------------
