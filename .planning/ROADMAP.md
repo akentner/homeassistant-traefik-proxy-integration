@@ -33,7 +33,7 @@ Decimal phases appear between their surrounding integers in numeric order.
       → per-router cert timestamp sensor + expiring binary_sensor (6-hour cadence)
       → TEST-04 test surface (123 tests passing)
 
-- [ ] **Phase 4: Data layer (correct + lean)** — typed models, one `GET /api/rawdata`
+- [x] **Phase 4: Data layer (correct + lean)** — typed models, one `GET /api/rawdata` (completed 2026-11-14)
       per cycle, auth modes + error taxonomy in the client, real Traefik fixtures,
       `TraefikRuntimeData`, snapshot coordinator with precomputed aggregates
 - [ ] **Phase 5: Entity model + lifecycle** — entity manager (add / missing / 24 h
@@ -268,7 +268,7 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
      do not fire when two consecutive snapshots are equal; the full test suite,
      `ruff` and `mypy --strict` are green and the existing entity set still
      reports correct states on both fixture generations.
-**Plans**: 9/9 plans executed (6 executed in 5 waves; 3 gap-closure plans in 2 waves)
+**Plans**: 9/9 plans complete (6 executed in 5 waves; 3 gap-closure plans in 2 waves)
 
 Plans:
 **Wave 1**
@@ -492,7 +492,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 1. Foundation | 4/4 | Complete    | 2026-07-05 |
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
-| 4. Data layer (correct + lean) | 9/9 | In Progress | - |
+| 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 0/TBD | Not started | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
