@@ -27,7 +27,8 @@ from .const import (
     DOMAIN,
     PLATFORMS,
 )
-from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator, build_api_client
+from .coordinator import TraefikProxyCoordinator, build_api_client
+from .data import TraefikProxyConfigEntry, TraefikRuntimeData
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,17 +68,18 @@ async def _async_handle_reload_routers(call: ServiceCall) -> dict[str, Any]:
     hass = call.hass
     t0 = time.monotonic()
 
-    # Find the first loaded Traefik coordinator. The integration is `service`
+    # Find the first loaded Traefik entry. The integration is `service`
     # type (one Traefik per config entry), so there should be exactly one
     # loaded entry in normal use.
-    coordinators = [
+    runtimes: list[TraefikRuntimeData] = [
         entry.runtime_data
         for entry in hass.config_entries.async_entries(DOMAIN)
         if entry.state is ConfigEntryState.LOADED
     ]
-    if not coordinators:
+    if not runtimes:
         raise HomeAssistantError("No loaded Traefik config entry to reload against")
-    coordinator: TraefikProxyCoordinator = coordinators[0]
+    runtime = runtimes[0]
+    coordinator = runtime.coordinator
 
     def _current_router_names() -> set[str]:
         """Snapshot of router names from the latest coordinator cycle."""
@@ -91,7 +93,7 @@ async def _async_handle_reload_routers(call: ServiceCall) -> dict[str, Any]:
 
     # Trigger the refresh. Raises TraefikProxyApiError -> HA surfaces as
     # service-call failure (the caller sees the error in the trace log).
-    await coordinator.client.reload_routers()
+    await runtime.client.reload_routers()
 
     # Poll the coordinator for an observable change. ``async_request_refresh``
     # is itself an awaitable that returns once the refresh cycle completes
@@ -180,10 +182,12 @@ async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigE
     by re-running ``async_setup_entry`` with the new URL, which rebuilds
     the API client + coordinator from scratch.
     """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data
+    runtime = entry.runtime_data
     scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    coordinator.update_interval = timedelta(seconds=scan_interval)
-    coordinator.client = build_api_client(hass, entry)
+    runtime.coordinator.update_interval = timedelta(seconds=scan_interval)
+    # The runtime data owns the only client; the coordinator reads it from
+    # there, so this one assignment switches every caller to the new client.
+    runtime.client = build_api_client(hass, entry)
     _LOGGER.debug(
         "Traefik options updated: entry_id=%s scan_interval=%ss",
         entry.entry_id,
@@ -194,49 +198,46 @@ async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigE
     # needed — threshold change is a UX concern, cert data is unchanged).
     # Defensive try/except so an options-mutation race never blocks the
     # listener from completing.
-    cert_coordinator = getattr(coordinator, "cert_coordinator", None)
-    if cert_coordinator is not None:
-        new_threshold = entry.options.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
-        try:
-            await cert_coordinator.async_set_threshold(new_threshold)
-        except Exception as err:  # final-resort catch-all; listener must complete
-            _LOGGER.debug(
-                "CertCoordinator.async_set_threshold raised (listener continues): %s",
-                err,
-            )
+    new_threshold = entry.options.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
+    try:
+        await runtime.cert_coordinator.async_set_threshold(new_threshold)
+    except Exception as err:  # final-resort catch-all; listener must complete
+        _LOGGER.debug(
+            "CertCoordinator.async_set_threshold raised (listener continues): %s",
+            err,
+        )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
     """Set up Traefik from a config entry.
 
-    Order matters (CONTEXT.md D-05/D-10):
+    Order matters:
 
-    1. Build main ``TraefikProxyCoordinator`` and await its first refresh —
-       first_refresh raises ``ConfigEntryNotReady`` on transient failure,
-       or ``ConfigEntryAuthFailed`` on 401/403 (auto-retried by HA on
-       NotReady, or surfaced to the reauth flow on AuthFailed).
-    2. Set ``entry.runtime_data = coordinator`` so the cert coordinator
-       can read the main coordinator's ``data`` dict in step 4.
-    3. Build the sibling ``CertCoordinator`` and attach it to the main
-       coordinator (PITFALLS #6 — NOT a runtime_data shape migration).
-    4. ``try/except``-guarded first refresh on the cert coordinator — a
-       TLS failure on the first cycle must NOT also raise
-       ``ConfigEntryNotReady`` (CONTEXT.md D-10). On failure we seed an
-       empty cache via ``async_set_updated_data({})`` so the platforms
-       see a defined state instead of awaiting an unfinished refresh.
-    5. Forward platforms (sensor, binary_sensor, button).
+    1. Build the API client and both coordinators, then assign
+       ``entry.runtime_data`` before any refresh: the main coordinator reads
+       its client from the runtime data, and the cert coordinator reads the
+       main coordinator's data through it.
+    2. Await the main coordinator's first refresh. It raises
+       ``ConfigEntryNotReady`` on transient failure (HA retries) or
+       ``ConfigEntryAuthFailed`` on 401/403 (reauth flow).
+    3. ``try/except``-guarded first refresh on the cert coordinator: a TLS
+       failure on the first cycle must not also raise
+       ``ConfigEntryNotReady``. On failure an empty cache is seeded via
+       ``async_set_updated_data({})`` so the platforms see a defined state
+       instead of awaiting an unfinished refresh.
+    4. Forward platforms (sensor, binary_sensor, button).
     """
+    client = build_api_client(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
-    await coordinator.async_config_entry_first_refresh()
-    entry.runtime_data = coordinator
-
-    # Phase 3: build and attach the cert coordinator (PITFALLS #6 sibling
-    # attach — entry.runtime_data shape is unchanged). The cert
-    # coordinator reads hostnames from the main coordinator's
-    # ``data["http_routers"]`` cache, which requires
-    # ``entry.runtime_data = coordinator`` to be set first.
     cert_coordinator = CertCoordinator(hass, entry)
-    coordinator.cert_coordinator = cert_coordinator
+    entry.runtime_data = TraefikRuntimeData(
+        client=client,
+        coordinator=coordinator,
+        cert_coordinator=cert_coordinator,
+    )
+
+    await coordinator.async_config_entry_first_refresh()
+
     _LOGGER.debug(
         "cert coordinator initialised: update_interval=%ds threshold=%d",
         int(cert_coordinator.update_interval.total_seconds()) if cert_coordinator.update_interval else 0,

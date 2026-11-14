@@ -8,7 +8,8 @@ from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEFAULT_NAME, DOMAIN
-from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator
+from .coordinator import TraefikProxyCoordinator
+from .data import TraefikProxyConfigEntry
 
 if TYPE_CHECKING:
     pass
@@ -57,7 +58,7 @@ class TraefikProxyEntity(CoordinatorEntity[TraefikProxyCoordinator]):
         *,
         description_key: str | None = None,
     ) -> None:
-        super().__init__(entry.runtime_data)
+        super().__init__(entry.runtime_data.coordinator)
         self._entry = entry
         self._category = category
         # Back-compat alias: the Phase 1 binary_sensor code reads

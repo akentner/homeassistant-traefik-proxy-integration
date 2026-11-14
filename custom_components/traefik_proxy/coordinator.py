@@ -1,4 +1,4 @@
-"""DataUpdateCoordinator for the Traefik integration (Phase 2 + Phase 3 sibling attach)."""
+"""DataUpdateCoordinator for the Traefik integration."""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from .const import (
 )
 
 if TYPE_CHECKING:
-    from .cert_coordinator import CertCoordinator
+    from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,9 +58,6 @@ class TraefikProxyData(TypedDict, total=False):
     overview: dict[str, Any]
 
 
-type TraefikProxyConfigEntry = ConfigEntry["TraefikProxyCoordinator"]
-
-
 def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
     """Return the verify_ssl value the user set last.
 
@@ -85,17 +82,12 @@ def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikPro
 class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikProxyData]):
     """Single polling point for Traefik state.
 
-    Phase 3 sibling attach (PITFALLS #6): the cert coordinator is stored as
-    ``cert_coordinator`` on this instance rather than as a separate
-    ``runtime_data`` shape. Existing accessors like
-    ``entry.runtime_data.client.reload_routers()`` keep working — the
-    ``entry.runtime_data`` value is the main ``TraefikProxyCoordinator`` itself,
-    with the cert coordinator as an additional attribute.
+    The coordinator does not own an API client. It reads the entry's one
+    client from ``entry.runtime_data`` (see :class:`TraefikRuntimeData`), so
+    the runtime data must be assigned before the first refresh.
     """
 
     config_entry: TraefikProxyConfigEntry
-    client: TraefikProxyApiClient
-    cert_coordinator: CertCoordinator | None = None
 
     def __init__(self, hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
         """Construct coordinator from a config entry's data + options."""
@@ -107,7 +99,11 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikProxyData]):
             name=entry.title or "Traefik",
             update_interval=timedelta(seconds=scan_interval),
         )
-        self.client = build_api_client(hass, entry)
+
+    @property
+    def client(self) -> TraefikProxyApiClient:
+        """Return the entry's API client (owned by the runtime data)."""
+        return self.config_entry.runtime_data.client
 
     async def _async_update_data(self) -> TraefikProxyData:
         """Fetch the six Traefik endpoints in parallel; map errors per CONTEXT.md D-07.

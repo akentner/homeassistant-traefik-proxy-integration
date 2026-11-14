@@ -7,15 +7,20 @@ hass.config_entries.async_setup (the proper HA entry machinery).
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from homeassistant.config_entries import ConfigEntryState
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
     CONF_URL,
     CONF_VERIFY_SSL,
     DOMAIN,
 )
+from custom_components.traefik_proxy.coordinator import TraefikProxyCoordinator
+from custom_components.traefik_proxy.data import TraefikRuntimeData
 
 MOCK_URL = "https://traefik.example.com:8080"
 
@@ -56,9 +61,7 @@ def _stub_all_endpoints(aioclient_mock, *, routers: list | None = None) -> None:
 
 
 async def test_setup_creates_coordinator_in_runtime_data(hass, aioclient_mock) -> None:
-    """Happy path: async_setup_entry creates the coordinator in entry.runtime_data."""
-    from custom_components.traefik_proxy.coordinator import TraefikProxyCoordinator
-
+    """Happy path: async_setup_entry stores a TraefikRuntimeData holding the coordinator."""
     _stub_all_endpoints(aioclient_mock)
 
     entry = _make_entry()
@@ -69,8 +72,10 @@ async def test_setup_creates_coordinator_in_runtime_data(hass, aioclient_mock) -
 
     assert result is True
     assert entry.state is ConfigEntryState.LOADED
-    assert isinstance(entry.runtime_data, TraefikProxyCoordinator)
-    assert entry.runtime_data.data["version"]["Version"] == "3.1.4"
+    assert isinstance(entry.runtime_data, TraefikRuntimeData)
+    assert isinstance(entry.runtime_data.coordinator, TraefikProxyCoordinator)
+    assert isinstance(entry.runtime_data.cert_coordinator, CertCoordinator)
+    assert entry.runtime_data.coordinator.data["version"]["Version"] == "3.1.4"
 
 
 async def test_unload_returns_to_not_loaded(hass, aioclient_mock) -> None:
@@ -142,3 +147,36 @@ async def test_runtime_data_verify_ssl_defaults_true(hass, aioclient_mock) -> No
     assert entry.state is ConfigEntryState.LOADED
     # verify_ssl defaults to True when neither options nor data provide it.
     assert entry.runtime_data.client._verify_ssl is True  # type: ignore[attr-defined]
+
+
+async def test_runtime_data_set_before_cert_first_refresh(hass, aioclient_mock) -> None:
+    """The cert coordinator's first refresh sees the runtime data and the main data."""
+    _stub_all_endpoints(aioclient_mock)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    seen: dict[str, bool] = {}
+
+    async def _record(self: CertCoordinator) -> dict:
+        runtime = self.config_entry.runtime_data
+        seen["is_runtime_data"] = isinstance(runtime, TraefikRuntimeData)
+        seen["main_data_present"] = runtime.coordinator.data is not None
+        return {}
+
+    with patch.object(CertCoordinator, "_async_update_data", _record):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert seen == {"is_runtime_data": True, "main_data_present": True}
+
+
+async def test_single_client_owner(hass, aioclient_mock) -> None:
+    """The coordinator uses the runtime data's client, not a copy of its own."""
+    _stub_all_endpoints(aioclient_mock)
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    runtime = entry.runtime_data
+    assert runtime.coordinator.client is runtime.client
