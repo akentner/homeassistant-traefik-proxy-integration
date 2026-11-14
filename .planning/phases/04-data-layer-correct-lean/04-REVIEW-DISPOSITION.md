@@ -3,6 +3,30 @@ phase: 04
 review: 04-REVIEW.md
 titles: json
 findings:
+  - id: WR-09
+    severity: warning
+    disposition: open
+    title: "The rawdata probe can be starved indefinitely: every post-failure version re-check resets its clock"
+  - id: WR-10
+    severity: warning
+    disposition: open
+    title: "The switch to pagination is committed even when the page reads fail in the same cycle (outage-wide 404)"
+  - id: IN-08
+    severity: info
+    disposition: open
+    title: "Request-construction errors on a stored entry retry setup forever with an unactionable reason"
+  - id: IN-09
+    severity: info
+    disposition: open
+    title: "`InvalidUrl` now routinely carries a credential-bearing URL in its exception args"
+  - id: IN-10
+    severity: info
+    disposition: open
+    title: "`_check_url_shape` lets `urlparse`'s `ValueError` escape (pre-existing, function changed in 04-08)"
+  - id: IN-11
+    severity: info
+    disposition: open
+    title: "Cert entities keep a redundant `_coordinator` alias of `self.coordinator`"
   - id: CR-01
     severity: critical
     disposition: open
@@ -67,31 +91,37 @@ findings:
     severity: info
     disposition: open
     title: "Dead `TYPE_CHECKING` block; sequential paginated reads contradict the stated constraint"
-open: 12
-total: 16
-recorded: 2026-11-14T01:26:55.869Z
+open: 18
+total: 22
+recorded: 2026-11-14T02:42:06.836Z
 ---
 
 # Phase 04: Code Review Disposition
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| CR-01 | critical | open | - |
-| WR-01 | warning | open | - |
-| WR-02 | warning | open | - |
-| WR-03 | warning | open | - |
-| WR-04 | warning | deferred | Phase 5 (M28): entity manager with grace period |
-| WR-05 | warning | deferred | Phase 5 (M28): entity manager adds only new unique_ids |
-| WR-06 | warning | open | - |
-| WR-07 | warning | open | - |
-| WR-08 | warning | open | - |
-| IN-01 | info | deferred | Phase 7 (M28): config flow / redirect handling |
-| IN-02 | info | open | - |
-| IN-03 | info | open | - |
-| IN-04 | info | deferred | Phase 7 (M28): rejected stored token starts reauth |
-| IN-05 | info | open | - |
-| IN-06 | info | open | - |
-| IN-07 | info | open | - |
+| WR-09 | warning | open | - |
+| WR-10 | warning | open | - |
+| IN-08 | info | open | - |
+| IN-09 | info | open | - |
+| IN-10 | info | open | - |
+| IN-11 | info | open | - |
+| CR-01 | critical | open | - (not in the current review) |
+| WR-01 | warning | open | - (not in the current review) |
+| WR-02 | warning | open | - (not in the current review) |
+| WR-03 | warning | open | - (not in the current review) |
+| WR-04 | warning | deferred | Phase 5 (M28): entity manager with grace period (not in the current review) |
+| WR-05 | warning | deferred | Phase 5 (M28): entity manager adds only new unique_ids (not in the current review) |
+| WR-06 | warning | open | - (not in the current review) |
+| WR-07 | warning | open | - (not in the current review) |
+| WR-08 | warning | open | - (not in the current review) |
+| IN-01 | info | deferred | Phase 7 (M28): config flow / redirect handling (not in the current review) |
+| IN-02 | info | open | - (not in the current review) |
+| IN-03 | info | open | - (not in the current review) |
+| IN-04 | info | deferred | Phase 7 (M28): rejected stored token starts reauth (not in the current review) |
+| IN-05 | info | open | - (not in the current review) |
+| IN-06 | info | open | - (not in the current review) |
+| IN-07 | info | open | - (not in the current review) |
 
 Dispositions: `open` (recorded, not yet triaged), `fixed`, `skipped`, `deferred`.
 Set `deferred` by hand and put the reason in the Source cell; both are preserved. A `|` in the reason is kept as prose and escaped on the next run.
