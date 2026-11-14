@@ -31,7 +31,7 @@ ROUTERS_PATH = "/api/http/routers"
 
 def _client(hass, page_size: int) -> TraefikProxyApiClient:  # type: ignore[no-untyped-def]
     """Build the client under test on HA's shared (mocked) session."""
-    return TraefikProxyApiClient(async_get_clientsession(hass), MOCK_URL, api_key="", page_size=page_size)
+    return TraefikProxyApiClient(async_get_clientsession(hass), MOCK_URL, api.Auth(), page_size=page_size)
 
 
 def _items(*names: str) -> list[dict[str, Any]]:
@@ -199,5 +199,5 @@ async def test_version_and_entrypoint_shape_errors(hass, aioclient_mock) -> None
 def test_page_size_defaults_to_module_constant(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without an explicit page_size the client reads DEFAULT_PAGE_SIZE at construction."""
     monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", 7)
-    client = TraefikProxyApiClient(None, MOCK_URL, api_key="")  # type: ignore[arg-type]
+    client = TraefikProxyApiClient(None, MOCK_URL, api.Auth())  # type: ignore[arg-type]
     assert client._page_size == 7
