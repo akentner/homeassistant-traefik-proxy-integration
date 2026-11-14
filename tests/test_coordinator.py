@@ -298,9 +298,20 @@ async def _refresh_paths(hass, aioclient_mock, coordinator: TraefikProxyCoordina
     return _requested_paths(aioclient_mock)
 
 
-async def test_request_budget_matrix(hass, aioclient_mock, freezer, mock_tls_probe) -> None:
-    """Exact requests per scenario: setup, steady, hourly, post-failure and restart."""
+async def test_request_budget_matrix(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """Exact requests per scenario.
+
+    Rawdata mode: setup, steady, hourly, post-failure and restart. Then the
+    paginated fallback after a rawdata 404 and its hourly rawdata re-probe:
+    no probe before the re-check interval, and a probe that succeeds
+    switches the client back to one rawdata request per cycle.
+    """
     assert timedelta(hours=1) == VERSION_RECHECK_INTERVAL
+    index = load_fixture("v3.7", "pages/index.json")
+    monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", index["per_page"])
+    pages = [f"/api/http/{kind}" for kind in ("routers", "services", "middlewares") for _page in index[kind]]
     stub_traefik(aioclient_mock)
 
     # (1) Setup reads version, entrypoints and the state.
@@ -344,6 +355,31 @@ async def test_request_budget_matrix(hass, aioclient_mock, freezer, mock_tls_pro
     # The next hourly re-check sees the stored pair again: no entrypoints request.
     freezer.tick(timedelta(hours=1))
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+
+    # (6) /api/rawdata answers 404: the same cycle falls back to the pages.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", *pages]
+    assert coordinator.last_update_success is True
+
+    # (7) A steady paginated cycle reads the pages only.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    # (11) Rawdata is back, but the re-check interval has not elapsed: no probe.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", json=load_fixture("v3.7", "rawdata.json"))
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    # (12) The hourly re-check retries rawdata once; success switches back.
+    freezer.tick(VERSION_RECHECK_INTERVAL)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (13) Back in rawdata mode: one request per cycle.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
 
 
 def _stub_failing_step(aioclient_mock, freezer, step: str, status: int) -> None:  # type: ignore[no-untyped-def]
