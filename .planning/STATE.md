@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 05
 current_phase_name: Entity model + lifecycle
-status: executing
-stopped_at: Completed 05-06-PLAN.md
-last_updated: "2026-11-14T21:46:31.468Z"
+status: verifying
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-11-14T22:01:41.654Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: f09400560abc98f925c16249be13b662d6c35ee4
+state_head: 5167c5ee79240f6d8e253f82c2e0c1cac57c1bbd
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 27
-  completed_plans: 26
+  completed_plans: 27
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 05 (Entity model + lifecycle) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-14 — Phase 05 execution started
 
 Progress: [█████░░░░░] 50% (3 of 8 phases)
@@ -90,6 +90,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | Phase 05 P04 | 5min | 1 tasks | 6 files |
 | Phase 05 P05 | 7min | 1 tasks | 9 files |
 | Phase 05 P06 | 13min | 1 tasks | 9 files |
+| Phase 05 P07 | 14min | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -160,6 +161,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: Cert entity names via translation_key + {host} placeholder ('{host} expiry' / '{host} expiring'); IN-11 closed
 - [Phase 05]: 05-06: Refresh button PARALLEL_UPDATES = 1 (serializes presses on top of the request-refresh debouncers)
 - [Phase 05]: 05-06: Refresh button keeps inherited CoordinatorEntity availability (unavailable while the main coordinator's last update failed)
+- [Phase 05]: 05-07: async_remove_legacy_devices removes only devices with exactly one legacy identifier and no current identifier, and only while no registry entry (disabled included) references them
+- [Phase 05]: 05-07: cross-entry tests use a user-disabled second entry, because setting up the integration sets up every enabled entry of the domain
+- [Phase 05]: 05-07: zero-write tests snapshot State.last_reported values; HA updates last_reported in place
 
 ### Pending Todos
 
@@ -201,7 +205,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T21:46:31.370Z
-Stopped at: Completed 05-06-PLAN.md
+Last session: 2026-11-14T22:01:41.569Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)

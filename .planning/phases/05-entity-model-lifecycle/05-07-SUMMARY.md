@@ -253,3 +253,8 @@ None. The plan's register covers every change:
 
 - Phase 5 plans are all executed. ENT requirements stay "Pending" in REQUIREMENTS.md until phase completion (convention).
 - Phase 7 bumps `MINOR_VERSION` to 3 and adds German config/options strings. The README/CLAUDE.md reload mentions stay in `deferred-items.md` for Phase 8.
+
+## Self-Check: PASSED
+
+- FOUND: translations/de.json, icons.json, tests/test_translations.py, tests/test_migration.py, tests/test_devices.py
+- FOUND commits: 21a8a43, ebcf631, 3a397a3, 090d156, 4a344b8, e483477 (ancestors of HEAD)
