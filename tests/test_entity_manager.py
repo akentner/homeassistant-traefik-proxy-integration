@@ -11,7 +11,7 @@ import dataclasses
 import logging
 from datetime import timedelta
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -39,10 +39,12 @@ from custom_components.traefik_proxy.entity_manager import (
     KindSpec,
     TraefikEntityManager,
 )
+from custom_components.traefik_proxy.tls import CertInfo
 from tests.conftest import (
     FIXTURE_VERSIONS,
     MOCK_URL,
     entity_id_for,
+    load_fixture,
     make_traefik_entry,
     rawdata_copy,
     restub_traefik,
@@ -790,3 +792,59 @@ async def test_per_item_default_keeps_router_and_service_entities(hass, aioclien
     reg_entry = er.async_get(hass).async_get(_service_entity_id(hass, entry))
     assert reg_entry is not None
     assert reg_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_services")].id
+
+
+async def test_unchanged_notifications_write_no_state(hass, aioclient_mock, freezer) -> None:  # type: ignore[no-untyped-def]
+    """With every entity enabled, forced and unchanged notifications write no state anywhere (ROADMAP SC3)."""
+    reference = dt_util.utcnow()
+
+    async def _fixed_cert(host: str, port: int, **_kwargs: Any) -> CertInfo:
+        return CertInfo(
+            host=host,
+            port=port,
+            not_after=reference + timedelta(days=30),
+            days_until_expiry=30,
+            subject=f"CN={host}",
+            issuer="CN=Test CA",
+            san=(host,),
+            fetched_at=reference,
+        )
+
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    # Pre-create the disabled-by-default entities enabled.
+    for name in load_fixture("v3.7", "entrypoints.json"):
+        registry.async_get_or_create(
+            ENTRYPOINTS.domain, DOMAIN, ENTRYPOINTS.unique_id(entry.entry_id, name["name"]), config_entry=entry
+        )
+    registry.async_get_or_create("sensor", DOMAIN, f"{entry.entry_id}_healthy_ratio", config_entry=entry)
+
+    with patch(
+        "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
+        AsyncMock(side_effect=_fixed_cert),
+    ):
+        await setup_traefik_entry(hass, aioclient_mock, entry)
+        reg_entries = er.async_entries_for_config_entry(registry, entry.entry_id)
+        assert not [reg.entity_id for reg in reg_entries if reg.disabled_by is not None]
+        states = {reg.entity_id: hass.states.get(reg.entity_id) for reg in reg_entries}
+        assert all(state is not None for state in states.values()), states
+        # HA updates last_reported in place on the same State object: keep the values.
+        before = {entity_id: state.last_reported for entity_id, state in states.items() if state is not None}
+        assert any(
+            reg.domain == ENTRYPOINTS.domain and reg.unique_id.startswith(f"{entry.entry_id}_{ENTRYPOINTS.prefix}")
+            for reg in reg_entries
+        )
+        runtime = entry.runtime_data
+
+        freezer.tick(timedelta(seconds=1))
+        runtime.coordinator.async_update_listeners()
+        runtime.cert_coordinator.async_set_updated_data(dict(runtime.cert_coordinator.data))
+        await runtime.coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+    assert runtime.coordinator.last_update_success
+    for entity_id, last_reported in before.items():
+        after = hass.states.get(entity_id)
+        assert after is not None
+        assert after.last_reported == last_reported, entity_id
