@@ -1,9 +1,12 @@
-"""Binary sensor entities for the Traefik integration."""
+"""Binary sensor entities for the Traefik integration.
+
+The platform provides the three any-*-failing aggregates on the diagnostics
+device and one certificate-expiring binary sensor per probed TLS host.
+"""
 
 from __future__ import annotations
 
 import logging
-import re
 from typing import TYPE_CHECKING, Any, cast
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -16,7 +19,6 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
 from .entity import TraefikProxyCertEntity, TraefikProxyEntity
-from .models import Router, Status
 from .sensor import _cert_cache_availability
 from .tls import CertError, CertInfo, is_error
 
@@ -27,42 +29,21 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_HOST_FROM_RULE = re.compile(r"Host\(`([^`]+)`\)")
-
-
-def _friendly_rule(rule: str | None) -> str | None:
-    """Extract first `Host(...)` match for the extra_state_attribute hint."""
-    if not rule:
-        return None
-    match = _HOST_FROM_RULE.search(rule)
-    return match.group(1) if match else None
-
 
 async def async_setup_entry(
     hass: Any,
     entry: TraefikProxyConfigEntry,
     async_add_entities: Any,
 ) -> None:
-    """Set up Traefik binary sensors for a config entry.
+    """Set up the Traefik binary sensors of a config entry.
 
-    Creates one ``TraefikProxyRouterBinarySensor`` per user-visible Traefik HTTP
-    router (CONTEXT.md D-06 / Phase 1 ROUTER-01) PLUS three aggregate
-    binary sensors on the Diagnostics device (CONTEXT.md D-14/D-19):
-
-    - ``TraefikProxyAnyRouterFailingBinarySensor``
-    - ``TraefikProxyAnyServiceFailingBinarySensor`` (v0.2.0)
-    - ``TraefikProxyAnyMiddlewareFailingBinarySensor`` (v0.2.0)
-
-    All aggregates are single instance per config entry — never deleted;
-    if the relevant list disappears the sensor falls to OFF (no items
-    failing) and stays.
+    Adds the any-router-, any-service- and any-middleware-failing aggregates
+    (one each per entry, disabled by default; never removed, they fall to off
+    when nothing is failing) and one certificate-expiring binary sensor per
+    host in the certificate cache.
     """
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
 
-    # The snapshot holds no Traefik-internal (``@internal``) routers.
-    router_entities = [
-        TraefikProxyRouterBinarySensor(entry, coordinator, router) for router in coordinator.data.routers.values()
-    ]
     any_failing_entity = TraefikProxyAnyRouterFailingBinarySensor(entry, coordinator)
     # v0.2.0: parallel aggregates for services + middlewares so users get
     # the same any-X-failing alarm pattern across all three Traefik
@@ -72,7 +53,6 @@ async def async_setup_entry(
     any_middleware_failing_entity = TraefikProxyAnyMiddlewareFailingBinarySensor(entry, coordinator)
     async_add_entities(
         [
-            *router_entities,
             any_failing_entity,
             any_service_failing_entity,
             any_middleware_failing_entity,
@@ -154,59 +134,6 @@ async def async_setup_entry(
     _create_pending_cert_binary_sensor_entities()
     # Register the combined listener for future cycles.
     entry.async_on_unload(cert_coordinator.async_add_listener(_on_cert_update))
-
-
-class TraefikProxyRouterBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """One binary_sensor per Traefik HTTP router."""
-
-    _attr_device_class = BinarySensorDeviceClass.RUNNING
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: TraefikProxyCoordinator,
-        router: Router,
-    ) -> None:
-        router_name = router.name
-        # Per-category device: identifier (DOMAIN, f"{entry.entry_id}_http_routers").
-        super().__init__(entry, category="http_routers", description_key=router_name)
-        self._item_name = router_name
-        self._initial_router = router
-        self._attr_unique_id = f"{entry.entry_id}_http_router_{router_name}"
-        # Explicit entity_id prefix per CONTEXT.md D-09/D-10.
-        self.entity_id = f"binary_sensor.traefik_http_router_{slugify(router_name)}"
-        self._attr_name = router_name
-
-    @property
-    def _router(self) -> Router:
-        """Return the current model of this router from the latest snapshot.
-
-        Falls back to the last known model when the router is not part of
-        the current snapshot.
-        """
-        return self.coordinator.data.routers.get(self._item_name, self._initial_router)
-
-    @property
-    def is_on(self) -> bool:
-        return self._router.status is Status.enabled
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        router = self._router
-        return {
-            "status": str(router.status),
-            "rule": router.rule,
-            "friendly_rule": _friendly_rule(router.rule),
-            "service": router.service,
-            # ``name`` is the raw Traefik router identifier. Useful on
-            # dashboards even when the entity_id slug mangles special characters.
-            "name": router.name,
-            "router_name": router.name,
-        }
-
-    @property
-    def available(self) -> bool:
-        return self.coordinator.last_update_success
 
 
 class TraefikProxyAnyRouterFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):

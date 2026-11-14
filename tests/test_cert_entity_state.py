@@ -21,7 +21,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
-from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.const import (
@@ -31,8 +30,9 @@ from custom_components.traefik_proxy.const import (
     CONF_VERIFY_SSL,
     DOMAIN,
 )
+from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.tls import CertError, CertInfo
-from tests.conftest import MOCK_URL, load_fixture, stub_traefik
+from tests.conftest import MOCK_URL, entity_id_for, load_fixture, stub_traefik
 
 # TLS hosts of the v3.7 capture (tls.domains and Host(...) rules).
 HOST = "secure.example.com"
@@ -42,7 +42,6 @@ EXPIRING = "binary_sensor.traefik_secure_example_com_expiring"
 OTHER_EXPIRING = "binary_sensor.traefik_www_secure_example_com_expiring"
 CERT = "sensor.traefik_secure_example_com_cert"
 OTHER_CERT = "sensor.traefik_www_secure_example_com_cert"
-ROUTER = f"binary_sensor.traefik_http_router_{slugify('secure@file')}"
 
 # Fixed reference instant so not_after values are deterministic.
 REFERENCE = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
@@ -193,6 +192,8 @@ async def test_cert_availability_follows_cert_coordinator_only(
     cert_coordinator = entry.runtime_data.cert_coordinator
     before = {eid: _state(hass, eid).state for eid in (EXPIRING, CERT, OTHER_EXPIRING, OTHER_CERT)}
     assert "unavailable" not in before.values()
+    router = entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, "secure@file"))
+    assert _state(hass, router).state == "enabled"
 
     # Main cycle fails: router entity goes unavailable, cert entities stay as they were.
     aioclient_mock.clear_requests()
@@ -201,7 +202,7 @@ async def test_cert_availability_follows_cert_coordinator_only(
     await entry.runtime_data.coordinator.async_refresh()
     await hass.async_block_till_done()
     assert not entry.runtime_data.coordinator.last_update_success
-    assert _state(hass, ROUTER).state == "unavailable"
+    assert _state(hass, router).state == "unavailable"
     assert {eid: _state(hass, eid).state for eid in before} == before
 
     # Cert cycle fails: every cert entity goes unavailable.

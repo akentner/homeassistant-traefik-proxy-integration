@@ -283,8 +283,6 @@ class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
             "name": ep.name,
             "address": ep.address,
             "transport": ep.protocol,
-            # ``entrypoint_name`` mirrors ``name`` for consistency with the
-            # ``router_name`` alias on TraefikProxyRouterBinarySensor.
             "entrypoint_name": ep.name,
         }
 

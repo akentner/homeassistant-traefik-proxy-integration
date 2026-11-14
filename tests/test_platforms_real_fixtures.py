@@ -15,8 +15,9 @@ from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
+from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.models import Status, TraefikSnapshot
-from tests.conftest import FIXTURE_VERSIONS, MOCK_URL, snapshot_from_fixture, stub_traefik
+from tests.conftest import FIXTURE_VERSIONS, MOCK_URL, entity_id_for, snapshot_from_fixture, stub_traefik
 
 FAILING_ENTITIES = (
     "binary_sensor.traefik_any_router_failing",
@@ -45,17 +46,28 @@ async def loaded(request, hass, aioclient_mock, mock_tls_probe) -> TraefikSnapsh
     return expected
 
 
-async def test_router_binary_sensors(hass, loaded: TraefikSnapshot) -> None:
-    """One binary_sensor per non-internal router, on iff the router is enabled."""
+async def test_router_sensors(hass, loaded: TraefikSnapshot) -> None:
+    """Exactly one ENUM sensor per non-internal router, its state is the router status; no router binary_sensor."""
     assert loaded.routers
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
     for name, router in loaded.routers.items():
-        state = hass.states.get(f"binary_sensor.traefik_http_router_{slugify(name)}")
+        state = hass.states.get(entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, name)))
         assert state is not None, name
-        assert state.state == ("on" if router.status is Status.enabled else "off"), name
-        assert state.attributes["status"] == str(router.status)
+        assert state.state == str(router.status), name
     assert not any(name.endswith("@internal") for name in loaded.routers)
-    router_entities = hass.states.async_entity_ids("binary_sensor")
-    assert sum(eid.startswith("binary_sensor.traefik_http_router_") for eid in router_entities) == len(loaded.routers)
+    broken = hass.states.get(
+        entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, "broken-missing-service@file"))
+    )
+    assert broken is not None and broken.state == "error"
+
+    reg_entries = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    router_keys = [
+        (reg_entry.domain, key)
+        for reg_entry in reg_entries
+        if (key := ROUTERS.key_of(entry.entry_id, reg_entry.unique_id)) is not None
+    ]
+    assert sorted(key for domain, key in router_keys if domain == "sensor") == sorted(loaded.routers)
+    assert not [key for domain, key in router_keys if domain == "binary_sensor"]
 
 
 async def test_entrypoint_sensors(hass, loaded: TraefikSnapshot) -> None:

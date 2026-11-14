@@ -13,7 +13,6 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy import api
@@ -26,8 +25,16 @@ from custom_components.traefik_proxy.const import (
 )
 from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL, TraefikProxyCoordinator
 from custom_components.traefik_proxy.data import TraefikRuntimeData
+from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.models import TraefikSnapshot
-from tests.conftest import MOCK_URL, load_fixture, snapshot_from_fixture, stub_traefik, stub_traefik_paginated
+from tests.conftest import (
+    MOCK_URL,
+    entity_id_for,
+    load_fixture,
+    snapshot_from_fixture,
+    stub_traefik,
+    stub_traefik_paginated,
+)
 
 
 def _make_entry(**kwargs) -> MockConfigEntry:
@@ -212,11 +219,12 @@ async def test_rawdata_snapshot_reaches_entities(hass, aioclient_mock, mock_tls_
     assert isinstance(coordinator.data, TraefikSnapshot)
     assert coordinator.data == snapshot_from_fixture("v3.7")
     assert len(coordinator.data.routers) == 128
-    enabled = hass.states.get(f"binary_sensor.traefik_http_router_{slugify('secure@file')}")
-    broken = hass.states.get(f"binary_sensor.traefik_http_router_{slugify('broken-missing-service@file')}")
-    assert enabled is not None and enabled.state == "on"
-    assert broken is not None and broken.state == "off"
-    assert broken.attributes["status"] == "error"
+    enabled = hass.states.get(entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, "secure@file")))
+    broken = hass.states.get(
+        entity_id_for(hass, "sensor", ROUTERS.unique_id(entry.entry_id, "broken-missing-service@file"))
+    )
+    assert enabled is not None and enabled.state == "enabled"
+    assert broken is not None and broken.state == "error"
     assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata"]
 
     aioclient_mock.mock_calls.clear()
