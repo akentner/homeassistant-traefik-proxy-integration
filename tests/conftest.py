@@ -103,13 +103,41 @@ def snapshot_from_fixture(version: str) -> TraefikSnapshot:
     )
 
 
+def stub_traefik(
+    aioclient_mock: Any,
+    *,
+    version: str = "v3.7",
+    base_url: str = MOCK_URL,
+    rawdata: Any = None,
+    version_payload: Any = None,
+    entrypoints: Any = None,
+) -> None:
+    """Serve a Traefik through ``/api/version``, ``/api/entrypoints`` and ``/api/rawdata``.
+
+    Each payload defaults to the capture of ``version``; an explicit value
+    replaces it (``rawdata={}`` is an empty Traefik). The first matching
+    mock wins, so a test overrides an endpoint by registering its own mock
+    before calling this helper.
+    """
+    payloads = {
+        "version": version_payload if version_payload is not None else load_fixture(version, "version.json"),
+        "entrypoints": entrypoints if entrypoints is not None else load_fixture(version, "entrypoints.json"),
+        "rawdata": rawdata if rawdata is not None else load_fixture(version, "rawdata.json"),
+    }
+    for name, payload in payloads.items():
+        aioclient_mock.get(f"{base_url}/api/{name}", json=payload)
+
+
 def stub_traefik_paginated(aioclient_mock: Any, *, version: str = "v3.7", base_url: str = MOCK_URL) -> None:
     """Serve a capture through the version, entrypoints and paginated list endpoints.
 
-    Every list page is registered with its recorded ``per_page``/``page``
-    query and ``X-Next-Page`` header, so the client's page size must equal
-    the index ``per_page`` (tests monkeypatch ``api.DEFAULT_PAGE_SIZE``).
+    ``/api/rawdata`` answers 404, so every scenario exercises the client's
+    paginated fallback. Every list page is registered with its recorded
+    ``per_page``/``page`` query and ``X-Next-Page`` header, so the client's
+    page size must equal the index ``per_page`` (tests monkeypatch
+    ``api.DEFAULT_PAGE_SIZE``).
     """
+    aioclient_mock.get(f"{base_url}/api/rawdata", status=404)
     aioclient_mock.get(f"{base_url}/api/version", json=load_fixture(version, "version.json"))
     aioclient_mock.get(f"{base_url}/api/entrypoints", json=load_fixture(version, "entrypoints.json"))
     index = load_fixture(version, "pages/index.json")

@@ -26,7 +26,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
-from custom_components.traefik_proxy.models import parse_entrypoints, parse_version
+from custom_components.traefik_proxy.models import parse_entrypoints, parse_rawdata, parse_version
 from tests.conftest import MOCK_URL, load_fixture, stub_traefik_paginated
 
 API_PATH = Path(__file__).parent.parent / "custom_components" / "traefik_proxy" / "api.py"
@@ -341,6 +341,80 @@ async def test_real_captures_parse_and_requests_stay_on_base_url(hass, aioclient
     assert aioclient_mock.mock_calls
     for _method, url, _data, _headers in aioclient_mock.mock_calls:
         assert str(url).startswith(f"{MOCK_URL}/api/")
+
+
+# --- State: /api/rawdata with the remembered paginated fallback --------------
+
+RAWDATA_PATH = "/api/rawdata"
+LIST_PATHS = ("/api/http/routers", "/api/http/services", "/api/http/middlewares")
+
+
+def _paths(aioclient_mock) -> list[str]:  # type: ignore[no-untyped-def]
+    return [call[1].path for call in aioclient_mock.mock_calls]
+
+
+async def test_rawdata_parses_like_the_model_parser(hass, aioclient_mock) -> None:
+    """The real v3.7 rawdata is read in one request and equals models.parse_rawdata."""
+    payload = load_fixture("v3.7", "rawdata.json")
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", json=payload)
+
+    state = await _client(hass).async_get_state()
+
+    assert state == parse_rawdata(payload)
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+
+
+async def test_rawdata_404_falls_back_to_pages_and_is_remembered(hass, aioclient_mock) -> None:
+    """A 404 on rawdata reads the list pages; the next call goes straight to the pages."""
+    per_page = load_fixture("v3.7", "pages/index.json")["per_page"]
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    client = _client(hass, page_size=per_page)
+
+    first = await client.async_get_state()
+    assert _paths(aioclient_mock)[0] == RAWDATA_PATH
+    assert set(_paths(aioclient_mock)[1:]) == set(LIST_PATHS)
+
+    aioclient_mock.mock_calls.clear()
+    second = await client.async_get_state()
+
+    assert second == first
+    assert first == parse_rawdata(load_fixture("v3.7", "rawdata.json"))
+    assert RAWDATA_PATH not in _paths(aioclient_mock)
+    assert set(_paths(aioclient_mock)) == set(LIST_PATHS)
+
+
+@pytest.mark.parametrize("status", [401, 500])
+async def test_rawdata_other_errors_do_not_fall_back(hass, aioclient_mock, status: int) -> None:
+    """Only a 404 switches to the pages; any other error propagates and no page is requested."""
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", status=status)
+    client = _client(hass)
+
+    with pytest.raises(TraefikProxyApiError) as err:
+        await client.async_get_state()
+
+    assert err.value.status == status
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+    assert client._paginated is False
+
+
+async def test_rawdata_unexpected_shape_raises_payload_error(hass, aioclient_mock) -> None:
+    """A rawdata list instead of an object is a payload error naming only the path."""
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", json=[])
+
+    with pytest.raises(api.TraefikProxyPayloadError, match=r"^/api/rawdata: unexpected payload shape$"):
+        await _client(hass).async_get_state()
+
+
+async def test_list_endpoint_404_in_paginated_mode_raises_not_found(hass, aioclient_mock) -> None:
+    """Once paginated, a 404 on a list endpoint is a NotFound error, not another fallback."""
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", status=404)
+    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", status=404)
+
+    with pytest.raises(api.TraefikProxyNotFoundError) as err:
+        await _client(hass).async_get_state()
+
+    assert err.value.path == "/api/http/routers"
+    assert _paths(aioclient_mock) == [RAWDATA_PATH, "/api/http/routers"]
 
 
 # --- Router refresh POST -----------------------------------------------------

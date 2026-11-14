@@ -1,6 +1,7 @@
 """Pagination and payload-shape tests for TraefikProxyApiClient.async_get_state.
 
-HTTP is mocked with ``aioclient_mock``; list pages are registered with their
+Every case answers ``/api/rawdata`` with 404, so the client takes its
+paginated fallback. HTTP is mocked with ``aioclient_mock``; list pages are registered with their
 ``per_page``/``page`` query and the ``X-Next-Page`` header Traefik sends.
 Traefik repeats a page number not greater than the current page on the last
 page (observed ``X-Next-Page: 1`` in both captured generations).
@@ -47,6 +48,11 @@ def _stub_page(aioclient_mock, page_size: int, page: int, items: Any, next_page:
     )
 
 
+def _stub_no_rawdata(aioclient_mock) -> None:  # type: ignore[no-untyped-def]
+    """Answer /api/rawdata with 404 so async_get_state takes the paginated path."""
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=404)
+
+
 def _stub_empty_services_and_middlewares(aioclient_mock) -> None:  # type: ignore[no-untyped-def]
     aioclient_mock.get(f"{MOCK_URL}/api/http/services", json=[])
     aioclient_mock.get(f"{MOCK_URL}/api/http/middlewares", json=[])
@@ -73,6 +79,7 @@ async def test_real_router_pages_followed_to_the_end(hass, aioclient_mock) -> No
 async def test_full_page_with_non_increasing_next_page_ends_the_loop(hass, aioclient_mock) -> None:
     """A page holding exactly page_size items whose X-Next-Page equals the current page is the last one."""
     _stub_page(aioclient_mock, 2, 1, _items("a@file", "b@file"), next_page="1")
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     state = await _client(hass, 2).async_get_state()
@@ -84,6 +91,7 @@ async def test_full_page_with_non_increasing_next_page_ends_the_loop(hass, aiocl
 async def test_missing_or_non_integer_next_page_ends_the_loop(hass, aioclient_mock) -> None:
     """No header or a non-integer header stops after the current page."""
     _stub_page(aioclient_mock, 2, 1, _items("a@file", "b@file"), next_page="next")
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     state = await _client(hass, 2).async_get_state()
@@ -96,6 +104,7 @@ async def test_name_repeated_across_pages_yields_one_entry(hass, aioclient_mock)
     """An item that shifts onto the next page between requests is kept once."""
     _stub_page(aioclient_mock, 2, 1, _items("a@file", "b@file"), next_page="2")
     _stub_page(aioclient_mock, 2, 2, _items("b@file"), next_page="2")
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     state = await _client(hass, 2).async_get_state()
@@ -108,6 +117,7 @@ async def test_failing_page_raises_and_returns_nothing(hass, aioclient_mock) -> 
     """HTTP 500 on page 2 raises; no partial state is returned."""
     _stub_page(aioclient_mock, 2, 1, _items("a@file", "b@file"), next_page="2")
     aioclient_mock.get(f"{MOCK_URL}{ROUTERS_PATH}", params={"per_page": 2, "page": 2}, status=500)
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     with pytest.raises(TraefikProxyApiError):
@@ -157,6 +167,7 @@ async def test_page_cap_raises_instead_of_truncating(hass, aioclient_mock, monke
         )
 
     aioclient_mock.get(f"{MOCK_URL}{ROUTERS_PATH}", side_effect=_always_next)
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     with pytest.raises(TraefikProxyPayloadError, match="more than 3 pages"):
@@ -167,6 +178,7 @@ async def test_page_cap_raises_instead_of_truncating(hass, aioclient_mock, monke
 async def test_object_page_raises_payload_error(hass, aioclient_mock) -> None:
     """A page that is a JSON object instead of a list is rejected."""
     _stub_page(aioclient_mock, 2, 1, {"routers": []})
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     with pytest.raises(TraefikProxyPayloadError):
@@ -176,6 +188,7 @@ async def test_object_page_raises_payload_error(hass, aioclient_mock) -> None:
 async def test_parser_errors_become_path_only_payload_errors(hass, aioclient_mock) -> None:
     """Parser shape errors surface as TraefikProxyPayloadError naming only the path."""
     _stub_page(aioclient_mock, 2, 1, ["not-an-object"])
+    _stub_no_rawdata(aioclient_mock)
     _stub_empty_services_and_middlewares(aioclient_mock)
 
     with pytest.raises(TraefikProxyPayloadError) as err:

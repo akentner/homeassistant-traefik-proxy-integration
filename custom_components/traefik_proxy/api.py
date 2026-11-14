@@ -18,6 +18,7 @@ from .models import (
     TraefikVersion,
     parse_entrypoints,
     parse_middlewares,
+    parse_rawdata,
     parse_routers,
     parse_services,
     parse_version,
@@ -33,6 +34,7 @@ DEFAULT_PAGE_SIZE = 500
 # instead of silently returning a truncated list.
 MAX_PAGES = 100
 
+_RAWDATA_PATH = "/api/rawdata"
 _REFRESH_PATH = "/api/http/routers/refresh"
 
 
@@ -170,6 +172,9 @@ class TraefikProxyApiClient:
         self._verify_ssl = verify_ssl
         self._request_timeout = request_timeout
         self._page_size = DEFAULT_PAGE_SIZE if page_size is None else page_size
+        # Set once Traefik answers 404 on /api/rawdata; from then on the
+        # client reads the paginated list endpoints for its whole lifetime.
+        self._paginated = False
 
     async def _request(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
         """GET ``path`` and return the decoded JSON payload and the raw ``X-Next-Page`` header."""
@@ -251,9 +256,26 @@ class TraefikProxyApiClient:
     async def async_get_state(self) -> TraefikState:
         """Fetch HTTP routers, services and middlewares as parsed models.
 
-        The three list endpoints are requested one after another, each
-        followed across all of its pages.
+        Reads the unpaginated ``/api/rawdata`` in one request. When Traefik
+        answers 404 there, the client switches to the paginated list
+        endpoints in the same call and keeps using them for its lifetime.
+        Every other error propagates unchanged.
         """
+        if not self._paginated:
+            try:
+                payload, _ = await self._request(_RAWDATA_PATH)
+            except TraefikProxyNotFoundError:
+                self._paginated = True
+                _LOGGER.debug("path=%s not found, switching to the paginated list endpoints", _RAWDATA_PATH)
+            else:
+                try:
+                    return parse_rawdata(payload)
+                except (ValueError, TypeError, KeyError) as err:
+                    raise TraefikProxyPayloadError(_RAWDATA_PATH, "unexpected payload shape") from err
+        return await self._get_state_paginated()
+
+    async def _get_state_paginated(self) -> TraefikState:
+        """Read the three list endpoints one after another, each across all of its pages."""
         path = "/api/http/routers"
         try:
             routers = parse_routers(await self._get_paginated(path))
