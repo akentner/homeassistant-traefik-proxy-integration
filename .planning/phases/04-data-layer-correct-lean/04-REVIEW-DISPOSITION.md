@@ -3,6 +3,34 @@ phase: 04
 review: 04-REVIEW.md
 titles: json
 findings:
+  - id: IN-08
+    severity: info
+    disposition: open
+    title: "Request-construction errors on a stored entry retry setup forever with an unactionable reason (carried into Phase 7)"
+  - id: IN-09
+    severity: info
+    disposition: open
+    title: "`InvalidUrl` carries a credential-bearing URL in its exception args (carried into Phase 7)"
+  - id: IN-10
+    severity: info
+    disposition: open
+    title: "`_check_url_shape` lets `urlparse`'s `ValueError` escape"
+  - id: IN-11
+    severity: info
+    disposition: open
+    title: "Cert entities keep a redundant `_coordinator` alias of `self.coordinator`"
+  - id: IN-12
+    severity: info
+    disposition: open
+    title: "Matrix row (15) and the fix report over-claim the probe timing; three probe-clock edges are untested"
+  - id: IN-13
+    severity: info
+    disposition: open
+    title: "The probe interval is hard-wired to `VERSION_RECHECK_INTERVAL`, and `_probe_armed_at` is moved when nothing was armed"
+  - id: IN-14
+    severity: info
+    disposition: open
+    title: "The committed switch to the pages is no longer logged"
   - id: WR-09
     severity: warning
     disposition: fixed
@@ -11,22 +39,6 @@ findings:
     severity: warning
     disposition: fixed
     title: "The switch to pagination is committed even when the page reads fail in the same cycle (outage-wide 404)"
-  - id: IN-08
-    severity: info
-    disposition: open
-    title: "Request-construction errors on a stored entry retry setup forever with an unactionable reason"
-  - id: IN-09
-    severity: info
-    disposition: open
-    title: "`InvalidUrl` now routinely carries a credential-bearing URL in its exception args"
-  - id: IN-10
-    severity: info
-    disposition: open
-    title: "`_check_url_shape` lets `urlparse`'s `ValueError` escape (pre-existing, function changed in 04-08)"
-  - id: IN-11
-    severity: info
-    disposition: open
-    title: "Cert entities keep a redundant `_coordinator` alias of `self.coordinator`"
   - id: CR-01
     severity: critical
     disposition: fixed
@@ -91,21 +103,24 @@ findings:
     severity: info
     disposition: open
     title: "Dead `TYPE_CHECKING` block; sequential paginated reads contradict the stated constraint"
-open: 13
-total: 22
-recorded: 2026-11-14T02:59:03.248Z
+open: 16
+total: 25
+recorded: 2026-11-14T03:05:35.009Z
 ---
 
 # Phase 04: Code Review Disposition
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| WR-09 | warning | fixed | 04-REVIEW-FIX.md |
-| WR-10 | warning | fixed | 04-REVIEW-FIX.md |
 | IN-08 | info | open | - |
 | IN-09 | info | open | - |
 | IN-10 | info | open | - |
 | IN-11 | info | open | - |
+| IN-12 | info | open | - |
+| IN-13 | info | open | - |
+| IN-14 | info | open | - |
+| WR-09 | warning | fixed | 04-REVIEW-FIX.md (not in the current review) |
+| WR-10 | warning | fixed | 04-REVIEW-FIX.md (not in the current review) |
 | CR-01 | critical | fixed | Plan 04-07 (a845757..90af13a); confirmed resolved by re-review cc26dfc (not in the current review) |
 | WR-01 | warning | fixed | Plan 04-09 (87061f6..a93762a); confirmed resolved as scoped by re-review cc26dfc, follow-ups WR-09/WR-10 (not in the current review) |
 | WR-02 | warning | fixed | Plan 04-08 (6890f51..73986d3); confirmed resolved by re-review cc26dfc, follow-ups IN-08/IN-09 (not in the current review) |
