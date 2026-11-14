@@ -84,8 +84,9 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     immutable :class:`TraefikSnapshot`. The version is re-read at most once
     per ``VERSION_RECHECK_INTERVAL`` and on the first cycle after a failed
     one; the entrypoints are re-read only when the version or start date
-    changed (Traefik restarted or was upgraded). Listeners are only
-    notified when the snapshot differs from the previous one.
+    changed (Traefik restarted or was upgraded). While the client is
+    paginated, the hourly re-check also retries /api/rawdata once. Listeners
+    are only notified when the snapshot differs from the previous one.
     """
 
     config_entry: TraefikProxyConfigEntry
@@ -129,6 +130,12 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """
         if self._version is None or self._version_checked_at is None or not self.last_update_success:
             return True
+        return self._recheck_interval_elapsed()
+
+    def _recheck_interval_elapsed(self) -> bool:
+        """Return whether ``VERSION_RECHECK_INTERVAL`` has passed since the last successful version check."""
+        if self._version_checked_at is None:
+            return False
         return dt_util.utcnow() - self._version_checked_at >= VERSION_RECHECK_INTERVAL
 
     async def _async_refresh_version(self) -> None:
@@ -155,7 +162,13 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     async def _async_update_data(self) -> TraefikSnapshot:
         """Fetch the HTTP state and build the snapshot for this cycle."""
         if self._version_due():
+            # Only the regular hourly re-check arms the rawdata probe; a
+            # post-failure re-check inside the interval does not, so probes
+            # stay at least VERSION_RECHECK_INTERVAL apart.
+            probe_rawdata = self._recheck_interval_elapsed()
             await self._async_refresh_version()
+            if probe_rawdata:
+                self.client.request_rawdata_probe()
         try:
             state = await self.client.async_get_state()
         except TraefikProxyAuthError as err:

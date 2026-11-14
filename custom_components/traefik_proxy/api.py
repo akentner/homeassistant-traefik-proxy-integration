@@ -172,9 +172,11 @@ class TraefikProxyApiClient:
         self._verify_ssl = verify_ssl
         self._request_timeout = request_timeout
         self._page_size = DEFAULT_PAGE_SIZE if page_size is None else page_size
-        # Set once Traefik answers 404 on /api/rawdata; from then on the
-        # client reads the paginated list endpoints for its whole lifetime.
+        # Set when Traefik answers 404 on /api/rawdata (the client then reads
+        # the paginated list endpoints); cleared again by a successful
+        # rawdata probe, see request_rawdata_probe().
         self._paginated = False
+        self._rawdata_probe_due = False
 
     async def _request(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
         """GET ``path`` and return the decoded JSON payload and the raw ``X-Next-Page`` header."""
@@ -257,14 +259,55 @@ class TraefikProxyApiClient:
         except (ValueError, TypeError, KeyError) as err:
             raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
 
+    def request_rawdata_probe(self) -> None:
+        """Ask the next async_get_state call to retry /api/rawdata once while paginated.
+
+        No-op in rawdata mode. The caller decides when to probe; the client
+        runs no background task and no timer of its own.
+        """
+        if self._paginated:
+            self._rawdata_probe_due = True
+
+    async def _probe_rawdata(self) -> TraefikState | None:
+        """Retry /api/rawdata once; return its state, or None to keep the pages.
+
+        Auth errors propagate. Any other failure (404, other status,
+        connection error, invalid JSON, unexpected shape) returns None.
+        Only a parsed payload switches the client back to rawdata mode.
+        """
+        try:
+            payload, _ = await self._request(_RAWDATA_PATH)
+        except TraefikProxyAuthError:
+            raise
+        except TraefikProxyApiError as err:
+            _LOGGER.debug("path=%s probe failed (%s), staying paginated", _RAWDATA_PATH, type(err).__name__)
+            return None
+        try:
+            state = parse_rawdata(payload)
+        except (ValueError, TypeError, KeyError) as err:
+            _LOGGER.debug("path=%s probe payload rejected (%s), staying paginated", _RAWDATA_PATH, type(err).__name__)
+            return None
+        self._paginated = False
+        _LOGGER.debug("path=%s probe succeeded, switching back to rawdata", _RAWDATA_PATH)
+        return state
+
     async def async_get_state(self) -> TraefikState:
         """Fetch HTTP routers, services and middlewares as parsed models.
 
-        Reads the unpaginated ``/api/rawdata`` in one request. When Traefik
-        answers 404 there, the client switches to the paginated list
-        endpoints in the same call and keeps using them for its lifetime.
-        Every other error propagates unchanged.
+        Reads the unpaginated ``/api/rawdata`` in one request first. When
+        Traefik answers 404 there, the client switches to the paginated list
+        endpoints in the same call. While paginated, a probe armed through
+        :meth:`request_rawdata_probe` retries rawdata once and switches back
+        on success. Auth errors always propagate; every other rawdata error
+        outside a probe propagates unchanged.
         """
+        if self._paginated and self._rawdata_probe_due:
+            # Cleared before the await: overlapping calls consume one arming once.
+            self._rawdata_probe_due = False
+            state = await self._probe_rawdata()
+            if state is not None:
+                return state
+            return await self._get_state_paginated()
         if not self._paginated:
             try:
                 payload, _ = await self._request(_RAWDATA_PATH)
