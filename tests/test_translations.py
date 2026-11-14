@@ -50,8 +50,6 @@ ON_OFF_KEYS = {
 # Translation keys whose entity name comes from the item key (no translated name).
 UNNAMED_KEYS = {("sensor", "router"), ("sensor", "service"), ("sensor", "entrypoint")}
 
-_RED = pytest.mark.xfail(strict=True, reason="05-07 Task 1 RED: de.json and icons.json do not exist yet")
-
 
 def _load(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -107,7 +105,6 @@ def test_strings_json_equals_en_json() -> None:
     assert STRINGS.read_bytes() == EN.read_bytes()
 
 
-@_RED
 def test_de_matches_en_keys_and_placeholders() -> None:
     """de.json parses as UTF-8 JSON and mirrors en.json's device/entity/issues keys and placeholders."""
     en = _phase_strings(EN)
@@ -117,7 +114,6 @@ def test_de_matches_en_keys_and_placeholders() -> None:
         assert _placeholders(de[key]) == _placeholders(text), key
 
 
-@_RED
 def test_no_empty_strings() -> None:
     """No string in en.json, de.json or icons.json is empty."""
     for path in (EN, DE, ICONS):
@@ -125,7 +121,6 @@ def test_no_empty_strings() -> None:
             assert value.strip(), f"{path.name}: {key} is empty"
 
 
-@_RED
 def test_item_state_keys_equal_options() -> None:
     """Router and service state keys equal ITEM_STATE_OPTIONS in en and de."""
     for path in (EN, DE):
@@ -134,7 +129,6 @@ def test_item_state_keys_equal_options() -> None:
             assert set(sensors[key]["state"]) == set(ITEM_STATE_OPTIONS), f"{path.name}: {key}"
 
 
-@_RED
 def test_every_code_key_has_texts() -> None:
     """Every translation key used in code has an en and de name (or state texts for ENUM sensors)."""
     keys = _code_keys()
@@ -156,7 +150,6 @@ def test_every_code_key_has_texts() -> None:
         assert _placeholders(entity["binary_sensor"]["certificate_expiring"]["name"]) == {"host"}
 
 
-@_RED
 def test_every_code_key_has_icons() -> None:
     """Every translation key has a default icon; ENUM sensors and problem sensors have state icons."""
     icons = _load(ICONS)["entity"]
@@ -184,7 +177,6 @@ def test_parallel_updates() -> None:
     assert button.PARALLEL_UPDATES == 1
 
 
-@_RED
 @pytest.mark.usefixtures("mock_tls_probe")
 async def test_german_device_names(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """With the HA language set to German the sub-devices get the German names."""

@@ -1,0 +1,78 @@
+{
+  "device": {
+    "main": {
+      "name": "Traefik ({host})"
+    },
+    "routers": {
+      "name": "Traefik-Router ({host})"
+    },
+    "services": {
+      "name": "Traefik-Dienste ({host})"
+    },
+    "certificates": {
+      "name": "Traefik-Zertifikate ({host})"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "router": {
+        "state": {
+          "enabled": "Aktiviert",
+          "warning": "Warnung",
+          "error": "Fehler",
+          "disabled": "Deaktiviert",
+          "missing": "Fehlt"
+        }
+      },
+      "service": {
+        "state": {
+          "enabled": "Aktiviert",
+          "warning": "Warnung",
+          "error": "Fehler",
+          "disabled": "Deaktiviert",
+          "missing": "Fehlt"
+        }
+      },
+      "routers_count": {
+        "name": "Router"
+      },
+      "services_count": {
+        "name": "Dienste"
+      },
+      "middlewares_count": {
+        "name": "Middlewares"
+      },
+      "version": {
+        "name": "Traefik-Version"
+      },
+      "start_time": {
+        "name": "Startzeit"
+      },
+      "healthy_ratio": {
+        "name": "Gesunde Router"
+      },
+      "certificate_expiry": {
+        "name": "{host} Ablauf"
+      }
+    },
+    "binary_sensor": {
+      "routers_problem": {
+        "name": "Router-Probleme"
+      },
+      "services_problem": {
+        "name": "Dienst-Probleme"
+      },
+      "middlewares_problem": {
+        "name": "Middleware-Probleme"
+      },
+      "certificate_expiring": {
+        "name": "{host} läuft ab"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Jetzt aktualisieren"
+      }
+    }
+  }
+}
