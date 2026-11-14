@@ -24,9 +24,17 @@ from custom_components.traefik_proxy.const import (
     UID_ROUTERS_PROBLEM,
     UID_SERVICES_PROBLEM,
 )
+from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, SERVICES, missing_store_key
-from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
+from tests.conftest import (
+    entity_id_for,
+    load_fixture,
+    make_traefik_entry,
+    restub_traefik,
+    setup_traefik_entry,
+    stub_traefik,
+)
 
 pytestmark = pytest.mark.usefixtures("mock_tls_probe")
 
@@ -71,16 +79,34 @@ def _create(
     return reg_entry.entity_id
 
 
-def _disabled_legacy_routers_device(hass: HomeAssistant, entry: Any) -> str:
-    """Pre-create the entry's 0.3.0 "HTTP Routers" device, disabled by the user; return its id."""
+def _disabled_legacy_device(hass: HomeAssistant, entry: Any, suffix: str = "http_routers") -> str:
+    """Pre-create one of the entry's 0.3.0 per-category devices, disabled by the user; return its id."""
     device_registry = dr.async_get(hass)
     device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, f"{entry.entry_id}_http_routers")},
-        name="traefik.example.com Traefik Proxy - HTTP Routers",
+        identifiers={(DOMAIN, f"{entry.entry_id}_{suffix}")},
+        name=f"traefik.example.com Traefik Proxy - {suffix}",
     )
     device_registry.async_update_device(device.id, disabled_by=dr.DeviceEntryDisabler.USER)
     return device.id
+
+
+def _entries(registry: er.EntityRegistry, *entry_ids: str) -> dict[str, er.RegistryEntry]:
+    """Return {entity_id: registry entry} for every entity of the given config entries."""
+    return {
+        reg_entry.entity_id: reg_entry
+        for entry_id in entry_ids
+        for reg_entry in er.async_entries_for_config_entry(registry, entry_id)
+    }
+
+
+def _device(hass: HomeAssistant, entry_id: str, device: TraefikDevice) -> dr.DeviceEntry:
+    """Return the current ``device`` of a config entry."""
+    return next(
+        reg_device
+        for reg_device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id)
+        if device_identifier(entry_id, device) in reg_device.identifiers
+    )
 
 
 def _legacy_registry(hass: HomeAssistant, entry: Any) -> dict[str, str]:
@@ -341,9 +367,7 @@ async def test_disabled_router_replacement_keeps_disabled_state(
     """Each way a 0.3.0 router was disabled carries over to its replacement; names do not carry over."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
-    device_id = (
-        _disabled_legacy_routers_device(hass, entry) if old_disabled_by is er.RegistryEntryDisabler.DEVICE else None
-    )
+    device_id = _disabled_legacy_device(hass, entry) if old_disabled_by is er.RegistryEntryDisabler.DEVICE else None
     old = _create(
         hass,
         entry,
@@ -382,7 +406,7 @@ async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant
     """A second run with the disabled replacements present changes no registry entry and keeps one issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
-    legacy_device = _disabled_legacy_routers_device(hass, entry)
+    legacy_device = _disabled_legacy_device(hass, entry)
     _create(hass, entry, "binary_sensor", "http_router_file-ok@file", disabled_by=er.RegistryEntryDisabler.USER)
     _create(
         hass,
@@ -422,3 +446,127 @@ async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant
     issue = _get_issue(hass, ENTRY_ID)
     assert issue is not None
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "4"}
+
+
+@pytest.mark.xfail(strict=True, reason="CR-02: DEVICE disabler of surviving entities is not mapped yet")
+async def test_device_disabled_entities_stay_disabled_after_device_updates(
+    hass: HomeAssistant, aioclient_mock: Any, freezer: Any
+) -> None:
+    """Entities disabled through a 0.3.0 device stay disabled (by the user) when their new device is updated."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    by_device = er.RegistryEntryDisabler.DEVICE
+    ids = {
+        "service": _create(
+            hass,
+            entry,
+            "sensor",
+            f"{SERVICES.prefix}whoami@docker",
+            disabled_by=by_device,
+            device_id=_disabled_legacy_device(hass, entry, "http_services"),
+        ),
+        "aggregate": _create(
+            hass,
+            entry,
+            "binary_sensor",
+            UID_ROUTERS_PROBLEM,
+            disabled_by=by_device,
+            device_id=_disabled_legacy_device(hass, entry, "diagnostics"),
+        ),
+        "cert": _create(
+            hass,
+            entry,
+            CERT_EXPIRING.domain,
+            f"{CERT_EXPIRING.prefix}{CERT_HOST}",
+            disabled_by=by_device,
+            device_id=_disabled_legacy_device(hass, entry, "http_routers_tls"),
+        ),
+    }
+    new_device = {
+        "service": TraefikDevice.SERVICES,
+        "aggregate": TraefikDevice.MAIN,
+        "cert": TraefikDevice.CERTIFICATES,
+    }
+    registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    for name, entity_id in ids.items():
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None
+        assert reg_entry.disabled_by is er.RegistryEntryDisabler.USER, name
+        assert reg_entry.device_id == _device(hass, ENTRY_ID, new_device[name]).id, name
+        assert hass.states.get(entity_id) is None, name
+    legacy = {(DOMAIN, f"{ENTRY_ID}_{suffix}") for suffix in ("http_services", "diagnostics", "http_routers_tls")}
+    assert not any(
+        device.identifiers & legacy for device in dr.async_entries_for_config_entry(device_registry, ENTRY_ID)
+    )
+
+    # A Traefik upgrade updates the main device; renaming updates the sub-devices.
+    version = dict(load_fixture("v3.7", "version.json"))
+    version["Version"] = "3.7.99"
+    restub_traefik(aioclient_mock, version_payload=version)
+    freezer.tick(VERSION_RECHECK_INTERVAL)
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert _device(hass, ENTRY_ID, TraefikDevice.MAIN).sw_version == "3.7.99"
+    for device in (TraefikDevice.SERVICES, TraefikDevice.CERTIFICATES):
+        device_registry.async_update_device(_device(hass, ENTRY_ID, device).id, name_by_user=f"My {device}")
+    await hass.async_block_till_done()
+
+    for name, entity_id in ids.items():
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None
+        assert reg_entry.disabled_by is er.RegistryEntryDisabler.USER, name
+        assert hass.states.get(entity_id) is None, name
+
+
+@pytest.mark.xfail(strict=True, reason="CR-02: DEVICE disabler of surviving entities is not mapped yet")
+async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssistant) -> None:
+    """Only this entry's entities on its legacy devices change; other entries and devices keep DEVICE; a rerun is a no-op."""
+    by_device = er.RegistryEntryDisabler.DEVICE
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    other = make_traefik_entry(entry_id=OTHER_ENTRY_ID, unique_id="other.example.com", version=1, minor_version=1)
+    other.add_to_hass(hass)
+    own_legacy = _disabled_legacy_device(hass, entry, "http_services")
+    other_legacy = _disabled_legacy_device(hass, other, "http_services")
+    # A disabled device with the current main identifier (an install older than 0.3.0) is not a legacy device.
+    device_registry = dr.async_get(hass)
+    main = device_registry.async_get_or_create(
+        config_entry_id=ENTRY_ID, identifiers={device_identifier(ENTRY_ID, TraefikDevice.MAIN)}
+    )
+    device_registry.async_update_device(main.id, disabled_by=dr.DeviceEntryDisabler.USER)
+    service = _create(
+        hass, entry, "sensor", f"{SERVICES.prefix}whoami@docker", disabled_by=by_device, device_id=own_legacy
+    )
+    on_main = _create(hass, entry, "sensor", "http_entrypoint_web", disabled_by=by_device, device_id=main.id)
+    other_on_own_legacy = _create(
+        hass, other, "sensor", f"{SERVICES.prefix}whoami@docker", disabled_by=by_device, device_id=own_legacy
+    )
+    other_on_other_legacy = _create(
+        hass, other, "sensor", f"{SERVICES.prefix}api@internal", disabled_by=by_device, device_id=other_legacy
+    )
+    registry = er.async_get(hass)
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    expected = {
+        service: er.RegistryEntryDisabler.USER,
+        on_main: by_device,
+        other_on_own_legacy: by_device,
+        other_on_other_legacy: by_device,
+    }
+    for entity_id, disabled_by in expected.items():
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None
+        assert reg_entry.disabled_by is disabled_by, entity_id
+    after_first = _entries(registry, ENTRY_ID, OTHER_ENTRY_ID)
+    assert _get_issue(hass, ENTRY_ID) is None
+
+    hass.config_entries.async_update_entry(entry, minor_version=1)
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert _entries(registry, ENTRY_ID, OTHER_ENTRY_ID) == after_first
+    assert other.minor_version == 1
