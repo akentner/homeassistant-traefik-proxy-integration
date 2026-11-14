@@ -9,9 +9,10 @@ import ssl
 import subprocess
 import sys
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Iterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -28,8 +29,21 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # to the real production module rather than the testing_config stub
 # that ships with ``pytest_homeassistant_custom_component``.
 from custom_components.traefik_proxy import tls as _tls_module  # pre-import for in-fixture patching
+from custom_components.traefik_proxy.models import (
+    TraefikSnapshot,
+    TraefikState,
+    parse_entrypoints,
+    parse_middlewares,
+    parse_rawdata,
+    parse_routers,
+    parse_services,
+    parse_version,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Base URL of the Traefik API in config entries built by the tests.
+MOCK_URL = "https://traefik.example.com:8080"
 
 # Real Traefik captures (tests/traefik/capture.py), one directory per generation.
 FIXTURE_VERSIONS = ("v2.11", "v3.7")
@@ -54,6 +68,75 @@ def load_paginated(version: str, kind: str) -> tuple[list[Any], list[str | None]
         items.extend(load_fixture(version, f"pages/{page['file']}"))
         next_pages.append(page.get("x_next_page"))
     return items, next_pages
+
+
+def make_snapshot(
+    *,
+    routers: Iterable[dict[str, Any]] = (),
+    services: Iterable[dict[str, Any]] = (),
+    middlewares: Iterable[dict[str, Any]] = (),
+    entrypoints: Iterable[dict[str, Any]] = (),
+    version: dict[str, Any] | None = None,
+) -> TraefikSnapshot:
+    """Build a snapshot from raw list-form items (each with ``name``) via the real parsers.
+
+    ``version`` is a raw ``/api/version`` payload; it defaults to the v3.7 capture.
+    """
+    state = TraefikState(
+        routers=parse_routers(list(routers)),
+        services=parse_services(list(services)),
+        middlewares=parse_middlewares(list(middlewares)),
+    )
+    return TraefikSnapshot.build(
+        version=parse_version(version if version is not None else load_fixture("v3.7", "version.json")),
+        entrypoints=parse_entrypoints(list(entrypoints)),
+        state=state,
+    )
+
+
+def snapshot_from_fixture(version: str) -> TraefikSnapshot:
+    """Build the snapshot of a whole capture (rawdata, version, entrypoints)."""
+    return TraefikSnapshot.build(
+        version=parse_version(load_fixture(version, "version.json")),
+        entrypoints=parse_entrypoints(load_fixture(version, "entrypoints.json")),
+        state=parse_rawdata(load_fixture(version, "rawdata.json")),
+    )
+
+
+def stub_traefik_paginated(aioclient_mock: Any, *, version: str = "v3.7", base_url: str = MOCK_URL) -> None:
+    """Serve a capture through the version, entrypoints and paginated list endpoints.
+
+    Every list page is registered with its recorded ``per_page``/``page``
+    query and ``X-Next-Page`` header, so the client's page size must equal
+    the index ``per_page`` (tests monkeypatch ``api.DEFAULT_PAGE_SIZE``).
+    """
+    aioclient_mock.get(f"{base_url}/api/version", json=load_fixture(version, "version.json"))
+    aioclient_mock.get(f"{base_url}/api/entrypoints", json=load_fixture(version, "entrypoints.json"))
+    index = load_fixture(version, "pages/index.json")
+    per_page = index["per_page"]
+    for kind in ("routers", "services", "middlewares"):
+        for page in index[kind]:
+            next_page = page.get("x_next_page")
+            aioclient_mock.get(
+                f"{base_url}/api/http/{kind}",
+                params={"per_page": per_page, "page": page["page"]},
+                json=load_fixture(version, f"pages/{page['file']}"),
+                headers={"X-Next-Page": next_page} if next_page is not None else None,
+            )
+
+
+@pytest.fixture
+def mock_tls_probe() -> Iterator[AsyncMock]:
+    """Replace the cert coordinator's TLS probe so no DNS lookup or socket is opened."""
+
+    async def _unreachable(host: str, port: int, **_kwargs: Any) -> dict[str, Any]:
+        return {"host": host, "port": port, "error": "unreachable", "detail": "probe disabled in tests"}
+
+    with patch(
+        "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
+        AsyncMock(side_effect=_unreachable),
+    ) as probe:
+        yield probe
 
 
 pytest_plugins = ["pytest_homeassistant_custom_component"]

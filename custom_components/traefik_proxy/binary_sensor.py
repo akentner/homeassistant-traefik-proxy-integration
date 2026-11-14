@@ -15,8 +15,8 @@ except ImportError:  # HA releases before 2026.10 define it in the package
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .api import filter_internal_items
 from .entity import TraefikProxyEntity
+from .models import Router, Status
 from .sensor import _cert_cache_availability
 from .tls import CertError, CertInfo, is_error
 
@@ -59,11 +59,10 @@ async def async_setup_entry(
     """
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
 
-    # Phase 2: read `http_routers` (was `routers` in Phase 1 — fetch_all now
-    # returns the renamed key per CONTEXT.md D-04). filter_internal_items is
-    # the canonical helper from api.py (replaces _filter_user_routers).
-    routers = filter_internal_items(coordinator.data.get("http_routers") or [])
-    router_entities = [TraefikProxyRouterBinarySensor(entry, coordinator, router) for router in routers]
+    # The snapshot holds no Traefik-internal (``@internal``) routers.
+    router_entities = [
+        TraefikProxyRouterBinarySensor(entry, coordinator, router) for router in coordinator.data.routers.values()
+    ]
     any_failing_entity = TraefikProxyAnyRouterFailingBinarySensor(entry, coordinator)
     # v0.2.0: parallel aggregates for services + middlewares so users get
     # the same any-X-failing alarm pattern across all three Traefik
@@ -98,11 +97,7 @@ async def async_setup_entry(
         """
         if not coordinator.last_update_success:
             return
-        current_routers: set[str] = set()
-        data = coordinator.data if isinstance(coordinator.data, dict) else {}
-        routers_data = data.get("http_routers") if isinstance(data, dict) else None
-        if isinstance(routers_data, list):
-            current_routers = {r["name"] for r in routers_data if isinstance(r, dict) and "name" in r}
+        current_routers = set(coordinator.data.routers)
         prefix = f"{entry.entry_id}_http_router_"
         for reg_entry in list(registry.entities.values()):
             unique_id = reg_entry.unique_id
@@ -200,37 +195,43 @@ class TraefikProxyRouterBinarySensor(TraefikProxyEntity, BinarySensorEntity):
         self,
         entry: TraefikProxyConfigEntry,
         coordinator: TraefikProxyCoordinator,
-        router: dict[str, Any],
+        router: Router,
     ) -> None:
-        router_name = router["name"]
-        # Phase 2: per-category device (CONTEXT.md D-01/D-02). The HTTP Routers
-        # device identifier is (DOMAIN, f"{entry.entry_id}_http_routers").
+        router_name = router.name
+        # Per-category device: identifier (DOMAIN, f"{entry.entry_id}_http_routers").
         super().__init__(entry, category="http_routers", description_key=router_name)
-        self._router = router
+        self._item_name = router_name
+        self._initial_router = router
         self._attr_unique_id = f"{entry.entry_id}_http_router_{router_name}"
         # Explicit entity_id prefix per CONTEXT.md D-09/D-10.
         self.entity_id = f"binary_sensor.traefik_http_router_{slugify(router_name)}"
         self._attr_name = router_name
 
     @property
-    def is_on(self) -> bool | None:
-        status: Any = self._router.get("status") if isinstance(self._router, dict) else None
-        if status is None:
-            return None
-        return bool(status == "enabled")
+    def _router(self) -> Router:
+        """Return the current model of this router from the latest snapshot.
+
+        Falls back to the last known model when the router is not part of
+        the current snapshot.
+        """
+        return self.coordinator.data.routers.get(self._item_name, self._initial_router)
+
+    @property
+    def is_on(self) -> bool:
+        return self._router.status is Status.enabled
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        router = self._router
         return {
-            "status": self._router.get("status"),
-            "rule": self._router.get("rule"),
-            "friendly_rule": _friendly_rule(self._router.get("rule")),
-            "service": self._router.get("service"),
-            # ``name`` is the raw Traefik router identifier (CONTEXT.md D-20 /
-            # ROUTER-02). Useful on dashboards even when the entity_id slug
-            # mangles special characters.
-            "name": self._router.get("name"),
-            "router_name": self._router.get("name"),
+            "status": str(router.status),
+            "rule": router.rule,
+            "friendly_rule": _friendly_rule(router.rule),
+            "service": router.service,
+            # ``name`` is the raw Traefik router identifier. Useful on
+            # dashboards even when the entity_id slug mangles special characters.
+            "name": router.name,
+            "router_name": router.name,
         }
 
     @property
@@ -239,26 +240,13 @@ class TraefikProxyRouterBinarySensor(TraefikProxyEntity, BinarySensorEntity):
 
 
 class TraefikProxyAnyRouterFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """Aggregates router health: ON when ANY router status != 'enabled'.
+    """ON when at least one HTTP router is not ``enabled``.
 
-    Single instance per config entry — never deleted (CONTEXT.md D-19).
-    Lives on the Diagnostics device alongside the reload button
-    (CONTEXT.md D-14). ``entity_registry_enabled_default=False`` per
-    PITFALLS M-12 so the diagnostic entity does not pollute the States
-    panel by default — users opt in consciously when they want the
-    "any router failing" alarm surfaced.
-
-    Per CONTEXT.md D-14 the device class is ``PROBLEM`` so the UI shows the
-    standard problem icon and groups the entity with HA's other health
-    alarms. ``is_on`` is ``True`` when at least one router is anything other
-    than ``enabled`` (``disabled``, ``warning``, ``error`` — matches the
-    semantics used by ``TraefikProxyRouterBinarySensor.is_on``).
-
-    Reads the raw ``http_routers`` list (NOT ``filter_internal_items``-ed)
-    so a failing Traefik-internal router like ``api@internal`` can also
-    surface the alarm — internal routers are filtered from per-router
-    entities (entity-id regex rejects ``@`) but the aggregate is
-    internally a normal HA entity and can hold any name.
+    Reads the snapshot's precomputed router problems (status ``warning``,
+    ``error`` or ``disabled``). Traefik-internal routers are not part of the
+    snapshot. Single instance per config entry on the Diagnostics device,
+    disabled by default so the diagnostic entity does not clutter the
+    States panel until the user opts in.
     """
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
@@ -275,29 +263,15 @@ class TraefikProxyAnyRouterFailingBinarySensor(TraefikProxyEntity, BinarySensorE
         self._attr_name = "Any router failing"
 
     @property
-    def is_on(self) -> bool | None:
-        data = self.coordinator.data
-        if not isinstance(data, dict):
-            return None
-        routers = data.get("http_routers")
-        if not isinstance(routers, list):
-            # Transient gap in coordinator data — return None so HA shows
-            # the entity as "unknown" rather than flipping to OFF and
-            # potentially masking a real failure.
-            return None
-        failing = [r for r in routers if isinstance(r, dict) and r.get("status") != "enabled"]
-        return bool(failing)
+    def is_on(self) -> bool:
+        return bool(self.coordinator.data.router_problems)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        data = self.coordinator.data
-        routers = data.get("http_routers") if isinstance(data, dict) else None
-        if not isinstance(routers, list):
-            return {"failing_router_count": 0, "failing_router_names": []}
-        failing = [r for r in routers if isinstance(r, dict) and r.get("status") != "enabled"]
+        problems = self.coordinator.data.router_problems
         return {
-            "failing_router_count": len(failing),
-            "failing_router_names": [r.get("name") for r in failing if isinstance(r, dict)],
+            "failing_router_count": len(problems),
+            "failing_router_names": list(problems),
         }
 
     @property
@@ -306,15 +280,11 @@ class TraefikProxyAnyRouterFailingBinarySensor(TraefikProxyEntity, BinarySensorE
 
 
 class TraefikProxyAnyServiceFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """Aggregates HTTP service health: ON when ANY service status != 'enabled'.
+    """ON when at least one HTTP service is not ``enabled`` or has a server down.
 
-    v0.2.0 mirror of ``TraefikProxyAnyRouterFailingBinarySensor`` for services.
-    Same PROBLEM device_class + ``entity_registry_enabled_default=False``
-    pattern (PITFALLS M-12 + CONTEXT.md D-19). Reads the raw
-    ``http_services`` list — Traefik-internal services like
-    ``api@internal`` are NOT excluded here (a failing internal service
-    is still operationally relevant even though it isn't surfaced as a
-    per-service entity).
+    Reads the snapshot's precomputed service problems. Traefik-internal
+    services are not part of the snapshot. Same diagnostic placement and
+    disabled-by-default registration as the router aggregate.
     """
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
@@ -331,26 +301,15 @@ class TraefikProxyAnyServiceFailingBinarySensor(TraefikProxyEntity, BinarySensor
         self._attr_name = "Any service failing"
 
     @property
-    def is_on(self) -> bool | None:
-        data = self.coordinator.data
-        if not isinstance(data, dict):
-            return None
-        services = data.get("http_services")
-        if not isinstance(services, list):
-            return None
-        failing = [s for s in services if isinstance(s, dict) and s.get("status") != "enabled"]
-        return bool(failing)
+    def is_on(self) -> bool:
+        return bool(self.coordinator.data.service_problems)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        data = self.coordinator.data
-        services = data.get("http_services") if isinstance(data, dict) else None
-        if not isinstance(services, list):
-            return {"failing_service_count": 0, "failing_service_names": []}
-        failing = [s for s in services if isinstance(s, dict) and s.get("status") != "enabled"]
+        problems = self.coordinator.data.service_problems
         return {
-            "failing_service_count": len(failing),
-            "failing_service_names": [s.get("name") for s in failing if isinstance(s, dict)],
+            "failing_service_count": len(problems),
+            "failing_service_names": list(problems),
         }
 
     @property
@@ -359,12 +318,10 @@ class TraefikProxyAnyServiceFailingBinarySensor(TraefikProxyEntity, BinarySensor
 
 
 class TraefikProxyAnyMiddlewareFailingBinarySensor(TraefikProxyEntity, BinarySensorEntity):
-    """Aggregates HTTP middleware health: ON when ANY middleware status != 'enabled'.
+    """ON when at least one HTTP middleware is not ``enabled``.
 
-    v0.2.0 mirror of ``TraefikProxyAnyRouterFailingBinarySensor`` for
-    middlewares. Middlewares are HTTP-only per Traefik's API surface, but
-    they still report a ``status`` field (enabled / disabled / warning /
-    error) that we aggregate here.
+    Reads the snapshot's precomputed middleware problems. Same diagnostic
+    placement and disabled-by-default registration as the router aggregate.
     """
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
@@ -381,26 +338,15 @@ class TraefikProxyAnyMiddlewareFailingBinarySensor(TraefikProxyEntity, BinarySen
         self._attr_name = "Any middleware failing"
 
     @property
-    def is_on(self) -> bool | None:
-        data = self.coordinator.data
-        if not isinstance(data, dict):
-            return None
-        middlewares = data.get("http_middlewares")
-        if not isinstance(middlewares, list):
-            return None
-        failing = [m for m in middlewares if isinstance(m, dict) and m.get("status") != "enabled"]
-        return bool(failing)
+    def is_on(self) -> bool:
+        return bool(self.coordinator.data.middleware_problems)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        data = self.coordinator.data
-        middlewares = data.get("http_middlewares") if isinstance(data, dict) else None
-        if not isinstance(middlewares, list):
-            return {"failing_middleware_count": 0, "failing_middleware_names": []}
-        failing = [m for m in middlewares if isinstance(m, dict) and m.get("status") != "enabled"]
+        problems = self.coordinator.data.middleware_problems
         return {
-            "failing_middleware_count": len(failing),
-            "failing_middleware_names": [m.get("name") for m in failing if isinstance(m, dict)],
+            "failing_middleware_count": len(problems),
+            "failing_middleware_names": list(problems),
         }
 
     @property

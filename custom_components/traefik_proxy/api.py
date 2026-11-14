@@ -9,7 +9,26 @@ from typing import Any
 
 import aiohttp
 
+from .models import (
+    Entrypoint,
+    TraefikState,
+    TraefikVersion,
+    parse_entrypoints,
+    parse_middlewares,
+    parse_routers,
+    parse_services,
+    parse_version,
+)
+
 _LOGGER = logging.getLogger(__name__)
+
+# Items requested per page from the paginated list endpoints. Traefik's own
+# default is 100; a larger page keeps a typical installation at one request
+# per kind.
+DEFAULT_PAGE_SIZE = 500
+# Upper bound for pages followed per list endpoint. Reaching it raises
+# instead of silently returning a truncated list.
+MAX_PAGES = 100
 
 # Matches Traefik's auto-generated *internal* items (CONTEXT.md D-06 /
 # PITFALLS #2). Traefik itself exposes built-in API/dashboard/ping/etc.
@@ -37,6 +56,10 @@ class TraefikProxyApiError(Exception):
 
 class TraefikProxyAuthError(TraefikProxyApiError):
     """Raised on 401/403 — caller maps to ConfigEntryAuthFailed."""
+
+
+class TraefikProxyPayloadError(TraefikProxyApiError):
+    """Raised when Traefik answers with a payload of an unexpected shape."""
 
 
 def filter_internal_items(
@@ -73,12 +96,14 @@ class TraefikProxyApiClient:
         *,
         verify_ssl: bool = True,
         request_timeout: float = 10.0,
+        page_size: int | None = None,
     ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._verify_ssl = verify_ssl
         self._request_timeout = request_timeout
+        self._page_size = DEFAULT_PAGE_SIZE if page_size is None else page_size
 
     def _headers(self) -> dict[str, str]:
         """Per-request auth header — never default header on session."""
@@ -86,20 +111,28 @@ class TraefikProxyApiClient:
             return {"Authorization": f"Bearer {self._api_key}"}
         return {}
 
-    async def _get(self, path: str) -> Any:
+    async def _get_response(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
+        """GET ``path`` and return the JSON payload and the raw ``X-Next-Page`` header."""
         url = f"{self._base_url}{path}"
         try:
             async with asyncio.timeout(self._request_timeout):
                 async with self._session.get(
                     url,
                     headers=self._headers(),
+                    params=params,
                     ssl=self._verify_ssl,
                 ) as response:
-                    _LOGGER.debug("path=%s status=%s", path, response.status)
+                    _LOGGER.debug(
+                        "path=%s page=%s status=%s",
+                        path,
+                        params.get("page") if params else None,
+                        response.status,
+                    )
                     if response.status in (401, 403):
                         raise TraefikProxyAuthError(f"Auth failed for {path}: {response.status}")
                     response.raise_for_status()
-                    return await response.json(content_type=None)
+                    payload = await response.json(content_type=None)
+                    return payload, response.headers.get("X-Next-Page")
         except aiohttp.ClientResponseError as err:
             # raise_for_status already raised; re-classify for safety
             if err.status in (401, 403):
@@ -107,6 +140,71 @@ class TraefikProxyApiClient:
             raise TraefikProxyApiError(str(err)) from err
         except (TimeoutError, aiohttp.ClientConnectorError, aiohttp.InvalidUrlClientError) as err:
             raise TraefikProxyApiError(str(err)) from err
+
+    async def _get(self, path: str) -> Any:
+        payload, _ = await self._get_response(path)
+        return payload
+
+    async def _get_paginated(self, path: str) -> list[Any]:
+        """Collect every page of a Traefik list endpoint.
+
+        Traefik announces the next page in ``X-Next-Page``; on the last page
+        it repeats a page number that is not greater than the current one.
+        The loop continues only while the header is an integer greater than
+        the current page, and raises once more than ``MAX_PAGES`` pages
+        would be needed.
+        """
+        items: list[Any] = []
+        page = 1
+        while True:
+            payload, next_page = await self._get_response(path, {"per_page": self._page_size, "page": page})
+            if not isinstance(payload, list):
+                raise TraefikProxyPayloadError(f"{path}: unexpected payload shape")
+            items.extend(payload)
+            try:
+                announced = int(next_page) if next_page is not None else None
+            except ValueError:
+                announced = None
+            if announced is None or announced <= page:
+                return items
+            if announced > MAX_PAGES:
+                raise TraefikProxyPayloadError(f"{path}: more than {MAX_PAGES} pages")
+            page = announced
+
+    async def async_get_version(self) -> TraefikVersion:
+        """GET /api/version as a parsed model."""
+        path = "/api/version"
+        payload = await self._get(path)
+        try:
+            return parse_version(payload)
+        except (ValueError, TypeError, KeyError) as err:
+            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+
+    async def async_get_entrypoints(self) -> dict[str, Entrypoint]:
+        """GET /api/entrypoints as parsed models keyed by name."""
+        path = "/api/entrypoints"
+        payload = await self._get(path)
+        try:
+            return parse_entrypoints(payload)
+        except (ValueError, TypeError, KeyError) as err:
+            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+
+    async def async_get_state(self) -> TraefikState:
+        """Fetch HTTP routers, services and middlewares as parsed models.
+
+        The three list endpoints are requested one after another, each
+        followed across all of its pages.
+        """
+        path = "/api/http/routers"
+        try:
+            routers = parse_routers(await self._get_paginated(path))
+            path = "/api/http/services"
+            services = parse_services(await self._get_paginated(path))
+            path = "/api/http/middlewares"
+            middlewares = parse_middlewares(await self._get_paginated(path))
+        except (ValueError, TypeError, KeyError) as err:
+            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+        return TraefikState(routers=routers, services=services, middlewares=middlewares)
 
     # --- Read endpoints ---
     async def get_version(self) -> dict[str, Any]:

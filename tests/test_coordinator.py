@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
@@ -21,6 +24,8 @@ from custom_components.traefik_proxy.const import (
 )
 from custom_components.traefik_proxy.coordinator import TraefikProxyCoordinator
 from custom_components.traefik_proxy.data import TraefikRuntimeData
+from custom_components.traefik_proxy.models import TraefikSnapshot
+from tests.conftest import load_fixture, stub_traefik_paginated
 
 MOCK_URL = "https://traefik.example.com:8080"
 
@@ -75,7 +80,7 @@ async def test_setup_creates_coordinator_in_runtime_data(hass, aioclient_mock) -
     assert isinstance(entry.runtime_data, TraefikRuntimeData)
     assert isinstance(entry.runtime_data.coordinator, TraefikProxyCoordinator)
     assert isinstance(entry.runtime_data.cert_coordinator, CertCoordinator)
-    assert entry.runtime_data.coordinator.data["version"]["Version"] == "3.1.4"
+    assert entry.runtime_data.coordinator.data.version.version == "3.1.4"
 
 
 async def test_unload_returns_to_not_loaded(hass, aioclient_mock) -> None:
@@ -180,3 +185,79 @@ async def test_single_client_owner(hass, aioclient_mock) -> None:
 
     runtime = entry.runtime_data
     assert runtime.coordinator.client is runtime.client
+
+
+def _requested_paths(aioclient_mock) -> list[str]:
+    """Return the URL paths of every recorded request, in order."""
+    return [call[1].path for call in aioclient_mock.mock_calls]
+
+
+async def _setup_from_capture(hass, aioclient_mock, monkeypatch: pytest.MonkeyPatch) -> MockConfigEntry:
+    """Set up an entry served by the paginated v3.7 capture."""
+    monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", load_fixture("v3.7", "pages/index.json")["per_page"])
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+async def test_real_fixture_snapshot_reaches_router_entity(
+    hass, aioclient_mock, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """Real v3.7 pages flow through models, client and coordinator into router entities."""
+    entry = await _setup_from_capture(hass, aioclient_mock, monkeypatch)
+    coordinator = entry.runtime_data.coordinator
+
+    assert isinstance(coordinator.data, TraefikSnapshot)
+    assert len(coordinator.data.routers) == 128
+    enabled = hass.states.get(f"binary_sensor.traefik_http_router_{slugify('secure@file')}")
+    broken = hass.states.get(f"binary_sensor.traefik_http_router_{slugify('broken-missing-service@file')}")
+    assert enabled is not None and enabled.state == "on"
+    assert broken is not None and broken.state == "off"
+    assert broken.attributes["status"] == "error"
+
+    setup_paths = _requested_paths(aioclient_mock)
+    assert setup_paths.count("/api/version") == 1
+    assert setup_paths.count("/api/entrypoints") == 1
+
+    aioclient_mock.mock_calls.clear()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success is True
+    cycle_paths = _requested_paths(aioclient_mock)
+    assert "/api/version" not in cycle_paths
+    assert "/api/entrypoints" not in cycle_paths
+    assert cycle_paths.count("/api/http/routers") == 2
+
+
+async def test_equal_snapshots_do_not_notify_listeners(
+    hass, aioclient_mock, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """always_update=False: an unchanged snapshot does not call listeners; a changed one does."""
+    entry = await _setup_from_capture(hass, aioclient_mock, monkeypatch)
+    coordinator = entry.runtime_data.coordinator
+    calls: list[None] = []
+    entry.async_on_unload(coordinator.async_add_listener(lambda: calls.append(None)))
+
+    first = coordinator.data
+    await coordinator.async_refresh()
+    after_first = len(calls)
+    await coordinator.async_refresh()
+
+    assert coordinator.data == first
+    assert after_first == 0
+    assert len(calls) == after_first
+
+    # Positive control: a changed router set is published to listeners.
+    aioclient_mock.clear_requests()
+    _stub_all_endpoints(
+        aioclient_mock, routers=[{"name": "only@file", "status": "enabled", "rule": "Host(`a.example.com`)"}]
+    )
+    await coordinator.async_refresh()
+
+    assert set(coordinator.data.routers) == {"only@file"}
+    assert len(calls) == after_first + 1
