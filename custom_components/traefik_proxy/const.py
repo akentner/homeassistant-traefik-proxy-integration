@@ -1,5 +1,6 @@
 """Constants for the Traefik integration."""
 
+from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "traefik_proxy"
@@ -20,6 +21,12 @@ DEFAULT_NAME: Final = "Traefik Proxy"
 # that vanished from the last successful snapshot. Order is the ENUM options order.
 STATE_MISSING: Final = "missing"
 ITEM_STATE_OPTIONS: Final = ("enabled", "warning", "error", "disabled", STATE_MISSING)
+
+# A missing item's entity is removed once it has been missing this long (wall
+# clock, survives restarts). The check runs every MISSING_CHECK_INTERVAL, so
+# removal lands at most one interval after the deadline.
+MISSING_GRACE_PERIOD: Final = timedelta(hours=24)
+MISSING_CHECK_INTERVAL: Final = timedelta(minutes=5)
 
 # Clamps for Options Flow (Phase 2 — Plan 02-02 fills these in).
 # MIN_SCAN_INTERVAL/MAX_SCAN_INTERVAL bound the scan-interval knob

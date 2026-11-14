@@ -30,7 +30,7 @@ from .const import (
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
 from .entity import async_setup_devices
-from .entity_manager import TraefikEntityManager
+from .entity_manager import TraefikEntityManager, async_remove_missing_store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -223,9 +223,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
        ``ConfigEntryNotReady``. On failure an empty cache is seeded via
        ``async_set_updated_data({})`` so the platforms see a defined state
        instead of awaiting an unfinished refresh.
-    4. Register the main device and the Routers / Services / Certificates
+    4. Load the entity manager: stored missing-since times, the entry's
+       registry entries and the deadline timer.
+    5. Register the main device and the Routers / Services / Certificates
        sub-devices.
-    5. Forward platforms (sensor, binary_sensor, button).
+    6. Forward platforms (sensor, binary_sensor, button).
     """
     client = build_api_client(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
@@ -255,6 +257,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         # instead of awaiting an unfinished refresh.
         cert_coordinator.async_set_updated_data({})
 
+    await entry.runtime_data.entity_manager.async_load()
+
     # Every device exists, named and linked, before the first entity attaches.
     async_setup_devices(hass, entry)
 
@@ -282,3 +286,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry
     so we do not need explicit teardown here.
     """
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
+    """Delete the data the entry keeps outside the registries (its missing-since Store)."""
+    await async_remove_missing_store(hass, entry.entry_id)

@@ -360,7 +360,6 @@ async def _setup_with_ghost(hass: HomeAssistant, aioclient_mock: Any, entry: Any
     return reg_entry.entity_id
 
 
-@pytest.mark.xfail(strict=True, reason="RED: grace-period removal not implemented yet")
 async def test_vanished_router_removed_after_grace_period(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
     """A vanished router keeps its registry entry until 24 h have passed; the next check removes it."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
@@ -388,6 +387,19 @@ async def test_vanished_router_removed_after_grace_period(hass, aioclient_mock, 
     assert entry.runtime_data.entity_manager.missing_since(ROUTERS, ROUTER) is None
 
 
+async def test_grace_deadline_is_inclusive(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
+    """A router missing for exactly the grace period is removed by the next check."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    entity_id = _router_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+
+    freezer.tick(GRACE)
+    await _run_deadline_check(hass)
+    assert er.async_get(hass).async_get(entity_id) is None
+
+
 async def test_reappearing_router_inside_grace_keeps_entity(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
     """A router back inside the grace period keeps its entity; the original deadline removes nothing."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
@@ -410,7 +422,6 @@ async def test_reappearing_router_inside_grace_keeps_entity(hass, aioclient_mock
     assert "missing_since" not in state.attributes
 
 
-@pytest.mark.xfail(strict=True, reason="RED: missing_since is not persisted yet")
 async def test_grace_period_survives_entry_reload(hass, aioclient_mock, mock_tls_probe, freezer, hass_storage) -> None:  # type: ignore[no-untyped-def]
     """missing_since is persisted per entry: after a reload the router is missing since the original time."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
@@ -442,7 +453,6 @@ async def test_grace_period_survives_entry_reload(hass, aioclient_mock, mock_tls
     assert hass.states.get(entity_id) is None
 
 
-@pytest.mark.xfail(strict=True, reason="RED: orphan registry entries are not adopted yet")
 async def test_orphan_registry_entry_adopted_and_removed_after_grace(  # type: ignore[no-untyped-def]
     hass, aioclient_mock, mock_tls_probe, freezer, hass_storage
 ) -> None:
@@ -469,7 +479,6 @@ async def test_orphan_registry_entry_adopted_and_removed_after_grace(  # type: i
     assert hass_storage[_store_key("orphan-entry")]["data"] == {}
 
 
-@pytest.mark.xfail(strict=True, reason="RED: stored deadlines are not applied at setup yet")
 async def test_expired_stored_orphan_removed_at_setup(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
     """An orphan whose stored missing_since is older than 24 h is removed during setup and never gets a state."""
     key = _store_key("expired-entry")
@@ -528,7 +537,6 @@ async def test_failed_cycle_never_marks_missing(hass, aioclient_mock, mock_tls_p
     assert _store_key(entry.entry_id) not in hass_storage
 
 
-@pytest.mark.xfail(strict=True, reason="RED: missing-since Store and async_remove_entry not implemented yet")
 async def test_remove_entry_deletes_missing_store(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
     """Removing the config entry deletes its missing-since Store."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
