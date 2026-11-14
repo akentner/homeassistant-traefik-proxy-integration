@@ -1,0 +1,29 @@
+{
+  "middlewares": [
+    {
+      "file": "middlewares_1.json",
+      "page": 1,
+      "x_next_page": "1"
+    }
+  ],
+  "per_page": 100,
+  "routers": [
+    {
+      "file": "routers_1.json",
+      "page": 1,
+      "x_next_page": "2"
+    },
+    {
+      "file": "routers_2.json",
+      "page": 2,
+      "x_next_page": "1"
+    }
+  ],
+  "services": [
+    {
+      "file": "services_1.json",
+      "page": 1,
+      "x_next_page": "1"
+    }
+  ]
+}

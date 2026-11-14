@@ -1,0 +1,240 @@
+[
+  {
+    "name": "api@internal",
+    "provider": "internal",
+    "status": "enabled",
+    "usedBy": [
+      "traefik-api@file"
+    ]
+  },
+  {
+    "loadBalancer": {
+      "passHostHeader": true,
+      "servers": [
+        {
+          "url": "http://backend.example.com:80"
+        }
+      ]
+    },
+    "name": "bulk-svc@file",
+    "provider": "file",
+    "serverStatus": {
+      "http://backend.example.com:80": "UP"
+    },
+    "status": "enabled",
+    "type": "loadbalancer",
+    "usedBy": [
+      "bulk-000@file",
+      "bulk-001@file",
+      "bulk-002@file",
+      "bulk-003@file",
+      "bulk-004@file",
+      "bulk-005@file",
+      "bulk-006@file",
+      "bulk-007@file",
+      "bulk-008@file",
+      "bulk-009@file",
+      "bulk-010@file",
+      "bulk-011@file",
+      "bulk-012@file",
+      "bulk-013@file",
+      "bulk-014@file",
+      "bulk-015@file",
+      "bulk-016@file",
+      "bulk-017@file",
+      "bulk-018@file",
+      "bulk-019@file",
+      "bulk-020@file",
+      "bulk-021@file",
+      "bulk-022@file",
+      "bulk-023@file",
+      "bulk-024@file",
+      "bulk-025@file",
+      "bulk-026@file",
+      "bulk-027@file",
+      "bulk-028@file",
+      "bulk-029@file",
+      "bulk-030@file",
+      "bulk-031@file",
+      "bulk-032@file",
+      "bulk-033@file",
+      "bulk-034@file",
+      "bulk-035@file",
+      "bulk-036@file",
+      "bulk-037@file",
+      "bulk-038@file",
+      "bulk-039@file",
+      "bulk-040@file",
+      "bulk-041@file",
+      "bulk-042@file",
+      "bulk-043@file",
+      "bulk-044@file",
+      "bulk-045@file",
+      "bulk-046@file",
+      "bulk-047@file",
+      "bulk-048@file",
+      "bulk-049@file",
+      "bulk-050@file",
+      "bulk-051@file",
+      "bulk-052@file",
+      "bulk-053@file",
+      "bulk-054@file",
+      "bulk-055@file",
+      "bulk-056@file",
+      "bulk-057@file",
+      "bulk-058@file",
+      "bulk-059@file",
+      "bulk-060@file",
+      "bulk-061@file",
+      "bulk-062@file",
+      "bulk-063@file",
+      "bulk-064@file",
+      "bulk-065@file",
+      "bulk-066@file",
+      "bulk-067@file",
+      "bulk-068@file",
+      "bulk-069@file",
+      "bulk-070@file",
+      "bulk-071@file",
+      "bulk-072@file",
+      "bulk-073@file",
+      "bulk-074@file",
+      "bulk-075@file",
+      "bulk-076@file",
+      "bulk-077@file",
+      "bulk-078@file",
+      "bulk-079@file",
+      "bulk-080@file",
+      "bulk-081@file",
+      "bulk-082@file",
+      "bulk-083@file",
+      "bulk-084@file",
+      "bulk-085@file",
+      "bulk-086@file",
+      "bulk-087@file",
+      "bulk-088@file",
+      "bulk-089@file",
+      "bulk-090@file",
+      "bulk-091@file",
+      "bulk-092@file",
+      "bulk-093@file",
+      "bulk-094@file",
+      "bulk-095@file",
+      "bulk-096@file",
+      "bulk-097@file",
+      "bulk-098@file",
+      "bulk-099@file",
+      "bulk-100@file",
+      "bulk-101@file",
+      "bulk-102@file",
+      "bulk-103@file",
+      "bulk-104@file",
+      "bulk-105@file",
+      "bulk-106@file",
+      "bulk-107@file",
+      "bulk-108@file",
+      "bulk-109@file",
+      "bulk-110@file",
+      "bulk-111@file",
+      "bulk-112@file",
+      "bulk-113@file",
+      "bulk-114@file",
+      "bulk-115@file",
+      "bulk-116@file",
+      "bulk-117@file",
+      "bulk-118@file",
+      "bulk-119@file"
+    ]
+  },
+  {
+    "name": "dashboard@internal",
+    "provider": "internal",
+    "status": "enabled"
+  },
+  {
+    "loadBalancer": {
+      "passHostHeader": true,
+      "servers": [
+        {
+          "url": "http://backend.example.com:80"
+        }
+      ]
+    },
+    "name": "file-ok-svc@file",
+    "provider": "file",
+    "serverStatus": {
+      "http://backend.example.com:80": "UP"
+    },
+    "status": "enabled",
+    "type": "loadbalancer",
+    "usedBy": [
+      "chain-router@file",
+      "file-ok@file",
+      "secure@file",
+      "warn-unknown-entrypoint@file"
+    ]
+  },
+  {
+    "loadBalancer": {
+      "healthCheck": {
+        "followRedirects": true,
+        "interval": "2s",
+        "path": "/",
+        "timeout": "1s"
+      },
+      "passHostHeader": true,
+      "servers": [
+        {
+          "url": "http://backend.example.com:80"
+        },
+        {
+          "url": "http://192.0.2.10:80"
+        }
+      ]
+    },
+    "name": "lb-mixed@file",
+    "provider": "file",
+    "serverStatus": {
+      "http://192.0.2.10:80": "DOWN",
+      "http://backend.example.com:80": "UP"
+    },
+    "status": "enabled",
+    "type": "loadbalancer",
+    "usedBy": [
+      "lb-router@file"
+    ]
+  },
+  {
+    "name": "noop@internal",
+    "provider": "internal",
+    "status": "enabled"
+  },
+  {
+    "name": "ping@internal",
+    "provider": "internal",
+    "status": "enabled",
+    "usedBy": [
+      "ping@internal"
+    ]
+  },
+  {
+    "loadBalancer": {
+      "passHostHeader": true,
+      "servers": [
+        {
+          "url": "http://192.0.2.1:80"
+        }
+      ]
+    },
+    "name": "whoami@docker",
+    "provider": "docker",
+    "serverStatus": {
+      "http://192.0.2.1:80": "UP"
+    },
+    "status": "enabled",
+    "type": "loadbalancer",
+    "usedBy": [
+      "whoami@docker"
+    ]
+  }
+]

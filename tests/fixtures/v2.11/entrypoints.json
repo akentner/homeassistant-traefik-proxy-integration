@@ -1,0 +1,102 @@
+[
+  {
+    "address": ":8080",
+    "forwardedHeaders": {},
+    "http": {
+      "maxHeaderBytes": 1048576,
+      "maxHeaderValueCount": 500,
+      "sanitizePath": true
+    },
+    "http2": {
+      "maxConcurrentStreams": 250
+    },
+    "name": "traefik",
+    "transport": {
+      "lifeCycle": {
+        "graceTimeOut": "10s"
+      },
+      "respondingTimeouts": {
+        "idleTimeout": "3m0s",
+        "readTimeout": "1m0s"
+      }
+    },
+    "udp": {
+      "timeout": "3s"
+    }
+  },
+  {
+    "address": ":9999/udp",
+    "forwardedHeaders": {},
+    "http": {
+      "maxHeaderBytes": 1048576,
+      "maxHeaderValueCount": 500,
+      "sanitizePath": true
+    },
+    "http2": {
+      "maxConcurrentStreams": 250
+    },
+    "name": "udp-ep",
+    "transport": {
+      "lifeCycle": {
+        "graceTimeOut": "10s"
+      },
+      "respondingTimeouts": {
+        "idleTimeout": "3m0s",
+        "readTimeout": "1m0s"
+      }
+    },
+    "udp": {
+      "timeout": "3s"
+    }
+  },
+  {
+    "address": ":80",
+    "forwardedHeaders": {},
+    "http": {
+      "maxHeaderBytes": 1048576,
+      "maxHeaderValueCount": 500,
+      "sanitizePath": true
+    },
+    "http2": {
+      "maxConcurrentStreams": 250
+    },
+    "name": "web",
+    "transport": {
+      "lifeCycle": {
+        "graceTimeOut": "10s"
+      },
+      "respondingTimeouts": {
+        "idleTimeout": "3m0s",
+        "readTimeout": "1m0s"
+      }
+    },
+    "udp": {
+      "timeout": "3s"
+    }
+  },
+  {
+    "address": ":443",
+    "forwardedHeaders": {},
+    "http": {
+      "maxHeaderBytes": 1048576,
+      "maxHeaderValueCount": 500,
+      "sanitizePath": true
+    },
+    "http2": {
+      "maxConcurrentStreams": 250
+    },
+    "name": "websecure",
+    "transport": {
+      "lifeCycle": {
+        "graceTimeOut": "10s"
+      },
+      "respondingTimeouts": {
+        "idleTimeout": "3m0s",
+        "readTimeout": "1m0s"
+      }
+    },
+    "udp": {
+      "timeout": "3s"
+    }
+  }
+]

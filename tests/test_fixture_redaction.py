@@ -141,3 +141,109 @@ def test_htpasswd_hash_is_read_from_scenario(capture: ModuleType) -> None:
     scenario = (TESTS_DIR / "traefik" / "dynamic" / "scenario.yml").read_text()
     assert capture.htpasswd_hash().startswith("$2")
     assert f"{capture.HARNESS_USER}:{capture.htpasswd_hash()}" in scenario
+
+
+# ---------------------------------------------------------------------------
+# Scenario coverage: a thin capture must fail, not pass
+# ---------------------------------------------------------------------------
+
+
+def _load(gen: str, rel: str) -> Any:
+    path = FIXTURES_DIR / gen / rel
+    assert path.is_file(), f"{gen}: missing capture file {rel}"
+    return json.loads(path.read_text())
+
+
+@pytest.mark.parametrize("gen", GENERATIONS)
+def test_capture_covers_scenario(gen: str) -> None:
+    """Each generation contains every scenario element the later plans rely on."""
+    rawdata = _load(gen, "rawdata.json")
+    routers: dict[str, Any] = rawdata.get("routers", {})
+    services: dict[str, Any] = rawdata.get("services", {})
+
+    for provider in ("docker", "file", "internal"):
+        assert any(name.endswith(f"@{provider}") for name in routers), f"{gen}: no @{provider} router in rawdata"
+    assert any(router.get("error") for router in routers.values()), f"{gen}: no router with a non-empty error list"
+    assert any({"UP", "DOWN"} <= set((service.get("serverStatus") or {}).values()) for service in services.values()), (
+        f"{gen}: no service whose serverStatus holds both UP and DOWN"
+    )
+    assert any((router.get("tls") or {}).get("domains") for router in routers.values()), (
+        f"{gen}: no router with tls.domains"
+    )
+    assert len(routers) > 100, f"{gen}: only {len(routers)} routers; the paginated path needs more than 100"
+
+    index = _load(gen, "pages/index.json")
+    router_pages = index.get("routers", [])
+    assert len(router_pages) >= 2, f"{gen}: routers fit on {len(router_pages)} page(s); expected at least 2"
+    paged = [item for entry in router_pages for item in _load(gen, f"pages/{entry['file']}")]
+    assert len(paged) == len(routers), f"{gen}: {len(paged)} routers across pages vs {len(routers)} in rawdata"
+
+
+def test_v37_capture_has_certificates() -> None:
+    """The v3.7 capture includes /api/certificates (Phase 6 input)."""
+    certificates = _load("v3.7", "certificates.json")
+    assert isinstance(certificates, list), "v3.7: certificates.json is not a list"
+    assert certificates, "v3.7: certificates.json is empty"
+
+
+# ---------------------------------------------------------------------------
+# Redactor behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_redactor_maps_ips_consistently(capture: ModuleType) -> None:
+    """Same source IP -> same documentation IP (keys and values); distinct IPs stay distinct."""
+    redactor = capture.Redactor(hostname="", username="")
+    source = {
+        "loadBalancer": {"servers": [{"url": "http://10.1.2.3:80"}, {"url": "http://172.16.5.4:80"}]},
+        "serverStatus": {"http://10.1.2.3:80": "UP", "http://172.16.5.4:80": "DOWN"},
+        "middleware": {"basicAuth": {"users": ["someone:$apr1$abc$def"], "realm": "r"}},
+    }
+    redacted = redactor.redact(source)
+
+    servers = [server["url"] for server in redacted["loadBalancer"]["servers"]]
+    assert sorted(redacted["serverStatus"]) == sorted(servers), "dict-key and value mappings differ"
+    assert servers[0] != servers[1], "distinct source IPs collapsed into one"
+    doc_net = ipaddress.ip_network("192.0.2.0/24")
+    for url in servers:
+        host = url.removeprefix("http://").split(":")[0]
+        assert ipaddress.ip_address(host) in doc_net, f"{host} is outside 192.0.2.0/24"
+    assert redacted["middleware"]["basicAuth"] == {"users": ["redacted:redacted"], "realm": "r"}
+    assert "10.1.2.3" not in json.dumps(redacted)
+    assert "172.16.5.4" not in json.dumps(redacted)
+
+
+def test_redactor_never_reuses_reserved_documentation_ip(capture: ModuleType) -> None:
+    """A documentation IP already in the capture is never handed out for a private IP."""
+    redactor = capture.Redactor(hostname="", username="")
+    source = {"a": "http://10.0.0.1:80", "b": "http://192.0.2.1:80", "c": "fd00::1"}
+    redactor.reserve(source)
+    redacted = redactor.redact(source)
+    assert redacted["b"] == "http://192.0.2.1:80"
+    assert redacted["a"] not in {"http://192.0.2.1:80", "http://10.0.0.1:80"}
+    assert ipaddress.ip_address(redacted["c"]) in ipaddress.ip_network("2001:db8::/32")
+
+
+def test_redactor_replaces_identifiers(capture: ModuleType) -> None:
+    """Machine host/user names, UUIDs and container IDs are normalised."""
+    redactor = capture.Redactor(hostname="build-box", username="alice")
+    text = "build-box alice 123e4567-e89b-12d3-a456-426614174000 0123456789ab " + "ab12" * 16
+    assert redactor.redact_text(text) == (
+        "capture-host.example.org capture-user 00000000-0000-0000-0000-000000000000 000000000000 " + "0" * 64
+    )
+
+
+# ---------------------------------------------------------------------------
+# Harness isolation
+# ---------------------------------------------------------------------------
+
+
+def test_harness_is_not_collectable() -> None:
+    """Nothing under tests/traefik looks like a test module or conftest to pytest."""
+    harness = TESTS_DIR / "traefik"
+    offenders = sorted(
+        str(path.relative_to(TESTS_DIR))
+        for pattern in ("test_*.py", "*_test.py", "conftest.py")
+        for path in harness.rglob(pattern)
+    )
+    assert not offenders, f"collectable files in the capture harness: {offenders}"

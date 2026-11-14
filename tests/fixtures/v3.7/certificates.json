@@ -1,0 +1,21 @@
+[
+  {
+    "certFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "commonName": "secure.example.com",
+    "issuerCN": "secure.example.com",
+    "keySize": 256,
+    "keyType": "ECDSA",
+    "name": "0000000000000000000000000000000000000000000000000000000000000000",
+    "notAfter": "2027-02-12T00:17:40Z",
+    "notBefore": "2026-11-13T00:17:40Z",
+    "publicKeyFingerprint": "0000000000000000000000000000000000000000000000000000000000000000",
+    "sans": [
+      "secure.example.com",
+      "www.secure.example.com"
+    ],
+    "serialNumber": "455146371953818928500261042643525613849885038955",
+    "signatureAlgorithm": "ECDSA-SHA256",
+    "status": "enabled",
+    "version": "v3"
+  }
+]
