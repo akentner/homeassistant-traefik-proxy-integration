@@ -194,7 +194,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       `OSError`) or `TraefikProxyPayloadError` (invalid JSON or shape);
       production code contains no `assert`.
       (A-15 client part, A-16)
-- [ ] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
+- [x] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
       dataclass holding client, coordinator and cert coordinator. (A-11)
 - [ ] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
       `dict[name, Model]` per kind and aggregates (counts per status, problem
@@ -440,7 +440,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-02 | Phase 4 | Pending |
 | DATA-03 | Phase 4 | Pending |
 | DATA-04 | Phase 4 | Pending |
-| DATA-05 | Phase 4 | Pending |
+| DATA-05 | Phase 4 | Complete |
 | DATA-06 | Phase 4 | Pending |
 | DATA-07 | Phase 4 | Pending |
 | ENT-01 | Phase 5 | Pending |

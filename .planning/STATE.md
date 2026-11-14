@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-11-14T00:21:32.960Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-11-14T00:32:23.162Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: 668b62001815f62abed97ebd678dd3876d780a4d
+state_head: e6a9c694b23f68f32cc116d7a5c23553f3fc93c6
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 12
+  completed_plans: 13
 milestone_name: milestone
 ---
 
@@ -31,9 +31,9 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: 2 of 6
-Status: Executing Phase 4 (04-01 complete)
-Last activity: 2026-11-14 - 04-01 complete: real redacted Traefik v2.11/v3.7 fixtures + capture harness
+Plan: 3 of 6
+Status: Ready to execute
+Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
 
@@ -76,6 +76,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 04 P01 | 8min | 2 tasks | 23 files |
+| Phase 04 P02 | 8min | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -115,6 +116,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-01: Traefik v2.11.63 and v3.7.19 send X-Next-Page: 1 on the last page; client follows the header only while int(value) > current page (D-07 rule)
 - [Phase 04]: 04-01: Observed status strings are only enabled/warning/disabled (no literal error); disabled + non-empty error[] is the D-02 error case; services stay enabled with a DOWN server
 - [Phase 04]: 04-01: --ping on the traefik entrypoint provides the @internal router (ping@internal) because insecure API mode stays off
+- [Phase 04]: 04-02: TraefikRuntimeData owns the only API client; TraefikProxyCoordinator.client is a read-only property over runtime_data.client, so an options change replaces the client in one statement
+- [Phase 04]: 04-02: entry.runtime_data is assigned before both first refreshes; platforms read runtime_data.coordinator/.cert_coordinator directly (no getattr, cert block always runs)
 
 ### Pending Todos
 
@@ -156,7 +159,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T00:21:32.909Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-11-14T00:32:23.115Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
