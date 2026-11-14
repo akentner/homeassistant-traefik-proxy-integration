@@ -220,7 +220,8 @@ Requirements for initial release. Each maps to a roadmap phase.
       (subscribed to the cert coordinator) share one `DeviceInfo` factory: main
       device `Traefik (<host>)` with `entry_type=SERVICE`,
       `configuration_url=<url>/dashboard/` and `sw_version` kept current;
-      sub-devices Routers / Services / Certificates via `via_device`. (A-07,
+      sub-devices Routers / Services / Certificates linked to it via the
+      registry `via_device_id` (no deprecated `DeviceInfo.via_device`). (A-07,
       A-21, U-04)
 - [ ] **ENT-04**: Routers and services are `sensor` entities with
       `device_class=enum` (`enabled`, `warning`, `error`, `disabled`,
@@ -241,11 +242,13 @@ Requirements for initial release. Each maps to a roadmap phase.
       state icons; every platform sets `PARALLEL_UPDATES`. (U-02)
 - [ ] **ENT-09**: Upgrading from 0.3.0 removes the old router/service
       `binary_sensor` and reload-button registry entries in a config-entry
-      migration and shows a non-fixable repair notice (HA 2026.3 API, removed
-      on unload).
+      migration and shows a non-fixable, persistent repair notice (HA 2026.3
+      API) that the user dismisses and that is deleted when the entry is
+      removed (amended by M34: not deleted on unload).
 - [ ] **ENT-10**: The option "create per-router/per-service entities"
-      (default on) is honoured; when off, only aggregate and diagnostic entities
-      exist and existing per-item entities are removed.
+      (default on) is honoured; when off, no per-router or per-service entity
+      exists (aggregate, diagnostic and certificate entities remain) and
+      existing per-router/per-service entities are removed.
 
 ### Certificates (CERT) — Phase 6
 

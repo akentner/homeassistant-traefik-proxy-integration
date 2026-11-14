@@ -331,7 +331,7 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
   4. One main device `Traefik (<host>)` (`entry_type=SERVICE`,
      `configuration_url=<url>/dashboard/`, `sw_version` updated when Traefik is
      upgraded) with sub-devices Routers / Services / Certificates linked via
-     `via_device`; all static entity names come from `translation_key` with
+     the registry `via_device_id` (no deprecated `DeviceInfo.via_device`); all static entity names come from `translation_key` with
      `en.json` + `de.json` entity strings and `icons.json` (state icons);
      every platform declares `PARALLEL_UPDATES`.
   5. The reload button, the `traefik_proxy.reload_routers` service,
@@ -340,8 +340,9 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      install from 0.3.0 removes the old router/service `binary_sensor` and
      reload-button registry entries via a config-entry migration and raises a
      non-fixable repair notice explaining the new entity IDs; with the option
-     "create per-router/per-service entities" set to off, only aggregate
-     entities exist. Cert entities subclass a `TraefikCertEntity` subscribed to
+     "create per-router/per-service entities" set to off, no per-router or
+     per-service entity exists (aggregate, diagnostic and certificate entities
+     remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
 **Plans**: TBD
@@ -401,6 +402,7 @@ redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
 **Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, DIAG-04
 **Audit items**: A-15 flow part, A-17, A-18, A-22, U-03, U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (§4.4 moot: services removed in Phase 5)
 **Carry-over (Phase 4 review, `04-REVIEW.md`)**: IN-01 (an http-to-https redirect drops the Authorization header and surfaces as `invalid_auth` / reauth instead of a clear "use https" error); IN-04 (a stored token the new `Auth` rejects fails setup instead of starting reauth); IN-08 (a stored entry with credentials in the URL plus a token retries setup forever and only shows "/api/version: ValueError"; the basic-auth selector and migration must move URL userinfo into the credential fields or raise a repair telling the user what to fix); IN-09 (`InvalidUrl(url)` in `config_flow.py` keeps the URL including its userinfo password in the exception args; raise it without the URL). WR-03 (update-listener leak) is already covered by SC2.
+**Carry-over (Phase 4 re-review, `04-REVIEW.md` @ 9ef58b3, M33)**: IN-10 (`_check_url_shape` lets `urlparse`'s `ValueError` escape: `http://[::1` aborts the user step with "Unknown error" and a traceback, and the reconfigure step hits it even earlier through `urlparse(...).hostname`; wrap the parse in `try/except ValueError: raise InvalidUrl from None` and run the shape check before computing the host in reconfigure).
 **Success Criteria** (what must be TRUE):
 
   1. The user step offers an auth selector (none / basic username+password /
@@ -445,6 +447,7 @@ tag and catalog PR themselves remain the user's action.
 **Requirements**: REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, DIST-04, DOCS-02, DOCS-04
 **Audit items**: A-19, B-01..B-06, H-01..H-10, H-12; research §2, §3, §6 Q1/Q7/Q8
 **Carry-over (Phase 4 review)**: `pyproject.toml` `addopts` measures `--cov=custom_components.traefik`, a package that no longer exists; switch to `--cov=custom_components.traefik_proxy` and gate CI on it. Clear `.planning/phases/04-data-layer-correct-lean/deferred-items.md` (SyntaxWarning from the non-raw docstring in `tests/test_binary_sensor.py:35`) as part of the docstring sweep.
+**Carry-over (Phase 4 re-review, `04-REVIEW.md` @ 9ef58b3, M33)**: IN-11 (cert entities keep a redundant `_coordinator` alias of `self.coordinator`; drop it and read `self.coordinator` everywhere — close as already resolved if the Phase 5 cert-entity rewrite removed it); IN-12 (the probe-clock matrix row and `04-REVIEW-FIX.md` over-claim the timing "first probe one hour after the switch, never in a failing cycle"; correct the comment and add tests for an off-grid switch, a probe due in a failing cycle and a probe due in a recovering cycle); IN-13 (add `RAWDATA_PROBE_INTERVAL = timedelta(hours=1)`, give `_interval_elapsed(since, interval)` an interval parameter, rename `_probe_armed_at` to `_probe_clock` or document it as the probe grid tick that also moves in rawdata mode); IN-14 (log at debug level when the switch to the paginated list endpoints is committed, not only "trying"); fixture determinism (document in the capture harness that re-captured fixtures are byte-stable only while the committed throwaway certificate is kept; a regenerated certificate changes the certificate fixtures).
 **Success Criteria** (what must be TRUE):
 
   1. `manifest.json` declares `"categories": ["computers_network.monitoring"]`
