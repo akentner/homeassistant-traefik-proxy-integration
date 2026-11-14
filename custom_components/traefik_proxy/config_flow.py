@@ -12,7 +12,7 @@ Implements four flows against the Phase 1 probe-and-validate foundation:
 - :class:`TraefikProxyConfigFlow.async_step_reauth` / ``async_step_reauth_confirm``
   — token rotation (CFG-04, CONTEXT.md D-10). Fires when the coordinator
   raises ``ConfigEntryAuthFailed``; the new bearer token is validated against
-  ``/api/overview`` and the entry's data is updated in place + reloaded.
+  ``/api/version`` and the entry's data is updated in place + reloaded.
 - :class:`TraefikProxyConfigFlow.async_step_reconfigure` — in-place URL + token
   change (CFG-03, CONTEXT.md D-11). Pre-fills the URL from ``entry.data`` and
   verify_ssl from the effective value (options, then data); the token is never
@@ -33,7 +33,6 @@ try:
     import probatio as vol
 except ImportError:  # HA releases before 2026.9 ship voluptuous only
     import voluptuous as vol  # type: ignore[no-redef]
-from aiohttp import ClientConnectorError, ClientResponseError, InvalidUrlClientError
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -50,7 +49,13 @@ from homeassistant.helpers.selector import (
     TextSelectorType,
 )
 
-from .api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
+from .api import (
+    TraefikProxyApiClient,
+    TraefikProxyApiError,
+    TraefikProxyAuthError,
+    TraefikProxyInvalidUrlError,
+    TraefikProxyNotFoundError,
+)
 from .const import (
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
@@ -67,7 +72,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     MIN_TLS_WARN_DAYS,
 )
-from .coordinator import effective_verify_ssl
+from .coordinator import auth_from_entry_data, effective_verify_ssl
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,7 +128,7 @@ class InvalidAuth(Exception):
 
 
 class ApiDisabled(Exception):
-    """Traefik's `api: {}` block not enabled (404 on /api/overview)."""
+    """Traefik's API is not enabled (404 on the /api/version probe)."""
 
 
 class InvalidUrl(Exception):
@@ -147,31 +152,34 @@ def _check_url_shape(url: str) -> None:
 
 
 async def _validate_input(hass: Any, data: dict[str, Any]) -> None:
-    """Probe /api/overview and map errors to user-friendly exceptions.
+    """Probe /api/version and map client errors to user-friendly exceptions.
 
     Shared by the user / yaml / reauth / reconfigure flows so that the
-    401 -> InvalidAuth, 404 -> ApiDisabled, invalid URL -> InvalidUrl,
+    401/403 -> InvalidAuth, 404 -> ApiDisabled, invalid URL -> InvalidUrl,
     and everything-else -> CannotConnect mapping is defined exactly once.
     """
     _check_url_shape(data[CONF_URL])
+    try:
+        auth = auth_from_entry_data(data)
+    except ValueError:
+        # A credential the client refuses to send (e.g. a control character).
+        raise InvalidAuth from None
     client = TraefikProxyApiClient(
         session=async_get_clientsession(hass),
         base_url=data[CONF_URL],
-        api_key=data.get(CONF_API_KEY, ""),
+        auth=auth,
         verify_ssl=data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
     )
     try:
         async with asyncio.timeout(10):
-            await client.get_overview()
-    except InvalidUrlClientError as err:
-        raise InvalidUrl(data[CONF_URL]) from err
+            await client.async_get_version()
     except TraefikProxyAuthError:
         raise InvalidAuth from None
-    except ClientResponseError as err:
-        if err.status == 404:
-            raise ApiDisabled from err
-        raise CannotConnect from err
-    except TimeoutError, ClientConnectorError, TraefikProxyApiError:
+    except TraefikProxyNotFoundError:
+        raise ApiDisabled from None
+    except TraefikProxyInvalidUrlError:
+        raise InvalidUrl(data[CONF_URL]) from None
+    except TraefikProxyApiError, TimeoutError:
         raise CannotConnect from None
 
 
@@ -383,7 +391,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         storage), a non-empty token replaces it. The same host and a host no
         other entry owns are accepted; a host owned by another entry aborts
         with ``already_configured``. On submit, validates the new
-        endpoint via ``/api/overview`` and calls
+        endpoint via ``/api/version`` and calls
         ``async_update_reload_and_abort`` with ``data_updates`` so HA
         rewrites the entry's data in place and reloads — no delete + re-add
         required. verify_ssl is also written to ``options`` so the value the

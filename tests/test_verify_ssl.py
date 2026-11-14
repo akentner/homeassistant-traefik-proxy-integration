@@ -49,7 +49,10 @@ def _make_entry(*, verify_ssl: bool = True, options: dict[str, Any] | None = Non
 
 
 def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[no-untyped-def]
-    """Mock the six GET endpoints ``fetch_all`` and the probe request."""
+    """Mock the setup requests (version, entrypoints) and the list endpoints of one cycle.
+
+    The config-flow probe is the ``/api/version`` request.
+    """
     aioclient_mock.get(
         f"{base_url}/api/version",
         json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
@@ -58,10 +61,6 @@ def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[
     aioclient_mock.get(f"{base_url}/api/http/routers", json=[])
     aioclient_mock.get(f"{base_url}/api/http/services", json=[])
     aioclient_mock.get(f"{base_url}/api/http/middlewares", json=[])
-    aioclient_mock.get(
-        f"{base_url}/api/overview",
-        json={"http": {"routers": [], "services": [], "middlewares": []}},
-    )
 
 
 async def _setup_entry(hass, entry: MockConfigEntry) -> None:  # type: ignore[no-untyped-def]

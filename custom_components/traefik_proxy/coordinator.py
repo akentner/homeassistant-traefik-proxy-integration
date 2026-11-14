@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +16,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 
-from .api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
+from .api import Auth, AuthMode, TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
 from .const import (
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
@@ -43,12 +44,25 @@ def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
     return bool(entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL))
 
 
+def auth_from_entry_data(data: Mapping[str, Any]) -> Auth:
+    """Map stored entry data to the client's Auth value.
+
+    Entries store a single optional bearer token: a non-empty token selects
+    bearer auth, an empty or missing one selects no auth. Basic auth is not
+    reachable from entry data yet.
+    """
+    token = data.get(CONF_API_KEY)
+    if isinstance(token, str) and token:
+        return Auth(mode=AuthMode.bearer, token=token)
+    return Auth()
+
+
 def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:
     """Build the runtime API client from the entry and the shared HA session."""
     return TraefikProxyApiClient(
         session=aiohttp_client.async_get_clientsession(hass),
         base_url=entry.data[CONF_URL],
-        api_key=entry.data[CONF_API_KEY],
+        auth=auth_from_entry_data(entry.data),
         verify_ssl=effective_verify_ssl(entry),
     )
 

@@ -45,7 +45,10 @@ def _make_entry(*, options: dict[str, Any] | None = None) -> MockConfigEntry:
 
 
 def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[no-untyped-def]
-    """Mock the six GET endpoints ``fetch_all`` and the probe request."""
+    """Mock the setup requests (version, entrypoints) and the list endpoints of one cycle.
+
+    The config-flow probe is the ``/api/version`` request.
+    """
     aioclient_mock.get(
         f"{base_url}/api/version",
         json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
@@ -54,19 +57,19 @@ def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[
     aioclient_mock.get(f"{base_url}/api/http/routers", json=[])
     aioclient_mock.get(f"{base_url}/api/http/services", json=[])
     aioclient_mock.get(f"{base_url}/api/http/middlewares", json=[])
-    aioclient_mock.get(
-        f"{base_url}/api/overview",
-        json={"http": {"routers": [], "services": [], "middlewares": []}},
-    )
 
 
-def _first_overview_auth(aioclient_mock) -> str | None:  # type: ignore[no-untyped-def]
-    """Authorization header of the first recorded ``/api/overview`` request."""
+def _probe_auth(aioclient_mock) -> str | None:  # type: ignore[no-untyped-def]
+    """Authorization header of the first recorded ``/api/version`` request.
+
+    The entries in these tests are added but not set up before the flow, so
+    the first version request is the config-flow probe.
+    """
     for call in aioclient_mock.mock_calls:
-        if str(call[1]).endswith("/api/overview"):
+        if str(call[1]).endswith("/api/version"):
             headers = call[3] or {}
             return headers.get("Authorization")
-    raise AssertionError("no /api/overview request recorded")
+    raise AssertionError("no /api/version request recorded")
 
 
 async def test_reconfigure_form_does_not_contain_token(hass) -> None:
@@ -102,7 +105,7 @@ async def test_same_host_empty_token_keeps_stored_token(hass, aioclient_mock, su
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_API_KEY] == SECRET
-    assert _first_overview_auth(aioclient_mock) == f"Bearer {SECRET}"
+    assert _probe_auth(aioclient_mock) == f"Bearer {SECRET}"
 
 
 async def test_same_host_new_token_replaces_stored_token(hass, aioclient_mock) -> None:
@@ -121,7 +124,7 @@ async def test_same_host_new_token_replaces_stored_token(hass, aioclient_mock) -
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_API_KEY] == "new-token"
-    assert _first_overview_auth(aioclient_mock) == "Bearer new-token"
+    assert _probe_auth(aioclient_mock) == "Bearer new-token"
 
 
 async def test_same_host_verify_ssl_flip(hass, aioclient_mock) -> None:

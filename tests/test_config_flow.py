@@ -7,24 +7,43 @@ Covers:
   instead of HA's generic "Unknown error occurred".
 - ``STEP_USER_DATA_SCHEMA`` accepts an empty ``api_key`` (``TextSelector``
   with URL type used to mask the field; ``cv.url`` rejects bad schemes).
-- ``TraefikProxyApiClient._get`` no longer lets ``InvalidUrlClientError`` bubble —
-  it gets classified as ``TraefikProxyApiError`` so the coordinator sees a clean
-  ``UpdateFailed`` on subsequent cycles.
+- ``TraefikProxyApiClient`` classifies ``InvalidUrlClientError`` as
+  ``TraefikProxyInvalidUrlError`` so neither the flow nor the coordinator sees a
+  raw aiohttp exception.
+- ``_validate_input`` probes ``/api/version`` and maps every client error class
+  to its flow error (auth, API disabled, invalid URL, cannot connect).
+- Every ``AuthMode`` round-trips through the client to the exact
+  Authorization header ``Auth.header()`` promises.
 
 Hermetic via ``aioclient_mock`` (HA's HTTP mock layer) — no live Traefik needed.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError
+from custom_components.traefik_proxy.api import (
+    Auth,
+    AuthMode,
+    TraefikProxyApiClient,
+    TraefikProxyApiError,
+    TraefikProxyAuthError,
+    TraefikProxyConnectionError,
+    TraefikProxyInvalidUrlError,
+    TraefikProxyNotFoundError,
+    TraefikProxyPayloadError,
+)
 from custom_components.traefik_proxy.config_flow import (
     STEP_USER_DATA_SCHEMA,
     STEP_YAML_DATA_SCHEMA,
+    ApiDisabled,
+    CannotConnect,
+    InvalidAuth,
     InvalidUrl,
     _check_url_shape,
     _validate_input,
@@ -34,6 +53,8 @@ from custom_components.traefik_proxy.const import (
     CONF_URL,
     CONF_VERIFY_SSL,
 )
+from custom_components.traefik_proxy.coordinator import auth_from_entry_data
+from tests.conftest import load_fixture
 
 GOOD_URL = "https://traefik.example.com:8080"
 
@@ -173,42 +194,115 @@ async def test_validate_input_uses_urlparse_shape_check(hass: object) -> None:
         await _validate_input(hass, {CONF_URL: "://broken", CONF_API_KEY: "tok"})
 
 
-async def test_validate_input_passes_on_good_url(hass: object, aioclient_mock: object) -> None:
-    """Happy-path probe succeeds against a mocked 200 + valid overview payload."""
-    aioclient_mock.get(
-        f"{GOOD_URL}/api/overview",  # type: ignore[attr-defined]
-        json={"http": {}},
-        headers={"Authorization": "Bearer tok"},
-    )
+async def test_validate_input_passes_on_good_url(hass: object, aioclient_mock: Any) -> None:
+    """Happy-path probe succeeds against the captured /api/version and sends the bearer token."""
+    aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
+
     await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok"})
+
+    assert aioclient_mock.mock_calls[0][3] == {"Authorization": "Bearer tok"}
 
 
 async def test_validate_input_empty_bearer_does_not_send_authorization_header(
-    hass: object, aioclient_mock: object
+    hass: object, aioclient_mock: Any
 ) -> None:
-    """Empty bearer → no Authorization header sent → Traefik with api.insecure works."""
-    aioclient_mock.get(  # type: ignore[attr-defined]
-        f"{GOOD_URL}/api/overview",
-        json={"http": {}},
-    )
-    # If the empty-bearer code path erroneously sent an empty header, the
-    # request wouldn't match the unmocked assertion above and aioclient_mock
-    # would raise NoMockMatchError. Reaching this line = test passes.
+    """Empty bearer -> no Authorization header sent -> Traefik with api.insecure works."""
+    aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
+
     await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: ""})
+
+    assert "Authorization" not in aioclient_mock.mock_calls[0][3]
+
+
+async def test_validate_input_rejects_token_with_control_characters(hass: object, aioclient_mock: Any) -> None:
+    """A token the client refuses to send surfaces as invalid_auth without a request."""
+    with pytest.raises(InvalidAuth):
+        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok\r\nX-Injected: 1"})
+    assert aioclient_mock.mock_calls == []
+
+
+@pytest.mark.parametrize(
+    ("side_effect", "expected"),
+    [
+        pytest.param(TraefikProxyAuthError("/api/version", "HTTP 401", status=401), InvalidAuth, id="auth-401"),
+        pytest.param(TraefikProxyAuthError("/api/version", "HTTP 403", status=403), InvalidAuth, id="auth-403"),
+        pytest.param(
+            TraefikProxyNotFoundError("/api/version", "HTTP 404", status=404), ApiDisabled, id="not-found-404"
+        ),
+        pytest.param(
+            TraefikProxyInvalidUrlError("/api/version", "InvalidUrlClientError"), InvalidUrl, id="invalid-url"
+        ),
+        pytest.param(TraefikProxyConnectionError("/api/version", "ClientOSError"), CannotConnect, id="connection"),
+        pytest.param(TraefikProxyPayloadError("/api/version", "invalid JSON"), CannotConnect, id="payload"),
+        pytest.param(TraefikProxyApiError("/api/version", "HTTP 500", status=500), CannotConnect, id="api-500"),
+        pytest.param(TimeoutError(), CannotConnect, id="timeout"),
+    ],
+)
+async def test_validate_input_maps_client_errors(
+    hass: object, side_effect: BaseException, expected: type[Exception]
+) -> None:
+    """Each client error class maps to exactly one flow error, most specific first."""
+    with (
+        patch.object(TraefikProxyApiClient, "async_get_version", AsyncMock(side_effect=side_effect)),
+        pytest.raises(expected),
+    ):
+        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+
+
+async def test_validate_input_maps_real_404_to_api_disabled(hass: object, aioclient_mock: Any) -> None:
+    """A real 404 on the probe reaches the api_disabled branch end to end."""
+    aioclient_mock.get(f"{GOOD_URL}/api/version", status=404)
+
+    with pytest.raises(ApiDisabled):
+        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: ""})
 
 
 # ----------------------- api.py: InvalidUrlClientError is classified -----------------------
 
 
-async def test_api_get_classifies_invalid_url_client_error() -> None:
-    """``TraefikProxyApiClient._get`` catches ``InvalidUrlClientError`` → ``TraefikProxyApiError``."""
-    client = TraefikProxyApiClient(
-        session=MagicMock(),
-        base_url="http;//bad",
-        api_key="",
-    )
+async def test_api_classifies_invalid_url_client_error() -> None:
+    """The client turns ``InvalidUrlClientError`` into ``TraefikProxyInvalidUrlError``."""
     bad_session = MagicMock()
     bad_session.get.side_effect = aiohttp.InvalidUrlClientError("http;//bad")
-    client._session = bad_session
-    with pytest.raises(TraefikProxyApiError):
-        await client._get("/api/overview")
+    client = TraefikProxyApiClient(session=bad_session, base_url="http;//bad", auth=Auth())
+
+    with pytest.raises(TraefikProxyInvalidUrlError):
+        await client.async_get_version()
+
+
+# ----------------------- Auth invariant -----------------------
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        pytest.param(Auth(), id="none"),
+        pytest.param(Auth(mode=AuthMode.basic, username="capture", password="pw"), id="basic"),
+        pytest.param(Auth(mode=AuthMode.bearer, token="s3cret-token"), id="bearer"),
+    ],
+)
+async def test_every_auth_mode_round_trips_to_its_header(hass: object, aioclient_mock: Any, auth: Auth) -> None:
+    """A real request records exactly the Authorization header the Auth promises (no bearer-only shortcut)."""
+    # A new AuthMode must be added to the parametrization above.
+    assert set(AuthMode) == {AuthMode.none, AuthMode.basic, AuthMode.bearer}
+    aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
+
+    await TraefikProxyApiClient(async_get_clientsession(hass), GOOD_URL, auth).async_get_version()
+
+    headers = aioclient_mock.mock_calls[0][3]
+    assert headers.get("Authorization") == auth.header().get("Authorization")
+    assert headers == auth.header()
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param({CONF_API_KEY: "tok"}, Auth(mode=AuthMode.bearer, token="tok"), id="token"),
+        pytest.param({CONF_API_KEY: ""}, Auth(), id="empty"),
+        pytest.param({}, Auth(), id="missing"),
+        pytest.param({CONF_API_KEY: None}, Auth(), id="none"),
+    ],
+)
+def test_auth_from_entry_data(data: dict[str, Any], expected: Auth) -> None:
+    """Entry data maps to bearer for a non-empty token and to no auth otherwise."""
+    assert auth_from_entry_data({CONF_URL: GOOD_URL, **data}) == expected
