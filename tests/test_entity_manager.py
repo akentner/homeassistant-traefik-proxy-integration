@@ -7,6 +7,7 @@ vanishes between two coordinator cycles by re-serving a modified rawdata.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import logging
 from datetime import timedelta
 from typing import Any
@@ -549,3 +550,115 @@ async def test_remove_entry_deletes_missing_store(hass, aioclient_mock, mock_tls
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert key not in hass_storage
+
+
+# ---------------------------------------------------------------------------
+# Services and entrypoints through the manager
+# ---------------------------------------------------------------------------
+
+SERVICE = "file-ok-svc@file"
+
+
+def _service_entity_id(hass: HomeAssistant, entry: Any, key: str = SERVICE) -> str:
+    from custom_components.traefik_proxy.entity_manager import SERVICES
+
+    return entity_id_for(hass, SERVICES.domain, SERVICES.unique_id(entry.entry_id, key))
+
+
+@pytest.mark.xfail(strict=True, reason="RED: service sensor attributes not yet canonical")
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+async def test_service_server_down_reaches_sensor_next_cycle(
+    hass, aioclient_mock, mock_tls_probe, version: str
+) -> None:  # type: ignore[no-untyped-def]
+    """A server going DOWN changes servers_up on the next cycle; disabled + error turns the state to error."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, version=version)
+    entity_id = _service_entity_id(hass, entry)
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert (state.state, state.attributes["servers_up"], state.attributes["servers_total"]) == ("enabled", 1, 1)
+
+    rawdata = rawdata_copy(version)
+    service = rawdata["services"][SERVICE]
+    service["serverStatus"] = dict.fromkeys(service["serverStatus"], "DOWN")
+    await _refresh(hass, aioclient_mock, entry, rawdata, version)
+
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert (state.state, state.attributes["servers_up"], state.attributes["servers_total"]) == ("enabled", 0, 1)
+    assert SERVICE in entry.runtime_data.coordinator.data.service_problems
+
+    service["status"] = "disabled"
+    service["error"] = ["boom"]
+    await _refresh(hass, aioclient_mock, entry, rawdata, version)
+
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "error"
+    assert state.attributes["errors"] == ["boom"]
+
+
+@pytest.mark.xfail(strict=True, reason="RED: services not yet managed by the entity manager")
+async def test_new_service_appears_and_vanished_service_goes_missing(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """A new service gets its sensor without reload; a vanished one stays registered with state missing."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    entity_id = _service_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    rawdata["services"]["added-svc@file"] = copy.deepcopy(rawdata["services"].pop(SERVICE))
+
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+
+    added = hass.states.get(_service_entity_id(hass, entry, "added-svc@file"))
+    assert added is not None and added.state == "enabled"
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "missing"
+    assert state.attributes["missing_since"] == dt_util.utcnow().isoformat()
+    assert er.async_get(hass).async_get(entity_id) is not None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: entrypoints not yet managed by the entity manager")
+async def test_vanished_entrypoint_goes_missing(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """An enabled entrypoint sensor whose entrypoint vanished reads missing with missing_since."""
+    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
+
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    unique_id = ENTRYPOINTS.unique_id(entry.entry_id, "web")
+    entity_id = er.async_get(hass).async_get_or_create("sensor", DOMAIN, unique_id, config_entry=entry).entity_id
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+    state = hass.states.get(entity_id)
+    assert state is not None and state.state == ":80"
+
+    coordinator = entry.runtime_data.coordinator
+    entrypoints = {name: ep for name, ep in coordinator.data.entrypoints.items() if name != "web"}
+    coordinator.async_set_updated_data(dataclasses.replace(coordinator.data, entrypoints=entrypoints))
+    await hass.async_block_till_done()
+
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "missing"
+    assert state.attributes["missing_since"] == dt_util.utcnow().isoformat()
+    assert er.async_get(hass).async_get(entity_id) is not None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: services not yet on the Services sub-device")
+async def test_router_and_service_with_same_name_are_separate(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """A router and a service both named dup@file are two sensors on the Routers and Services sub-devices."""
+    from custom_components.traefik_proxy.entity_manager import SERVICES
+
+    rawdata = rawdata_copy()
+    rawdata["routers"]["dup@file"] = copy.deepcopy(rawdata["routers"][ROUTER])
+    rawdata["services"]["dup@file"] = copy.deepcopy(rawdata["services"][SERVICE])
+    entry = await setup_traefik_entry(hass, aioclient_mock, rawdata=rawdata)
+    registry = er.async_get(hass)
+    devices = _entry_devices(hass, entry)
+
+    router_entry = registry.async_get(_router_entity_id(hass, entry, "dup@file"))
+    service_entry = registry.async_get(_service_entity_id(hass, entry, "dup@file"))
+    assert router_entry is not None and service_entry is not None
+    assert router_entry.entity_id != service_entry.entity_id
+    assert router_entry.unique_id == f"{entry.entry_id}_http_router_dup@file"
+    assert service_entry.unique_id == SERVICES.unique_id(entry.entry_id, "dup@file")
+    assert service_entry.unique_id == f"{entry.entry_id}_http_service_dup@file"
+    assert router_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_routers")].id
+    assert service_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_services")].id

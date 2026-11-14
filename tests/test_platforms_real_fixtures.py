@@ -10,14 +10,23 @@ from __future__ import annotations
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EntityCategory
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
+from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN, ITEM_STATE_OPTIONS
 from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.models import Status, TraefikSnapshot
-from tests.conftest import FIXTURE_VERSIONS, MOCK_URL, entity_id_for, snapshot_from_fixture, stub_traefik
+from tests.conftest import (
+    FIXTURE_VERSIONS,
+    MOCK_URL,
+    entity_id_for,
+    make_traefik_entry,
+    snapshot_from_fixture,
+    stub_traefik,
+)
 
 FAILING_ENTITIES = (
     "binary_sensor.traefik_any_router_failing",
@@ -117,3 +126,92 @@ async def test_failing_aggregates_registered_and_problems_present(hass, loaded: 
     assert "broken-missing-service@file" in loaded.router_problems
     assert loaded.routers["broken-missing-service@file"].status is Status.error
     assert "lb-mixed@file" in loaded.service_problems
+
+
+SERVICE_ATTRIBUTES = {"type", "provider", "servers_up", "servers_total", "used_by", "errors"}
+HA_ATTRIBUTES = {"options", "device_class", "friendly_name"}
+
+
+def _device_id(hass, entry_id: str, identifier: str) -> str:  # type: ignore[no-untyped-def]
+    """Return the id of the entry's device with Traefik identifier ``identifier``."""
+    matches = [
+        device.id
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry_id)
+        if (DOMAIN, identifier) in device.identifiers
+    ]
+    assert len(matches) == 1, identifier
+    return matches[0]
+
+
+@pytest.mark.xfail(strict=True, reason="RED: service sensors not yet managed ENUM sensors")
+async def test_service_enum_sensors(hass, loaded: TraefikSnapshot) -> None:
+    """Each service is an ENUM sensor on the Services sub-device with the canonical, private attributes."""
+    from custom_components.traefik_proxy.entity_manager import SERVICES
+
+    assert loaded.services
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    registry = er.async_get(hass)
+    services_device = _device_id(hass, entry.entry_id, f"{entry.entry_id}_services")
+    for name, service in loaded.services.items():
+        entity_id = entity_id_for(hass, "sensor", SERVICES.unique_id(entry.entry_id, name))
+        state = hass.states.get(entity_id)
+        assert state is not None, name
+        assert state.state == str(service.status), name
+        assert state.attributes["options"] == list(ITEM_STATE_OPTIONS)
+        assert set(state.attributes) - HA_ATTRIBUTES == SERVICE_ATTRIBUTES, name
+        assert (state.attributes["servers_up"], state.attributes["servers_total"]) == (
+            service.servers_up,
+            service.servers_total,
+        )
+        for key in SERVICE_ATTRIBUTES:
+            assert "://" not in str(state.attributes[key]), name
+            assert "192.0.2." not in str(state.attributes[key]), name
+        reg_entry = registry.async_get(entity_id)
+        assert reg_entry is not None and reg_entry.device_id == services_device, name
+    mixed = hass.states.get(entity_id_for(hass, "sensor", SERVICES.unique_id(entry.entry_id, "lb-mixed@file")))
+    assert mixed is not None
+    assert (mixed.attributes["servers_total"], mixed.attributes["servers_up"]) == (2, 1)
+
+
+@pytest.mark.xfail(strict=True, reason="RED: entrypoint sensors not yet diagnostic and disabled by default")
+async def test_entrypoint_sensors_diagnostic_and_disabled(hass, loaded: TraefikSnapshot) -> None:
+    """Every entrypoint sensor is registered disabled by the integration, diagnostic, on the main device."""
+    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
+
+    assert loaded.entrypoints
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    registry = er.async_get(hass)
+    main_device = _device_id(hass, entry.entry_id, entry.entry_id)
+    for name in loaded.entrypoints:
+        reg_entry = registry.async_get(entity_id_for(hass, "sensor", ENTRYPOINTS.unique_id(entry.entry_id, name)))
+        assert reg_entry is not None, name
+        assert reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION, name
+        assert reg_entry.entity_category is EntityCategory.DIAGNOSTIC, name
+        assert reg_entry.device_id == main_device, name
+        assert hass.states.get(reg_entry.entity_id) is None, name
+
+
+@pytest.mark.xfail(strict=True, reason="RED: entrypoint sensors not yet address + protocol only")
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+async def test_enabled_entrypoint_sensors(hass, aioclient_mock, mock_tls_probe, version: str) -> None:  # type: ignore[no-untyped-def]
+    """Entrypoint sensors enabled before setup show the address and the protocol."""
+    from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS
+
+    expected = snapshot_from_fixture(version)
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for name in expected.entrypoints:
+        registry.async_get_or_create("sensor", DOMAIN, ENTRYPOINTS.unique_id(entry.entry_id, name), config_entry=entry)
+    stub_traefik(aioclient_mock, version=version)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    for name, entrypoint in expected.entrypoints.items():
+        state = hass.states.get(entity_id_for(hass, "sensor", ENTRYPOINTS.unique_id(entry.entry_id, name)))
+        assert state is not None, name
+        assert state.state == entrypoint.address, name
+        assert state.attributes["protocol"] == entrypoint.protocol, name
+        assert "transport" not in state.attributes
+    udp = hass.states.get(entity_id_for(hass, "sensor", ENTRYPOINTS.unique_id(entry.entry_id, "udp-ep")))
+    assert udp is not None and udp.attributes["protocol"] == "udp"
