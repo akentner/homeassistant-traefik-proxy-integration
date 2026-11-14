@@ -185,10 +185,10 @@ Requirements for initial release. Each maps to a roadmap phase.
       `/api/rawdata` is unavailable the
       client falls back to the paginated list endpoints and follows
       `X-Next-Page`. HTTP objects only; TCP/UDP data is ignored. (A-06, P-01)
-- [ ] **DATA-03**: The client supports auth modes none / basic (username +
+- [x] **DATA-03**: The client supports auth modes none / basic (username +
       password) / bearer; the `Authorization` header is built per request and
       credentials never appear in logs or exception messages.
-- [ ] **DATA-04**: The client raises only subclasses of `TraefikProxyApiError`:
+- [x] **DATA-04**: The client raises only subclasses of `TraefikProxyApiError`:
       `TraefikProxyAuthError` (401/403), `TraefikProxyNotFoundError` (404),
       `TraefikProxyConnectionError` (any `aiohttp.ClientError`, timeout,
       `OSError`) or `TraefikProxyPayloadError` (invalid JSON or shape);
@@ -438,8 +438,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-04 | Phase 3 | Complete |
 | DATA-01 | Phase 4 | Complete |
 | DATA-02 | Phase 4 | Pending |
-| DATA-03 | Phase 4 | Pending |
-| DATA-04 | Phase 4 | Pending |
+| DATA-03 | Phase 4 | Complete |
+| DATA-04 | Phase 4 | Complete |
 | DATA-05 | Phase 4 | Complete |
 | DATA-06 | Phase 4 | Complete |
 | DATA-07 | Phase 4 | Pending |

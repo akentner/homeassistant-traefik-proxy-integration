@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-11-14T00:56:03.878Z"
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-11-14T01:06:58.345Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: 133ac583332bd3ea176b59758e93a23c3382d044
+state_head: e5a554ddf3de8731fa997855c612489f4971e3b6
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 15
+  completed_plans: 16
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
@@ -79,6 +79,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P02 | 8min | 3 tasks | 15 files |
 | Phase 04 P03 | 7 min | 2 tasks | 3 files |
 | Phase 04 P04 | 9min | 3 tasks | 14 files |
+| Phase 04 P05 | 8min | 2 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-04: X-Next-Page loop continues only while the header is an int greater than the current page; missing/non-integer header ends it; an announced page above MAX_PAGES raises TraefikProxyPayloadError
 - [Phase 04]: 04-04: per-item entities store _item_name plus the construction-time model and resolve the current model from coordinator.data on every read (fallback: last known model)
 - [Phase 04]: 04-04: cert host collection skips routers with Router.tls False; snapshot consumers never read raw API dicts
+- [Phase 04]: 04-05: Basic Authorization header built in api.py (base64 of UTF-8 user:password); aiohttp 3.14 deprecates BasicAuth and HA 2026.3's aiohttp 3.13 lacks encode_basic_auth
+- [Phase 04]: 04-05: Auth rejects credentials its mode does not use and control characters; config flow maps that ValueError to invalid_auth
+- [Phase 04]: 04-05: TraefikProxyApiError(path, detail, *, status) — messages are '<path>: HTTP <status>' / '<path>: <ExceptionType>' / fixed description; reload_routers keeps 401/403 -> Auth, other non-2xx -> base error until Phase 5
 
 ### Pending Todos
 
@@ -168,7 +172,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T00:56:03.832Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-11-14T01:06:58.298Z
+Stopped at: Completed 04-05-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)

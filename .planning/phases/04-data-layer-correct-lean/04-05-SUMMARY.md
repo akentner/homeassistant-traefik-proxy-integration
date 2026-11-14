@@ -248,7 +248,7 @@ None. No new network endpoint, auth path or trust-boundary surface beyond the pl
 
 ## Issues Encountered
 
-- The flagged assumption from the plan stays open for a human: no 3xx or redirect-to-other-host handling was added. A 302 that aiohttp does not follow is treated as a non-2xx base error (tested). With real aiohttp, `allow_redirects` defaults to True for GET, so a redirect to another host would be followed with the Authorization header. aiohttp strips that header only when the redirect changes origin, which it does. Confirm in Phase 7/8 whether `allow_redirects=False` is wanted.
+- The flagged assumption from the plan stays open for a human: no 3xx or redirect-to-other-host handling was added. A 302 that aiohttp does not follow is treated as a non-2xx base error (tested). With real aiohttp, `allow_redirects` defaults to True for GET, so a redirect is followed. aiohttp drops a per-request Authorization header when the redirect changes origin, so a redirect to another host would not carry the credential, but the request would still leave the configured host. Confirm in Phase 7/8 whether `allow_redirects=False` is wanted (it would also make the host-pinning prohibition hold against a redirecting server).
 - The deferred `SyntaxWarning` entry in deferred-items.md is still marked open, although 04-04 removed its cause; left for the verifier, as 04-04 noted.
 
 ## User Setup Required
