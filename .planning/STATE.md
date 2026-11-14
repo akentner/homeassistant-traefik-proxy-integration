@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-11-14T00:32:23.162Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-11-14T00:43:17.423Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: e6a9c694b23f68f32cc116d7a5c23553f3fc93c6
+state_head: cb9c8bb949ccf79d45e2368dcf7789ed249f94b4
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 13
+  completed_plans: 14
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
@@ -77,6 +77,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 |------|----------|-------|-------|
 | Phase 04 P01 | 8min | 2 tasks | 23 files |
 | Phase 04 P02 | 8min | 3 tasks | 15 files |
+| Phase 04 P03 | 7 min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,10 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-01: --ping on the traefik entrypoint provides the @internal router (ping@internal) because insecure API mode stays off
 - [Phase 04]: 04-02: TraefikRuntimeData owns the only API client; TraefikProxyCoordinator.client is a read-only property over runtime_data.client, so an options change replaces the client in one statement
 - [Phase 04]: 04-02: entry.runtime_data is assigned before both first refreshes; platforms read runtime_data.coordinator/.cert_coordinator directly (no getattr, cert block always runs)
+- [Phase 04]: 04-03: ALLOWED_GENERATION_DIFFERENCES empty - v2.11.63 and v3.7.19 agree on every projected router/service/middleware field
+- [Phase 04]: 04-03: Service/Middleware type = list-form type, else lowercased single non-meta rawdata key
+- [Phase 04]: 04-03: parse_version uses startDate (StartDate accepted); missing -> KeyError, non-string -> TypeError, unparsable -> ValueError, naive -> UTC
+- [Phase 04]: 04-03: TDD RED commits carry an interface stub of models.py so RED fails on assertions (tdd.md treats import faults as INVALID_RED)
 
 ### Pending Todos
 
@@ -159,7 +164,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T00:32:23.115Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-11-14T00:43:17.373Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
