@@ -10,6 +10,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DEFAULT_NAME, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
+from .models import TraefikSnapshot
 
 if TYPE_CHECKING:
     pass
@@ -91,9 +92,6 @@ class TraefikProxyEntity(CoordinatorEntity[TraefikProxyCoordinator]):
             return None
 
     def _sw_version(self) -> str | None:
-        data = self.coordinator.data or {}
-        version = data.get("version") if isinstance(data, dict) else None
-        if isinstance(version, dict):
-            version_value = version.get("Version")
-            return str(version_value) if version_value is not None else None
-        return None
+        # Cert-entity unit tests build entities on mocked entries without a snapshot.
+        data = self.coordinator.data
+        return data.version.version if isinstance(data, TraefikSnapshot) else None

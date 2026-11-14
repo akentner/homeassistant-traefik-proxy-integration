@@ -1,29 +1,26 @@
 """Sensor entities for the Traefik integration.
 
-Phase 2 plan 02-03 fills this out with `TraefikProxyEntrypointSensor`,
-`TraefikProxyServiceSensor`, and the three aggregate count sensors on the Overview
-device (CONTEXT.md D-15/D-16/D-17).
-
 Entity count per config entry (after `async_setup_entry` returns):
-- 1 per `TraefikProxyEntrypointSensor` per Traefik entrypoint (HTTP Entrypoints device)
-- 1 per `TraefikProxyServiceSensor` per Traefik service (HTTP Services device;
-  provider internal `api@internal` is filtered out via `filter_internal_items`)
+- 1 `TraefikProxyEntrypointSensor` per Traefik entrypoint (HTTP Entrypoints device)
+- 1 `TraefikProxyServiceSensor` per Traefik HTTP service (HTTP Services device;
+  Traefik-internal ``@internal`` services are not part of the snapshot)
 - 1 each of `TraefikProxyRoutersCountSensor`, `TraefikProxyServicesCountSensor`,
   `TraefikProxyMiddlewaresCountSensor` on the Overview device
+- 1 `TraefikProxyCertTimestampSensor` per probed TLS hostname
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Final, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .api import filter_internal_items
 from .entity import TraefikProxyEntity
+from .models import Entrypoint, Service, StatusCounts
 from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
@@ -41,32 +38,16 @@ async def async_setup_entry(
 ) -> None:
     """Set up Traefik sensor entities for a config entry.
 
-    Mirrors the `binary_sensor.py` pattern (Phase 1 — coordinator from
-    `entry.runtime_data`, single `async_add_entities(...)` call with all
-    entities for this platform). Coordinator cycle may surface partial data
-    (any key missing -> empty list) so we defensively coerce via the
-    ``_dict_or_empty`` / ``_list_or_empty`` helpers below.
+    Entities are created from the coordinator's current snapshot and read
+    their state from the latest snapshot on every access.
     """
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
-    data = _dict_or_empty(coordinator.data)
+    snapshot = coordinator.data
 
-    # Per-entrypoint sensors (CONTEXT.md D-15).
-    # Entrypoints are NOT filtered via filter_internal_items — Traefik entrypoint
-    # names like `websecure@internal` are first-class configuration objects the
-    # user expects to see.
-    entrypoints: list[dict[str, Any]] = _list_or_empty(data.get("entrypoints"))
-    entrypoint_entities = [TraefikProxyEntrypointSensor(entry, coordinator, ep) for ep in entrypoints]
+    entrypoint_entities = [TraefikProxyEntrypointSensor(entry, coordinator, ep) for ep in snapshot.entrypoints.values()]
+    service_entities = [TraefikProxyServiceSensor(entry, coordinator, svc) for svc in snapshot.services.values()]
 
-    # Per-service sensors (CONTEXT.md D-16). Filter `@<provider>` internal items
-    # via the canonical helper in api.py (CONTEXT.md D-06).
-    services = filter_internal_items(_list_or_empty(data.get("http_services")))
-    service_entities = [TraefikProxyServiceSensor(entry, coordinator, svc) for svc in services]
-
-    # Aggregate counters on the Overview device (CONTEXT.md D-17). The
-    # sensors compute their state and breakdown attributes lazily from
-    # ``coordinator.data`` on every property access (see
-    # ``_TraefikProxyAggregateCountSensor`` docstring for the v0.1.4 fix) —
-    # no per-construction count kwargs needed.
+    # Aggregate counters on the Overview device read the snapshot counts.
     aggregate_entities = [
         TraefikProxyRoutersCountSensor(entry),
         TraefikProxyServicesCountSensor(entry),
@@ -164,21 +145,16 @@ async def async_setup_entry(
     # Register the combined listener for future cycles.
     entry.async_on_unload(cert_coordinator.async_add_listener(_cert_update_listener))
 
-    # Stale entity cleanup (CONTEXT.md D-18, gatus binary_sensor.py:49-71).
-    # Entrypoints + services that disappear from coordinator.data are removed
-    # from the entity registry on the next refresh cycle. Aggregate counters
-    # on the Overview device (CONTEXT.md D-19) are NEVER deleted — their
+    # Stale entity cleanup: entrypoints and services that disappear from the
+    # snapshot are removed from the entity registry on the next refresh cycle.
+    # Aggregate counters on the Overview device are never deleted — their
     # unique_id prefix is ``_overview_`` and is skipped below.
     registry = er.async_get(hass)
 
     def _remove_stale_entrypoints() -> None:
         if not coordinator.last_update_success:
             return
-        current: set[str] = set()
-        data = coordinator.data if isinstance(coordinator.data, dict) else {}
-        eps = data.get("entrypoints") if isinstance(data, dict) else None
-        if isinstance(eps, list):
-            current = {ep["name"] for ep in eps if isinstance(ep, dict) and "name" in ep}
+        current = set(coordinator.data.entrypoints)
         prefix = f"{entry.entry_id}_http_entrypoint_"
         for reg_entry in list(registry.entities.values()):
             unique_id = reg_entry.unique_id or ""
@@ -192,11 +168,7 @@ async def async_setup_entry(
     def _remove_stale_services() -> None:
         if not coordinator.last_update_success:
             return
-        current: set[str] = set()
-        data = coordinator.data if isinstance(coordinator.data, dict) else {}
-        svcs = data.get("http_services") if isinstance(data, dict) else None
-        if isinstance(svcs, list):
-            current = {s["name"] for s in filter_internal_items([item for item in svcs if isinstance(item, dict)])}
+        current = set(coordinator.data.services)
         prefix = f"{entry.entry_id}_http_service_"
         for reg_entry in list(registry.entities.values()):
             unique_id = reg_entry.unique_id or ""
@@ -211,102 +183,33 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_remove_stale_services))
 
 
-def _dict_or_empty(value: Any) -> dict[str, Any]:
-    """Coerce an arbitrary value to ``dict[str, Any]`` (``{}`` on absence/bad type).
-
-    Used to consume ``TraefikProxyData`` TypedDict (total=False) keys safely
-    under ``mypy --strict`` — every key is ``None`` at the type level, so
-    chaining ``.get(...)`` on the raw value triggers ``union-attr`` errors.
-    """
-    return value if isinstance(value, dict) else {}
-
-
-def _list_or_empty(value: Any) -> list[dict[str, Any]]:
-    """Coerce an arbitrary value to ``list[dict[str, Any]]`` (``[]`` on absence/bad type).
-
-    Mirrors ``_dict_or_empty`` for list-shaped TypedDict keys.
-    """
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _safe_int(value: Any) -> int:
-    """Coerce a possibly-missing overview counter to int (0 on absence/bad type)."""
-    if isinstance(value, bool):
-        # bool is a subclass of int — treat as 0 to avoid True → 1 in counts.
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-    return 0
-
-
-# Map Traefik's API `status` strings onto the dashboard buckets used in
-# ``custom:modern-circular-gauge`` cards. Traefik v3 returns
-# ``enabled | disabled | warning | error``; we surface those as
-# ``success | disabled | warning | error`` (matching Traefik's dashboard
-# pie-chart slice labels). Items whose status is missing or unmapped are
-# silently skipped — they don't show up in any bucket (avoids polluting
-# the count when Traefik adds a new status class in a future version).
-_STATUS_TO_BUCKET: Final[dict[str, str]] = {
-    "enabled": "success",
-    "warning": "warning",
-    "error": "error",
-    "disabled": "disabled",
-}
-
-
-def _count_by_status(
-    items: list[dict[str, Any]],
-    *,
-    name_key: str = "name",
-    status_key: str = "status",
-) -> dict[str, int]:
-    """Count ``items`` grouped by their ``status_key`` mapped to bucket labels.
-
-    Items missing ``status_key`` or with an unmapped status value are
-    silently dropped (no bucket for them). Items that aren't dicts are
-    also dropped. The caller is responsible for ``filter_internal_items``
-    BEFORE this helper — we count whatever we receive.
-
-    :return: ``{"success": N, "warning": N, "error": N, "disabled": N}``
-        with all four keys always present (zero when no matches).
-    """
-    counts: dict[str, int] = {
-        "success": 0,
-        "warning": 0,
-        "error": 0,
-        "disabled": 0,
-    }
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        bucket = _STATUS_TO_BUCKET.get(str(item.get(status_key, "")), None)
-        if bucket is not None:
-            counts[bucket] += 1
-    return counts
-
-
 class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
-    """One sensor per Traefik HTTP entrypoint (CONTEXT.md D-15).
+    """One sensor per Traefik entrypoint.
 
-    State = ``entrypoint["address"]`` (e.g., ``":443"``); attributes expose the
-    raw ``name`` and ``transport`` so dashboards can group / colour by protocol
-    without re-fetching from Traefik. Entrypoints are config-time constructs
-    in Traefik's API — runtime request counts live in ``/api/overview`` or
-    ``/metrics`` (deferred to v2 per CONTEXT.md deferred section).
+    State = the entrypoint's listening address (e.g. ``":443"``); attributes
+    expose the raw ``name`` and the ``transport`` protocol (``tcp`` or
+    ``udp``) so dashboards can group by protocol. The model is looked up by
+    name in the latest snapshot on every read.
     """
 
     def __init__(
         self,
         entry: TraefikProxyConfigEntry,
         coordinator: TraefikProxyCoordinator,
-        entrypoint: dict[str, Any],
+        entrypoint: Entrypoint,
     ) -> None:
-        entrypoint_name = entrypoint.get("name") or "unknown"
+        entrypoint_name = entrypoint.name
         super().__init__(entry, category="http_entrypoints", description_key=entrypoint_name)
-        self._entrypoint = entrypoint
+        self._item_name = entrypoint_name
+        self._initial_entrypoint = entrypoint
         self._attr_unique_id = f"{entry.entry_id}_http_entrypoint_{entrypoint_name}"
         self.entity_id = f"sensor.traefik_http_entrypoint_{slugify(entrypoint_name)}"
         self._attr_name = entrypoint_name
+
+    @property
+    def _entrypoint(self) -> Entrypoint:
+        """Return the current model, or the last known one when it is not in the snapshot."""
+        return self.coordinator.data.entrypoints.get(self._item_name, self._initial_entrypoint)
 
     @property
     def native_value(self) -> str:
@@ -316,20 +219,18 @@ class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
         display format and avoids ambiguity when the bind host is included
         (``"0.0.0.0:443"`` vs ``":443"``).
         """
-        address = self._entrypoint.get("address") if isinstance(self._entrypoint, dict) else None
-        return str(address) if address is not None else "unknown"
+        return self._entrypoint.address
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        ep = self._entrypoint if isinstance(self._entrypoint, dict) else {}
+        ep = self._entrypoint
         return {
-            "name": ep.get("name"),
-            "address": ep.get("address"),
-            "transport": ep.get("transport"),
+            "name": ep.name,
+            "address": ep.address,
+            "transport": ep.protocol,
             # ``entrypoint_name`` mirrors ``name`` for consistency with the
-            # ``router_name`` alias on TraefikProxyRouterBinarySensor (Phase 1
-            # ROUTER-02 contract pin).
-            "entrypoint_name": ep.get("name"),
+            # ``router_name`` alias on TraefikProxyRouterBinarySensor.
+            "entrypoint_name": ep.name,
         }
 
     @property
@@ -338,61 +239,49 @@ class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
 
 
 class TraefikProxyServiceSensor(TraefikProxyEntity, SensorEntity):
-    """One sensor per Traefik HTTP service (CONTEXT.md D-16).
+    """One sensor per Traefik HTTP service.
 
-    State = ``loadbalancer.status`` when present, else ``service.status``.
-    Attributes expose the ``type``, the ``server_count`` from
-    ``loadbalancer.servers[]`` (omitted when no loadbalancer is configured —
-    e.g., redirect services), and the raw servers list so dashboards can
-    surface backend health.
+    State = the service status (``enabled``, ``warning``, ``error`` or
+    ``disabled``). Attributes expose the service ``type`` and the backend
+    server counts from Traefik's health status (``server_count`` = all
+    servers, ``servers_up`` = servers reported ``UP``). The model is looked
+    up by name in the latest snapshot on every read.
     """
 
     def __init__(
         self,
         entry: TraefikProxyConfigEntry,
         coordinator: TraefikProxyCoordinator,
-        service: dict[str, Any],
+        service: Service,
     ) -> None:
-        service_name = service.get("name") or "unknown"
+        service_name = service.name
         super().__init__(entry, category="http_services", description_key=service_name)
-        self._service = service
+        self._item_name = service_name
+        self._initial_service = service
         self._attr_unique_id = f"{entry.entry_id}_http_service_{service_name}"
         self.entity_id = f"sensor.traefik_http_service_{slugify(service_name)}"
         self._attr_name = service_name
 
     @property
+    def _service(self) -> Service:
+        """Return the current model, or the last known one when it is not in the snapshot."""
+        return self.coordinator.data.services.get(self._item_name, self._initial_service)
+
+    @property
     def native_value(self) -> str:
-        """Return ``loadbalancer.status`` (preferred), else ``service.status``."""
-        svc = self._service if isinstance(self._service, dict) else {}
-        loadbalancer = svc.get("loadbalancer") if isinstance(svc.get("loadbalancer"), dict) else None
-        if loadbalancer is not None:
-            status = loadbalancer.get("status")
-            if status is not None:
-                return str(status)
-        # Fall back to the service-level status (Traefik also exposes this).
-        status = svc.get("status")
-        return str(status) if status is not None else "unknown"
+        """Return the service status."""
+        return str(self._service.status)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        svc = self._service if isinstance(self._service, dict) else {}
-        loadbalancer = svc.get("loadbalancer") if isinstance(svc.get("loadbalancer"), dict) else None
-        if loadbalancer is not None:
-            servers = loadbalancer.get("servers")
-            server_count = len(servers) if isinstance(servers, list) else 0
-        else:
-            servers = None
-            server_count = 0
+        svc = self._service
         return {
-            "name": svc.get("name"),
-            "status": svc.get("status"),
-            "type": svc.get("type"),
-            "server_count": server_count,
-            # ``servers`` is the raw backend list (URL + optional healthcheck
-            # status when healthcheck is configured). Absent when no
-            # loadbalancer is configured (e.g., redirect services).
-            "servers": servers,
-            "service_name": svc.get("name"),
+            "name": svc.name,
+            "status": str(svc.status),
+            "type": svc.type,
+            "server_count": svc.servers_total,
+            "servers_up": svc.servers_up,
+            "service_name": svc.name,
         }
 
     @property
@@ -403,37 +292,21 @@ class TraefikProxyServiceSensor(TraefikProxyEntity, SensorEntity):
 class _TraefikProxyAggregateCountSensor(TraefikProxyEntity, SensorEntity):
     """Shared base for the three Overview device aggregate counters.
 
-    State and breakdown attributes are **properties** that recompute from
-    ``coordinator.data`` on every access. Coordinator refreshes fire
-    ``async_write_ha_state`` which causes HA to re-read these properties,
-    so the displayed value reflects Traefik's current roster — not
-    whatever the first fetch happened to return.
-
-    v0.1.4 fix: the previous implementation captured ``filtered_count``
-    in ``self._attr_native_value`` at ``__init__`` time and never updated
-    it. After the very first coordinator cycle, the value froze — counts
-    of the freshly-bootstrapped Traefik with empty router lists would
-    read "0" forever even after routers were configured.
+    State and attributes are properties that read the status counts the
+    coordinator precomputes once per snapshot, so the displayed value
+    always reflects the latest Traefik roster.
 
     ``state_class=MEASUREMENT`` so HA can graph trends over time — users
     may want to chart how many routers / services / middlewares are
     configured across deploys.
 
-    Subclasses override:
-
-    - ``_DATA_KEY`` — coordinator.data key to count and filter
-      (e.g. ``"http_routers"``)
-    - ``_OVERVIEW_KEY`` — sub-key under each ``/api/overview`` transport
-      block (e.g. ``"routers"`` for routers / services, ``None`` for
-      middlewares which have no transport breakdown).
-    - ``_HAS_OVERVIEW_BREAKDOWN`` — ``False`` for middlewares.
+    Subclasses implement ``_counts`` (which snapshot counts to show) and
+    set ``_HAS_HTTP_COUNT`` when the ``http_count`` attribute applies.
     """
 
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    _DATA_KEY: ClassVar[str]
-    _OVERVIEW_KEY: ClassVar[str]
-    _HAS_OVERVIEW_BREAKDOWN: ClassVar[bool] = True
+    _HAS_HTTP_COUNT: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -448,73 +321,47 @@ class _TraefikProxyAggregateCountSensor(TraefikProxyEntity, SensorEntity):
         self.entity_id = entity_id
         self._attr_name = name
 
+    def _counts(self) -> StatusCounts:
+        """Return the status counts this sensor shows."""
+        raise NotImplementedError
+
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success
 
     @property
     def native_value(self) -> int:
-        """Filtered count of ``_DATA_KEY`` from the most recent coordinator data.
-
-        Returns 0 on cold start (``coordinator.data`` is None) or when
-        the key is missing from the response.
-        """
-        data = self.coordinator.data
-        if not isinstance(data, dict):
-            return 0
-        return len(filter_internal_items(_list_or_empty(data.get(self._DATA_KEY))))
+        """Total number of items of this kind in the latest snapshot."""
+        return self._counts().total
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Breakdown counts per transport (HTTP / TCP / UDP) from ``/api/overview``.
+        """Per-status counts, their breakdown and the success percentage.
 
-        Empty breakdown (``_HAS_OVERVIEW_BREAKDOWN = False``) returns
-        just ``{"filtered_count": ...}`` — middlewares are HTTP-only per
-        Traefik's API surface.
-
-        v0.2.0 additions: per-bucket counts (success / warning / error /
-        disabled) and a derived ``success_pct`` for dashboard pies /
-        gauges. Reads from ``coordinator.data`` on every call so the
-        counts refresh on each coordinator cycle (same pattern as
-        ``native_value`` — see v0.1.4 fix).
+        ``success_pct`` = success / (success + warning + error) * 100,
+        excluding disabled items (turned off on purpose, not a quality
+        signal), clamped to [0.0, 100.0] and 100.0 when no such item exists.
         """
-        attrs: dict[str, Any] = {"filtered_count": self.native_value}
-        # Status breakdown (success/warning/error/disabled) — applied to
-        # both routers+services (which have _HAS_OVERVIEW_BREAKDOWN=True)
-        # and middlewares (False). The breakdown reads the per-item status
-        # directly from /api/http/{routers,services,middlewares}, which is
-        # independent of the /api/overview breakdown above.
-        data = self.coordinator.data if isinstance(self.coordinator.data, dict) else {}
-        items = filter_internal_items(_list_or_empty(data.get(self._DATA_KEY)))
-        breakdown = _count_by_status(items)
+        counts = self._counts()
+        breakdown = {
+            "success": counts.enabled,
+            "warning": counts.warning,
+            "error": counts.error,
+            "disabled": counts.disabled,
+        }
+        attrs: dict[str, Any] = {"filtered_count": counts.total}
         attrs.update({f"{bucket}_count": count for bucket, count in breakdown.items()})
         attrs["status_breakdown"] = breakdown
-        # success_pct = success / (success + warning + error). Excludes
-        # disabled (admin has explicitly turned it off — not a quality
-        # signal). Clamped to [0.0, 100.0]. 100.0 if no non-disabled items
-        # at all.
-        non_disabled = breakdown["success"] + breakdown["warning"] + breakdown["error"]
-        pct = breakdown["success"] / non_disabled * 100.0 if non_disabled > 0 else 100.0
+        non_disabled = counts.enabled + counts.warning + counts.error
+        pct = counts.enabled / non_disabled * 100.0 if non_disabled > 0 else 100.0
         attrs["success_pct"] = max(0.0, min(100.0, pct))
-
-        if not self._HAS_OVERVIEW_BREAKDOWN:
-            return attrs
-        overview = _dict_or_empty(data.get("overview")) if isinstance(data, dict) else {}
-        attrs["http_count"] = _safe_int(_dict_or_empty(overview.get("http")).get(self._OVERVIEW_KEY))
-        attrs["tcp_count"] = _safe_int(_dict_or_empty(overview.get("tcp")).get(self._OVERVIEW_KEY))
-        attrs["udp_count"] = _safe_int(_dict_or_empty(overview.get("udp")).get(self._OVERVIEW_KEY))
+        if self._HAS_HTTP_COUNT:
+            attrs["http_count"] = counts.total
         return attrs
 
 
 class TraefikProxyRoutersCountSensor(_TraefikProxyAggregateCountSensor):
-    """Total Traefik routers — filtered count (CONTEXT.md D-17).
-
-    State = ``len(filter_internal_items(coordinator.data["http_routers"]))``;
-    attributes break down by transport (HTTP / TCP / UDP) from ``/api/overview``.
-    """
-
-    _DATA_KEY = "http_routers"
-    _OVERVIEW_KEY = "routers"
+    """Number of HTTP routers in the latest snapshot."""
 
     def __init__(self, entry: TraefikProxyConfigEntry) -> None:
         super().__init__(
@@ -524,12 +371,12 @@ class TraefikProxyRoutersCountSensor(_TraefikProxyAggregateCountSensor):
             name="Routers",
         )
 
+    def _counts(self) -> StatusCounts:
+        return self.coordinator.data.router_counts
+
 
 class TraefikProxyServicesCountSensor(_TraefikProxyAggregateCountSensor):
-    """Total Traefik services — filtered count (CONTEXT.md D-17)."""
-
-    _DATA_KEY = "http_services"
-    _OVERVIEW_KEY = "services"
+    """Number of HTTP services in the latest snapshot."""
 
     def __init__(self, entry: TraefikProxyConfigEntry) -> None:
         super().__init__(
@@ -539,17 +386,14 @@ class TraefikProxyServicesCountSensor(_TraefikProxyAggregateCountSensor):
             name="Services",
         )
 
+    def _counts(self) -> StatusCounts:
+        return self.coordinator.data.service_counts
+
 
 class TraefikProxyMiddlewaresCountSensor(_TraefikProxyAggregateCountSensor):
-    """Total Traefik middlewares — filtered count (CONTEXT.md D-17).
+    """Number of HTTP middlewares in the latest snapshot."""
 
-    Middlewares are HTTP-only per Traefik's API surface (no TCP/UDP
-    middleware concept), so the breakdown is just the filtered count.
-    """
-
-    _DATA_KEY = "http_middlewares"
-    _OVERVIEW_KEY = ""  # unused — overridden by _HAS_OVERVIEW_BREAKDOWN = False
-    _HAS_OVERVIEW_BREAKDOWN = False
+    _HAS_HTTP_COUNT = False
 
     def __init__(self, entry: TraefikProxyConfigEntry) -> None:
         super().__init__(
@@ -558,6 +402,9 @@ class TraefikProxyMiddlewaresCountSensor(_TraefikProxyAggregateCountSensor):
             entity_id="sensor.traefik_middlewares",
             name="Middlewares",
         )
+
+    def _counts(self) -> StatusCounts:
+        return self.coordinator.data.middleware_counts
 
 
 class TraefikProxyCertTimestampSensor(TraefikProxyEntity, SensorEntity):

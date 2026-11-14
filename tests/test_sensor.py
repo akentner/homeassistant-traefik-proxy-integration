@@ -1,10 +1,10 @@
-"""Unit tests for the Phase 2 sensor platform entities.
+"""Unit tests for the sensor platform entities.
 
 Covers TraefikProxyEntrypointSensor, TraefikProxyServiceSensor, and the three
-TraefikProxyXxxCountSensor aggregate counters. Uses MagicMock for the coordinator
-(unlike test_coordinator.py which exercises the real DataUpdateCoordinator);
-this keeps the assertions focused on entity state derivation rather than
-lifecycle wiring (already covered by test_coordinator.py).
+TraefikProxyXxxCountSensor aggregate counters. The coordinator is a MagicMock
+whose ``data`` is a real TraefikSnapshot built through the model parsers
+(``make_snapshot`` / ``snapshot_from_fixture``), so the assertions run on the
+same shapes the integration publishes.
 """
 
 from __future__ import annotations
@@ -15,51 +15,36 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.util import slugify
 
+from custom_components.traefik_proxy.models import TraefikSnapshot
 from custom_components.traefik_proxy.sensor import (
     TraefikProxyEntrypointSensor,
     TraefikProxyMiddlewaresCountSensor,
     TraefikProxyRoutersCountSensor,
     TraefikProxyServicesCountSensor,
     TraefikProxyServiceSensor,
-    _count_by_status,
 )
+from tests.conftest import FIXTURE_VERSIONS, make_snapshot, snapshot_from_fixture
 
 
-def _entry(name: str = "traefik.example.com") -> MagicMock:
-    """Build a mock TraefikProxyConfigEntry for sensor instantiation.
-
-    Note: ``runtime_data`` is left unset — for sensors that read state
-    from the coordinator, use :func:`_entry_with_data` instead which
-    wires the coordinator into ``entry.runtime_data.coordinator`` so that
-    ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to the
-    data-bearing mock.
-    """
-    e = MagicMock()
-    e.entry_id = "test-entry"
-    e.data = {"url": f"https://{name}:8080"}
-    return e
-
-
-def _coordinator_with(data: dict[str, Any] | None) -> MagicMock:
-    """Build a MagicMock coordinator with the given data payload."""
-    coord = MagicMock()
-    coord.data = data
-    coord.last_update_success = True
-    return coord
-
-
-def _entry_with_data(data: dict[str, Any] | None) -> tuple[MagicMock, MagicMock]:
-    """Build a (entry, coordinator) pair wired together for entity tests.
+def _entry_with_snapshot(snapshot: TraefikSnapshot) -> tuple[MagicMock, MagicMock]:
+    """Build a (entry, coordinator) pair whose coordinator publishes ``snapshot``.
 
     The entry's ``runtime_data.coordinator`` slot holds the coordinator so
-    ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to the mock
-    that owns the data dict. Required for the v0.1.4+ property-based
-    state derivation on the aggregate count sensors.
+    ``TraefikProxyEntity.__init__`` resolves ``self.coordinator`` to it.
     """
-    entry = _entry()
-    coord = _coordinator_with(data)
+    entry = MagicMock()
+    entry.entry_id = "test-entry"
+    entry.data = {"url": "https://traefik.example.com:8080"}
+    coord = MagicMock()
+    coord.data = snapshot
+    coord.last_update_success = True
     entry.runtime_data = MagicMock(coordinator=coord)
     return entry, coord
+
+
+def _routers(*statuses: str) -> list[dict[str, Any]]:
+    """Raw router items named ``r<i>@file`` with the given statuses."""
+    return [{"name": f"r{i}@file", "status": status} for i, status in enumerate(statuses)]
 
 
 # ---------------------------------------------------------------------------
@@ -68,32 +53,67 @@ def _entry_with_data(data: dict[str, Any] | None) -> tuple[MagicMock, MagicMock]
 
 
 def test_entrypoint_sensor_state_from_address() -> None:
-    """TraefikProxyEntrypointSensor.native_value == entrypoint['address']."""
-    ep = {"name": "websecure", "address": ":443", "transport": "tcp"}
-    coord = _coordinator_with({"entrypoints": [ep]})
-    entity = TraefikProxyEntrypointSensor(_entry(), coord, ep)
+    """TraefikProxyEntrypointSensor.native_value is the entrypoint address."""
+    snapshot = make_snapshot(entrypoints=[{"name": "websecure", "address": ":443"}])
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
     assert entity.native_value == ":443"
 
 
 def test_entrypoint_sensor_entity_id_and_unique_id() -> None:
     """Entrypoint entity_id follows the traefik_http_entrypoint_<slug> convention."""
-    ep = {"name": "websecure", "address": ":443", "transport": "tcp"}
-    coord = _coordinator_with({"entrypoints": [ep]})
-    entity = TraefikProxyEntrypointSensor(_entry(), coord, ep)
+    snapshot = make_snapshot(entrypoints=[{"name": "websecure", "address": ":443"}])
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
     assert entity.entity_id == f"sensor.traefik_http_entrypoint_{slugify('websecure')}"
     assert entity.unique_id == "test-entry_http_entrypoint_websecure"
 
 
 def test_entrypoint_sensor_attributes_include_name_address_transport() -> None:
-    """extra_state_attributes surface raw fields per UX-04."""
-    ep = {"name": "websecure", "address": ":443", "transport": "tcp", "tls": {}}
-    coord = _coordinator_with({"entrypoints": [ep]})
-    entity = TraefikProxyEntrypointSensor(_entry(), coord, ep)
-    attrs = entity.extra_state_attributes
-    assert attrs["name"] == "websecure"
-    assert attrs["address"] == ":443"
-    assert attrs["transport"] == "tcp"
-    assert attrs["entrypoint_name"] == "websecure"
+    """Attributes expose name, address, the transport protocol and the name alias."""
+    snapshot = make_snapshot(
+        entrypoints=[{"name": "websecure", "address": ":443"}, {"name": "udp-ep", "address": ":9999/udp"}]
+    )
+    entry, coord = _entry_with_snapshot(snapshot)
+    tcp = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["websecure"])
+    udp = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["udp-ep"])
+    assert tcp.extra_state_attributes == {
+        "name": "websecure",
+        "address": ":443",
+        "transport": "tcp",
+        "entrypoint_name": "websecure",
+    }
+    assert udp.extra_state_attributes["transport"] == "udp"
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_entrypoint_sensors_from_capture(version: str) -> None:
+    """Every captured entrypoint yields its address and protocol."""
+    snapshot = snapshot_from_fixture(version)
+    entry, coord = _entry_with_snapshot(snapshot)
+    states = {
+        name: (
+            TraefikProxyEntrypointSensor(entry, coord, ep).native_value,
+            TraefikProxyEntrypointSensor(entry, coord, ep).extra_state_attributes["transport"],
+        )
+        for name, ep in snapshot.entrypoints.items()
+    }
+    assert states == {
+        "traefik": (":8080", "tcp"),
+        "udp-ep": (":9999/udp", "udp"),
+        "web": (":80", "tcp"),
+        "websecure": (":443", "tcp"),
+    }
+
+
+def test_entrypoint_sensor_reads_latest_snapshot() -> None:
+    """The entity resolves its model from the current snapshot on every read."""
+    snapshot = make_snapshot(entrypoints=[{"name": "web", "address": ":80"}])
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyEntrypointSensor(entry, coord, snapshot.entrypoints["web"])
+
+    coord.data = make_snapshot(entrypoints=[{"name": "web", "address": ":8081"}])
+    assert entity.native_value == ":8081"
 
 
 # ---------------------------------------------------------------------------
@@ -101,52 +121,86 @@ def test_entrypoint_sensor_attributes_include_name_address_transport() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_service_sensor_state_from_loadbalancer_status() -> None:
-    """TraefikProxyServiceSensor.native_value == loadbalancer.status when present."""
-    svc = {
-        "name": "backend-api",
+def _lb_service(name: str, status: str, server_status: dict[str, str]) -> dict[str, Any]:
+    """Raw list-form load-balancer service item."""
+    return {
+        "name": name,
+        "provider": "file",
         "type": "loadbalancer",
-        "loadbalancer": {"servers": [{"url": "http://10.0.0.1:8000"}], "status": "OK"},
+        "status": status,
+        "loadBalancer": {"servers": [{"url": url} for url in server_status]},
+        "serverStatus": server_status,
+    }
+
+
+def test_service_sensor_state_is_service_status() -> None:
+    """TraefikProxyServiceSensor.native_value is the parsed service status."""
+    snapshot = make_snapshot(
+        services=[
+            _lb_service("ok@file", "enabled", {"http://192.0.2.1:80": "UP"}),
+            {"name": "broken@file", "status": "disabled", "error": ["boom"]},
+        ]
+    )
+    entry, coord = _entry_with_snapshot(snapshot)
+    ok = TraefikProxyServiceSensor(entry, coord, snapshot.services["ok@file"])
+    broken = TraefikProxyServiceSensor(entry, coord, snapshot.services["broken@file"])
+    assert ok.native_value == "enabled"
+    assert broken.native_value == "error"
+
+
+def test_service_sensor_server_counts_from_server_status() -> None:
+    """server_count counts every server, servers_up only the ones reported UP."""
+    snapshot = make_snapshot(
+        services=[
+            _lb_service(
+                "mixed@file",
+                "enabled",
+                {"http://192.0.2.10:80": "DOWN", "http://backend.example.com:80": "UP"},
+            )
+        ]
+    )
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["mixed@file"])
+    assert entity.extra_state_attributes == {
+        "name": "mixed@file",
         "status": "enabled",
-    }
-    coord = _coordinator_with({"http_services": [svc]})
-    entity = TraefikProxyServiceSensor(_entry(), coord, svc)
-    assert entity.native_value == "OK"
-
-
-def test_service_sensor_state_falls_back_to_top_level_status() -> None:
-    """When loadbalancer.status is absent, fall back to service.status."""
-    svc = {
-        "name": "redirect-svc",
-        "type": "redirect",
-        # No loadbalancer key — redirect service.
-        "status": "WARNING",
-    }
-    coord = _coordinator_with({"http_services": [svc]})
-    entity = TraefikProxyServiceSensor(_entry(), coord, svc)
-    assert entity.native_value == "WARNING"
-
-
-def test_service_sensor_attributes_include_servers_and_count() -> None:
-    """extra_state_attributes include server_count + servers list."""
-    svc = {
-        "name": "backend-api",
         "type": "loadbalancer",
-        "loadbalancer": {
-            "servers": [
-                {"url": "http://10.0.0.1:8000"},
-                {"url": "http://10.0.0.2:8000"},
-            ],
-            "status": "OK",
-        },
-        "status": "enabled",
+        "server_count": 2,
+        "servers_up": 1,
+        "service_name": "mixed@file",
     }
-    coord = _coordinator_with({"http_services": [svc]})
-    entity = TraefikProxyServiceSensor(_entry(), coord, svc)
-    attrs = entity.extra_state_attributes
-    assert attrs["server_count"] == 2
-    assert attrs["type"] == "loadbalancer"
-    assert len(attrs["servers"]) == 2
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_service_sensor_attributes_expose_no_backend_url(version: str) -> None:
+    """No service attribute carries the server list or any backend URL."""
+    snapshot = snapshot_from_fixture(version)
+    entry, coord = _entry_with_snapshot(snapshot)
+    for service in snapshot.services.values():
+        attrs = TraefikProxyServiceSensor(entry, coord, service).extra_state_attributes
+        assert "servers" not in attrs
+        assert not any("://" in str(value) for value in attrs.values()), service.name
+    mixed = TraefikProxyServiceSensor(entry, coord, snapshot.services["lb-mixed@file"]).extra_state_attributes
+    assert (mixed["server_count"], mixed["servers_up"]) == (2, 1)
+
+
+def test_service_sensor_entity_id_and_unique_id() -> None:
+    """Service entity_id follows the traefik_http_service_<slug> convention."""
+    snapshot = make_snapshot(services=[{"name": "whoami@docker", "status": "enabled"}])
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["whoami@docker"])
+    assert entity.entity_id == f"sensor.traefik_http_service_{slugify('whoami@docker')}"
+    assert entity.unique_id == "test-entry_http_service_whoami@docker"
+
+
+def test_service_sensor_reads_latest_snapshot() -> None:
+    """The service state follows the current snapshot without re-instantiation."""
+    snapshot = make_snapshot(services=[{"name": "svc@file", "status": "enabled"}])
+    entry, coord = _entry_with_snapshot(snapshot)
+    entity = TraefikProxyServiceSensor(entry, coord, snapshot.services["svc@file"])
+
+    coord.data = make_snapshot(services=[{"name": "svc@file", "status": "warning"}])
+    assert entity.native_value == "warning"
 
 
 # ---------------------------------------------------------------------------
@@ -154,153 +208,88 @@ def test_service_sensor_attributes_include_servers_and_count() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_routers_count_sensor_uses_filtered_count() -> None:
-    """Routers count drops @<provider> internal items."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "user-router"},
-                {"name": "api@internal"},
-            ],
-        }
+def test_routers_count_sensor_excludes_internal_items() -> None:
+    """Traefik-internal routers are not part of the snapshot, so they are not counted."""
+    entry, _coord = _entry_with_snapshot(
+        make_snapshot(routers=[{"name": "user-router@file"}, {"name": "api@internal"}])
     )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    assert entity.native_value == 1  # api@internal filtered out
+    assert TraefikProxyRoutersCountSensor(entry).native_value == 1
 
 
-def test_aggregate_sensor_attributes_include_breakdown() -> None:
-    """extra_state_attributes read http_count/tcp_count/udp_count from /api/overview."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "r1"},
-                {"name": "r2"},
-            ],
-            "overview": {
-                "http": {"routers": 3},
-                "tcp": {"routers": 1},
-                "udp": {},
-            },
-        }
-    )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
-    assert attrs["filtered_count"] == 2
-    assert attrs["http_count"] == 3
-    assert attrs["tcp_count"] == 1
-    assert attrs["udp_count"] == 0
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_count_sensors_from_capture(version: str) -> None:
+    """Counts and http_count of the real captures; tcp/udp counts are gone."""
+    entry, _coord = _entry_with_snapshot(snapshot_from_fixture(version))
+    routers = TraefikProxyRoutersCountSensor(entry)
+    services = TraefikProxyServicesCountSensor(entry)
+    middlewares = TraefikProxyMiddlewaresCountSensor(entry)
+
+    assert routers.native_value == 128
+    router_attrs = routers.extra_state_attributes
+    assert router_attrs["filtered_count"] == 128
+    assert router_attrs["http_count"] == 128
+    assert router_attrs["status_breakdown"] == {"success": 125, "warning": 1, "error": 2, "disabled": 0}
+    assert "tcp_count" not in router_attrs
+    assert "udp_count" not in router_attrs
+
+    assert services.native_value == 4
+    assert services.extra_state_attributes["http_count"] == 4
+
+    assert middlewares.native_value == 2
+    middleware_attrs = middlewares.extra_state_attributes
+    assert middleware_attrs["success_count"] == 1
+    assert middleware_attrs["error_count"] == 1
+    assert middleware_attrs["success_pct"] == 50.0
+    assert "http_count" not in middleware_attrs
 
 
 def test_aggregate_count_updates_on_coordinator_cycle() -> None:
-    """v0.1.4 regression: counts MUST refresh on every coordinator cycle.
-
-    The pre-v0.1.4 implementation captured ``filtered_count`` at __init__
-    time in ``self._attr_native_value`` and never updated it. Counts of a
-    freshly-bootstrapped Traefik with empty router lists read "0" forever
-    even after routers were configured.
-
-    The new implementation reads from ``coordinator.data`` on every
-    property access; this test mutates ``coord.data`` between two reads
-    to assert that the count tracks the current data, not the initial.
-    """
-    entry, _coord = _entry_with_data({"http_routers": []})
+    """Counts follow the current snapshot, not the one present at construction."""
+    entry, coord = _entry_with_snapshot(make_snapshot())
     entity = TraefikProxyRoutersCountSensor(entry)
     assert entity.native_value == 0
 
-    # Coordinator refresh brings new data
-    entry.runtime_data.coordinator.data = {"http_routers": [{"name": "new"}, {"name": "another"}]}
-    assert entity.native_value == 2  # updated without re-instantiation
-
-
-def test_aggregate_attributes_refresh_with_coordinator_data() -> None:
-    """v0.1.4 regression: overview breakdown attributes also refresh."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [],
-            "overview": {"http": {"routers": 0}},
-        }
-    )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    assert entity.extra_state_attributes["http_count"] == 0
-
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [{"name": "a"}],
-        "overview": {"http": {"routers": 1}},
-    }
-    assert entity.extra_state_attributes["filtered_count"] == 1
-    assert entity.extra_state_attributes["http_count"] == 1
-
-
-def test_aggregate_returns_zero_when_coordinator_data_missing() -> None:
-    """Cold-start case (coordinator.data is None): all counts 0, breakdown 0."""
-    entry, _coord = _entry_with_data(None)
-    entry.runtime_data.coordinator.last_update_success = False
-    entity = TraefikProxyRoutersCountSensor(entry)
-    assert entity.native_value == 0
-    assert entity.extra_state_attributes["filtered_count"] == 0
-    assert entity.extra_state_attributes["http_count"] == 0
-
-
-def test_services_count_sensor_uses_filtered_count() -> None:
-    """Services count drops @<provider> internal items (api@internal)."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_services": [
-                {"name": "backend-api"},
-                {"name": "backend-warn"},
-                {"name": "api@internal"},
-            ],
-        }
-    )
-    entity = TraefikProxyServicesCountSensor(entry)
+    coord.data = make_snapshot(routers=_routers("enabled", "enabled"))
     assert entity.native_value == 2
+    assert entity.extra_state_attributes["filtered_count"] == 2
+    assert entity.extra_state_attributes["http_count"] == 2
 
 
-def test_middlewares_count_sensor_uses_filtered_count() -> None:
-    """Middlewares count drops ``@internal`` items (Traefik's auto-generated
-    API/dashboard/redirect internals).
-
-    Middlewares are HTTP-only — no http_count/tcp_count/udp breakdown.
-    User-named provider-suffixed middlewares (``strip@docker``) are NOT
-    internal and should be counted.
-    """
-    entry, _coord = _entry_with_data(
-        {
-            "http_middlewares": [
-                {"name": "auth-headers", "status": "enabled"},
-                {"name": "rate-limit", "status": "enabled"},
-                {"name": "strip@docker", "status": "enabled"},  # user middleware, kept
-                {"name": "dashboard_stripprefix@internal", "status": "enabled"},  # Traefik-internal, dropped
-            ],
-        }
+def test_services_count_sensor_excludes_internal_items() -> None:
+    """Services count excludes api@internal."""
+    entry, _coord = _entry_with_snapshot(
+        make_snapshot(services=[{"name": "backend-api@file"}, {"name": "backend-warn@file"}, {"name": "api@internal"}])
     )
-    entity = TraefikProxyMiddlewaresCountSensor(entry)
-    assert entity.native_value == 3
-    # v0.2.0: now also exposes status breakdown (all 3 enabled → success=3).
-    assert entity.extra_state_attributes["filtered_count"] == 3
-    assert entity.extra_state_attributes["success_count"] == 3
-    assert entity.extra_state_attributes["warning_count"] == 0
-    assert entity.extra_state_attributes["error_count"] == 0
-    assert entity.extra_state_attributes["disabled_count"] == 0
-    assert entity.extra_state_attributes["success_pct"] == 100.0
+    assert TraefikProxyServicesCountSensor(entry).native_value == 2
 
 
-def test_middlewares_no_overview_breakdown() -> None:
-    """TraefikProxyMiddlewaresCountSensor excludes http/tcp/udp breakdown attrs.
-
-    Middlewares are HTTP-only per Traefik's API surface — there is no
-    TCP/UDP middleware concept, so the breakdown is meaningless. The
-    base class' ``_HAS_OVERVIEW_BREAKDOWN = False`` flag suppresses those
-    keys entirely.
-    """
-    entry, _coord = _entry_with_data(
-        {
-            "http_middlewares": [{"name": "x", "status": "enabled"}],
-            "overview": {"http": {"middlewares": 5}, "tcp": {"middlewares": 99}},
-        }
+def test_middlewares_count_sensor_counts_user_items() -> None:
+    """Provider-suffixed user middlewares count; ``@internal`` ones do not."""
+    entry, _coord = _entry_with_snapshot(
+        make_snapshot(
+            middlewares=[
+                {"name": "auth-headers@file", "status": "enabled"},
+                {"name": "rate-limit@file", "status": "enabled"},
+                {"name": "strip@docker", "status": "enabled"},
+                {"name": "dashboard_stripprefix@internal", "status": "enabled"},
+            ]
+        )
     )
     entity = TraefikProxyMiddlewaresCountSensor(entry)
     attrs = entity.extra_state_attributes
+    assert entity.native_value == 3
+    assert attrs["filtered_count"] == 3
+    assert attrs["success_count"] == 3
+    assert attrs["warning_count"] == 0
+    assert attrs["error_count"] == 0
+    assert attrs["disabled_count"] == 0
+    assert attrs["success_pct"] == 100.0
+
+
+def test_middlewares_have_no_transport_counts() -> None:
+    """Middlewares expose neither http_count nor tcp/udp counts."""
+    entry, _coord = _entry_with_snapshot(make_snapshot(middlewares=[{"name": "x@file", "status": "enabled"}]))
+    attrs = TraefikProxyMiddlewaresCountSensor(entry).extra_state_attributes
     assert attrs["filtered_count"] == 1
     assert attrs["success_count"] == 1
     assert "http_count" not in attrs
@@ -308,115 +297,44 @@ def test_middlewares_no_overview_breakdown() -> None:
     assert "udp_count" not in attrs
 
 
-# ---------------------------------------------------------------------------
-# v0.2.0 — _count_by_status helper + breakdown attributes
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "items,expected",
-    [
-        (
-            [
-                {"name": "r1", "status": "enabled"},
-                {"name": "r2", "status": "enabled"},
-            ],
-            {"success": 2, "warning": 0, "error": 0, "disabled": 0},
-        ),
-        (
-            [
-                {"name": "r1", "status": "enabled"},
-                {"name": "r2", "status": "warning"},
-                {"name": "r3", "status": "error"},
-                {"name": "r4", "status": "disabled"},
-            ],
-            {"success": 1, "warning": 1, "error": 1, "disabled": 1},
-        ),
-        # Traefik status missing → dropped (no bucket)
-        (
-            [{"name": "r1"}, {"name": "r2", "status": "enabled"}],
-            {"success": 1, "warning": 0, "error": 0, "disabled": 0},
-        ),
-        # Future Traefik status value (e.g. "critical") → silently dropped
-        (
-            [
-                {"name": "r1", "status": "enabled"},
-                {"name": "r2", "status": "critical"},
-            ],
-            {"success": 1, "warning": 0, "error": 0, "disabled": 0},
-        ),
-        # Empty list
-        ([], {"success": 0, "warning": 0, "error": 0, "disabled": 0}),
-        # Non-dict entries skipped
-        (
-            ["not-a-dict", {"name": "r1", "status": "enabled"}, None],
-            {"success": 1, "warning": 0, "error": 0, "disabled": 0},
-        ),
-    ],
-)
-def test_count_by_status_groups_items(items: list, expected: dict[str, int]) -> None:
-    """_count_by_status maps Traefik API status values to bucket labels.
-
-    The four buckets (success / warning / error / disabled) always
-    appear in the result, even when no items map to them.
-    """
-    assert _count_by_status(items) == expected
-
-
 def test_aggregate_routers_breakdown_attributes() -> None:
-    """sensor.traefik_routers exposes success/warning/error/disabled counts.
-
-    Mirrors the user's actual Traefik at 192.168.178.3:8080: 9 user
-    routers (6 from file provider + 3 from internal that we filter out)
-    all currently enabled.
-    """
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
+    """sensor.traefik_routers exposes success/warning/error/disabled counts."""
+    entry, _coord = _entry_with_snapshot(
+        make_snapshot(
+            routers=[
                 {"name": "ha-nextgen@file", "status": "enabled"},
                 {"name": "ha@file", "status": "enabled"},
                 {"name": "httpsredirect@file", "status": "enabled"},
                 {"name": "n8n@file", "status": "enabled"},
                 {"name": "opencode@file", "status": "enabled"},
                 {"name": "traccar@file", "status": "enabled"},
-                # Traefik-internal filtered out before counting.
                 {"name": "api@internal", "status": "enabled"},
                 {"name": "dashboard@internal", "status": "enabled"},
                 {"name": "web-to-websecure@internal", "status": "enabled"},
-            ],
-        }
+            ]
+        )
     )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
+    attrs = TraefikProxyRoutersCountSensor(entry).extra_state_attributes
     assert attrs["filtered_count"] == 6
     assert attrs["success_count"] == 6
     assert attrs["warning_count"] == 0
     assert attrs["error_count"] == 0
     assert attrs["disabled_count"] == 0
     assert attrs["success_pct"] == 100.0
-    assert attrs["status_breakdown"] == {
-        "success": 6,
-        "warning": 0,
-        "error": 0,
-        "disabled": 0,
-    }
+    assert attrs["status_breakdown"] == {"success": 6, "warning": 0, "error": 0, "disabled": 0}
 
 
 def test_aggregate_breakdown_reflects_mixed_status() -> None:
-    """A router in 'warning' state shows up in warning_count, not success_count."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "ok-1", "status": "enabled"},
-                {"name": "ok-2", "status": "enabled"},
-                {"name": "warn-1", "status": "warning"},
-                {"name": "err-1", "status": "error"},
-                {"name": "off-1", "status": "disabled"},
-            ],
-        }
+    """Each status lands in its own bucket; disabled with errors counts as error."""
+    entry, _coord = _entry_with_snapshot(
+        make_snapshot(
+            routers=[
+                *_routers("enabled", "enabled", "warning", "disabled"),
+                {"name": "err@file", "status": "disabled", "error": ["the service does not exist"]},
+            ]
+        )
     )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
+    attrs = TraefikProxyRoutersCountSensor(entry).extra_state_attributes
     assert attrs["filtered_count"] == 5
     assert attrs["success_count"] == 2
     assert attrs["warning_count"] == 1
@@ -427,74 +345,44 @@ def test_aggregate_breakdown_reflects_mixed_status() -> None:
 
 
 def test_aggregate_success_pct_excludes_disabled() -> None:
-    """success_pct denominator excludes disabled items (admin opt-out)."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "ok-1", "status": "enabled"},
-                {"name": "off-1", "status": "disabled"},
-                {"name": "off-2", "status": "disabled"},
-            ],
-        }
-    )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
-    # 1 success / 1 enabled-only = 100%
-    assert attrs["success_pct"] == 100.0
+    """success_pct denominator excludes disabled items."""
+    entry, _coord = _entry_with_snapshot(make_snapshot(routers=_routers("enabled", "disabled", "disabled")))
+    assert TraefikProxyRoutersCountSensor(entry).extra_state_attributes["success_pct"] == 100.0
 
 
-def test_aggregate_success_pct_zero_when_no_non_disabled() -> None:
-    """If everything is disabled (no enabled/warning/error), pct is 100% (vacuously)."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "off-1", "status": "disabled"},
-                {"name": "off-2", "status": "disabled"},
-            ],
-        }
-    )
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
+def test_aggregate_success_pct_when_everything_disabled() -> None:
+    """Only disabled items: success_pct is 100.0 (no item to judge)."""
+    entry, _coord = _entry_with_snapshot(make_snapshot(routers=_routers("disabled", "disabled")))
+    attrs = TraefikProxyRoutersCountSensor(entry).extra_state_attributes
     assert attrs["filtered_count"] == 2
     assert attrs["success_count"] == 0
     assert attrs["success_pct"] == 100.0
 
 
 def test_aggregate_breakdown_refreshes_on_coordinator_cycle() -> None:
-    """v0.2.0 regression: breakdown attributes refresh every cycle, not at __init__."""
-    entry, _coord = _entry_with_data(
-        {
-            "http_routers": [
-                {"name": "ok-1", "status": "enabled"},
-            ],
-        }
-    )
+    """Breakdown attributes follow every new snapshot."""
+    entry, coord = _entry_with_snapshot(make_snapshot(routers=_routers("enabled")))
     entity = TraefikProxyRoutersCountSensor(entry)
     assert entity.extra_state_attributes["success_count"] == 1
     assert entity.extra_state_attributes["warning_count"] == 0
 
-    # Coordinator refresh: warning shows up.
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
-            {"name": "ok-1", "status": "enabled"},
-            {"name": "ok-2", "status": "warning"},
-        ],
-    }
+    coord.data = make_snapshot(routers=_routers("enabled", "warning"))
     assert entity.extra_state_attributes["success_count"] == 1
     assert entity.extra_state_attributes["warning_count"] == 1
     assert entity.extra_state_attributes["success_pct"] == 50.0
 
 
-def test_aggregate_breakdown_handles_missing_data() -> None:
-    """Cold start: coordinator.data is None → all breakdown attrs are 0."""
-    entry, _coord = _entry_with_data(None)
-    entry.runtime_data.coordinator.last_update_success = False
-    entity = TraefikProxyRoutersCountSensor(entry)
-    attrs = entity.extra_state_attributes
-    assert attrs["filtered_count"] == 0
-    assert attrs["success_count"] == 0
-    assert attrs["warning_count"] == 0
-    assert attrs["error_count"] == 0
-    assert attrs["disabled_count"] == 0
-    # No non-disabled items → vacuously 100%
-    assert attrs["success_pct"] == 100.0
+def test_empty_traefik_reads_zero_everywhere() -> None:
+    """A Traefik without routers, services or middlewares: every count is 0, success_pct 100."""
+    entry, _coord = _entry_with_snapshot(make_snapshot())
+    for sensor_cls in (
+        TraefikProxyRoutersCountSensor,
+        TraefikProxyServicesCountSensor,
+        TraefikProxyMiddlewaresCountSensor,
+    ):
+        entity = sensor_cls(entry)
+        attrs = entity.extra_state_attributes
+        assert entity.native_value == 0
+        assert attrs["filtered_count"] == 0
+        assert attrs["status_breakdown"] == {"success": 0, "warning": 0, "error": 0, "disabled": 0}
+        assert attrs["success_pct"] == 100.0

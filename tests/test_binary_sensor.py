@@ -1,4 +1,8 @@
-"""Tests for TraefikProxyRouterBinarySensor."""
+"""Tests for the router binary sensor and the any-*-failing aggregates.
+
+The coordinator is a MagicMock whose ``data`` is a real TraefikSnapshot built
+through the model parsers (``make_snapshot`` / ``snapshot_from_fixture``).
+"""
 
 from __future__ import annotations
 
@@ -8,219 +12,36 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.util import slugify
 
-from custom_components.traefik_proxy.api import filter_internal_items
 from custom_components.traefik_proxy.binary_sensor import (
     TraefikProxyAnyMiddlewareFailingBinarySensor,
+    TraefikProxyAnyRouterFailingBinarySensor,
     TraefikProxyAnyServiceFailingBinarySensor,
     TraefikProxyRouterBinarySensor,
 )
+from custom_components.traefik_proxy.models import TraefikSnapshot
+from tests.conftest import FIXTURE_VERSIONS, make_snapshot, snapshot_from_fixture
+
+_AGGREGATES = (
+    TraefikProxyAnyRouterFailingBinarySensor,
+    TraefikProxyAnyServiceFailingBinarySensor,
+    TraefikProxyAnyMiddlewareFailingBinarySensor,
+)
 
 
-def _router(name: str, status: str) -> dict:
+def _router(name: str, status: str, **extra: Any) -> dict[str, Any]:
     return {
         "name": name,
         "rule": f"Host(`{name}.example.com`)",
         "service": f"backend-{name}",
         "status": status,
-        "tls": None,
+        **extra,
     }
 
 
-def test_filter_internal_items_drops_internal():
-    """Traefik's auto-generated ``@internal`` items are dropped; user-named
-    provider-suffixed items (``@docker``, ``@file``, ``@kubernetes``, …)
-    are kept — those are user resources that Traefik just suffixes with
-    the provider name.
-
-    v0.1.5 regression: the previous regex ``r"@\w+"`` matched ANY
-    provider-suffix and dropped user routers. Real-world Traefik setups
-    with file / docker providers all have provider-suffixed user
-    routers (e.g. ``ha-nextgen@file``, ``n8n@docker``) — those are
-    legitimate user items, not Traefik internals.
-    """
-    routers = [
-        _router("my-router", "enabled"),  # kept (no @-suffix)
-        _router("api@internal", "enabled"),  # dropped (Traefik-internal)
-        _router("dashboard@internal", "enabled"),  # dropped (Traefik-internal)
-        _router("strip@docker", "enabled"),  # kept (user-named middleware)
-        _router("ha-nextgen@file", "enabled"),  # kept (user-named router)
-        _router("warn-router", "warning"),  # kept (no @-suffix)
-    ]
-    filtered = filter_internal_items(routers)
-    assert {r["name"] for r in filtered} == {
-        "my-router",
-        "strip@docker",
-        "ha-nextgen@file",
-        "warn-router",
-    }
-
-
-def test_filter_preserves_special_chars_in_user_names():
-    """Trailing ``@`` and provider-suffixes that aren't ``internal`` are kept.
-
-    v0.1.5 update: only ``@internal`` is treated as internal. Traefik's
-    universal naming convention appends the provider name to every
-    user-defined resource (so ``strip`` middleware in docker labels
-    becomes ``strip@docker``). Those items are NOT internal; they are
-    user resources that HA should surface.
-    """
-    routers = [
-        _router("router-with-at-edge@", "enabled"),  # trailing @ only -> kept
-        _router("router@feature@v2", "enabled"),  # in the middle, not @internal -> kept
-        _router("plain-router", "enabled"),  # no @ -> kept
-        _router("router@internal-thing", "enabled"),  # @internal followed by hyphen -> kept
-    ]
-    filtered = filter_internal_items(routers)
-    assert {r["name"] for r in filtered} == {
-        "router-with-at-edge@",
-        "router@feature@v2",
-        "plain-router",
-        "router@internal-thing",
-    }
-
-
-@pytest.mark.parametrize(
-    "status,expected",
-    [
-        ("enabled", True),
-        ("disabled", False),
-        ("warning", False),
-        ("error", False),
-    ],
-)
-def test_ison_derives_from_status(status, expected):
-    """is_on is True ONLY if Traefik status == 'enabled'."""
-    router = _router("test", status)
-    mock_coordinator = MagicMock()
-    mock_coordinator.last_update_success = True
-    # Phase 2 fetch_all shape: 'http_routers' (was 'routers' in Phase 1).
-    mock_coordinator.data = {
-        "version": {"Version": "3.x"},
-        "http_routers": [router],
-        "entrypoints": [],
-        "http_services": [],
-        "http_middlewares": [],
-        "overview": {},
-    }
-    mock_entry = MagicMock()
-    mock_entry.entry_id = "test-entry"
-    mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
-
-    entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
-    assert entity.is_on is expected
-
-
-def test_entity_id_uses_traefik_http_router_prefix():
-    router = _router("my-router", "enabled")
-    mock_coordinator = MagicMock()
-    mock_coordinator.last_update_success = True
-    mock_coordinator.data = {
-        "version": {"Version": "3.x"},
-        "http_routers": [router],
-        "entrypoints": [],
-        "http_services": [],
-        "http_middlewares": [],
-        "overview": {},
-    }
-    mock_entry = MagicMock()
-    mock_entry.entry_id = "test-entry"
-    mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
-
-    entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
-    assert entity.entity_id == f"binary_sensor.traefik_http_router_{slugify('my-router')}"
-
-
-def test_extra_state_attributes_include_status_and_friendly_rule():
-    router = _router("r", "warning")
-    mock_coordinator = MagicMock()
-    mock_coordinator.last_update_success = True
-    mock_coordinator.data = {
-        "version": {"Version": "3.x"},
-        "http_routers": [router],
-        "entrypoints": [],
-        "http_services": [],
-        "http_middlewares": [],
-        "overview": {},
-    }
-    mock_entry = MagicMock()
-    mock_entry.entry_id = "test-entry"
-    mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
-
-    entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
-    attrs = entity.extra_state_attributes
-    assert attrs["status"] == "warning"
-    assert attrs["friendly_rule"] == "r.example.com"
-    assert attrs["service"] == "backend-r"
-
-
-def test_extra_state_attributes_exposes_raw_name_for_dashboards():
-    """ROUTER-02 + D-20: raw Traefik router name surfaced alongside the slug."""
-    router = _router("weird@host.example.com", "enabled")
-    mock_coordinator = MagicMock()
-    mock_coordinator.last_update_success = True
-    mock_coordinator.data = {
-        "version": {"Version": "3.x"},
-        "http_routers": [router],
-        "entrypoints": [],
-        "http_services": [],
-        "http_middlewares": [],
-        "overview": {},
-    }
-    mock_entry = MagicMock()
-    mock_entry.entry_id = "test-entry"
-    mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
-
-    entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
-    attrs = entity.extra_state_attributes
-    assert attrs["name"] == "weird@host.example.com"
-    assert attrs["router_name"] == "weird@host.example.com"
-
-
-def test_device_info_uses_per_category_identifier():
-    """Phase 2 multi-device model: identifier is (DOMAIN, f'{entry_id}_http_routers')."""
-    router = _router("r", "enabled")
-    mock_coordinator = MagicMock()
-    mock_coordinator.last_update_success = True
-    mock_coordinator.data = {
-        "version": {"Version": "3.1.4"},
-        "http_routers": [router],
-        "entrypoints": [],
-        "http_services": [],
-        "http_middlewares": [],
-        "overview": {},
-    }
-    mock_entry = MagicMock()
-    mock_entry.entry_id = "test-entry"
-    mock_entry.data = {"url": "https://traefik.example.com:8080"}
-    mock_entry.runtime_data = MagicMock(coordinator=mock_coordinator)
-
-    entity = TraefikProxyRouterBinarySensor(mock_entry, mock_coordinator, router)
-    info = entity.device_info
-    assert ("traefik_proxy", "test-entry_http_routers") in info["identifiers"]
-    assert info["model"] == "HTTP Routers"
-    assert info["manufacturer"] == "Traefik"
-    assert info["sw_version"] == "3.1.4"
-    assert "HTTP Routers" in info["name"]
-
-
-# ---------------------------------------------------------------------------
-# v0.2.0 — TraefikProxyAnyServiceFailingBinarySensor + TraefikProxyAnyMiddlewareFailingBinarySensor
-# ---------------------------------------------------------------------------
-
-
-def _entry_with_data(data: Any) -> MagicMock:
-    """Helper: build a MagicMock entry with the given coordinator data.
-
-    Mirrors ``_entry_with_data`` in test_sensor.py — wiring the coordinator
-    into ``entry.runtime_data.coordinator`` so ``TraefikProxyEntity.__init__`` resolves
-    ``self.coordinator`` to the data-bearing mock.
-    """
+def _entry_with_snapshot(snapshot: TraefikSnapshot) -> MagicMock:
+    """Build a MagicMock entry whose ``runtime_data.coordinator`` publishes ``snapshot``."""
     coord = MagicMock()
-    coord.data = data
+    coord.data = snapshot
     coord.last_update_success = True
     entry = MagicMock()
     entry.entry_id = "test-entry"
@@ -229,91 +50,234 @@ def _entry_with_data(data: Any) -> MagicMock:
     return entry
 
 
-def test_any_service_failing_aggregates_status() -> None:
-    """TraefikProxyAnyServiceFailingBinarySensor.is_on is True when any service != enabled."""
-    entry = _entry_with_data(
-        {
-            "http_services": [
-                {"name": "ok", "status": "enabled"},
-                {"name": "broken", "status": "error"},
-            ],
-        }
+def _router_entity(snapshot: TraefikSnapshot, name: str) -> TraefikProxyRouterBinarySensor:
+    entry = _entry_with_snapshot(snapshot)
+    coord = entry.runtime_data.coordinator
+    return TraefikProxyRouterBinarySensor(entry, coord, snapshot.routers[name])
+
+
+# ---------------------------------------------------------------------------
+# Router binary sensor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        (_router("test", "enabled"), True),
+        (_router("test", "disabled"), False),
+        (_router("test", "warning"), False),
+        (_router("test", "error"), False),
+        (_router("test", "disabled", error=["the service does not exist"]), False),
+    ],
+)
+def test_ison_derives_from_status(item: dict[str, Any], expected: bool) -> None:
+    """is_on is True only when the router status is ``enabled``."""
+    entity = _router_entity(make_snapshot(routers=[item]), "test")
+    assert entity.is_on is expected
+
+
+def test_router_state_follows_latest_snapshot() -> None:
+    """The router entity resolves its model by name on every read."""
+    snapshot = make_snapshot(routers=[_router("r@file", "enabled")])
+    entity = _router_entity(snapshot, "r@file")
+    assert entity.is_on is True
+
+    entity.coordinator.data = make_snapshot(routers=[_router("r@file", "warning")])
+    assert entity.is_on is False
+    assert entity.extra_state_attributes["status"] == "warning"
+
+
+def test_router_keeps_last_model_when_missing_from_snapshot() -> None:
+    """A router absent from the current snapshot keeps its last known model."""
+    snapshot = make_snapshot(routers=[_router("gone@file", "enabled")])
+    entity = _router_entity(snapshot, "gone@file")
+
+    entity.coordinator.data = make_snapshot()
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["name"] == "gone@file"
+
+
+def test_entity_id_uses_traefik_http_router_prefix() -> None:
+    entity = _router_entity(make_snapshot(routers=[_router("my-router@file", "enabled")]), "my-router@file")
+    assert entity.entity_id == f"binary_sensor.traefik_http_router_{slugify('my-router@file')}"
+    assert entity.unique_id == "test-entry_http_router_my-router@file"
+
+
+def test_extra_state_attributes_include_status_and_friendly_rule() -> None:
+    entity = _router_entity(make_snapshot(routers=[_router("r", "warning")]), "r")
+    assert entity.extra_state_attributes == {
+        "status": "warning",
+        "rule": "Host(`r.example.com`)",
+        "friendly_rule": "r.example.com",
+        "service": "backend-r",
+        "name": "r",
+        "router_name": "r",
+    }
+
+
+def test_disabled_router_with_errors_reports_error_status() -> None:
+    """A disabled router with errors is shown with status ``error``."""
+    item = _router("broken@file", "disabled", error=["the service does not exist"])
+    entity = _router_entity(make_snapshot(routers=[item]), "broken@file")
+    assert entity.extra_state_attributes["status"] == "error"
+
+
+def test_extra_state_attributes_exposes_raw_name_for_dashboards() -> None:
+    """The raw Traefik router name is surfaced alongside the slug."""
+    entity = _router_entity(
+        make_snapshot(routers=[_router("weird@host.example.com", "enabled")]), "weird@host.example.com"
     )
-    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data.coordinator)
+    attrs = entity.extra_state_attributes
+    assert attrs["name"] == "weird@host.example.com"
+    assert attrs["router_name"] == "weird@host.example.com"
+
+
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_router_entities_from_capture(version: str) -> None:
+    """Captured routers: enabled, warning and error cases map to on/off and status."""
+    snapshot = snapshot_from_fixture(version)
+    expected = {
+        "secure@file": (True, "enabled"),
+        "warn-unknown-entrypoint@file": (False, "warning"),
+        "broken-missing-service@file": (False, "error"),
+        "chain-router@file": (False, "error"),
+    }
+    for name, (is_on, status) in expected.items():
+        entity = _router_entity(snapshot, name)
+        assert (entity.is_on, entity.extra_state_attributes["status"]) == (is_on, status), name
+    assert _router_entity(snapshot, "secure@file").extra_state_attributes["friendly_rule"] == "secure.example.com"
+
+
+def test_device_info_uses_per_category_identifier() -> None:
+    """Identifier is (DOMAIN, f'{entry_id}_http_routers'); sw_version from the snapshot."""
+    snapshot = make_snapshot(
+        routers=[_router("r", "enabled")],
+        version={"Version": "3.1.4", "Codename": "rancher", "startDate": "2026-07-01T00:00:00Z"},
+    )
+    info = _router_entity(snapshot, "r").device_info
+    assert ("traefik_proxy", "test-entry_http_routers") in info["identifiers"]
+    assert info["model"] == "HTTP Routers"
+    assert info["manufacturer"] == "Traefik"
+    assert info["sw_version"] == "3.1.4"
+    assert "HTTP Routers" in info["name"]
+
+
+# ---------------------------------------------------------------------------
+# Any-*-failing aggregates
+# ---------------------------------------------------------------------------
+
+
+def _aggregate(cls: type, snapshot: TraefikSnapshot) -> Any:
+    entry = _entry_with_snapshot(snapshot)
+    return cls(entry, entry.runtime_data.coordinator)
+
+
+def test_any_router_failing_lists_problem_routers() -> None:
+    """ON when any router is not enabled; names come sorted from the snapshot."""
+    snapshot = make_snapshot(
+        routers=[
+            _router("ok@file", "enabled"),
+            _router("warn@file", "warning"),
+            _router("broken@file", "disabled", error=["boom"]),
+            _router("api@internal", "disabled"),
+        ]
+    )
+    entity = _aggregate(TraefikProxyAnyRouterFailingBinarySensor, snapshot)
+    assert entity.is_on is True
+    assert entity.extra_state_attributes == {
+        "failing_router_count": 2,
+        "failing_router_names": ["broken@file", "warn@file"],
+    }
+
+
+def test_any_service_failing_aggregates_status() -> None:
+    """ON when any service is not enabled."""
+    snapshot = make_snapshot(
+        services=[{"name": "ok@file", "status": "enabled"}, {"name": "broken@file", "status": "error"}]
+    )
+    entity = _aggregate(TraefikProxyAnyServiceFailingBinarySensor, snapshot)
     assert entity.is_on is True
     attrs = entity.extra_state_attributes
     assert attrs["failing_service_count"] == 1
-    assert attrs["failing_service_names"] == ["broken"]
+    assert attrs["failing_service_names"] == ["broken@file"]
 
 
-def test_any_service_failing_disabled_when_all_enabled() -> None:
-    """All-enabled services → is_on=False, count=0, names=[]."""
-    entry = _entry_with_data(
-        {
-            "http_services": [
-                {"name": "ok-1", "status": "enabled"},
-                {"name": "ok-2", "status": "enabled"},
-            ],
-        }
+def test_enabled_service_with_down_server_is_a_problem() -> None:
+    """An enabled service with one server DOWN counts as failing."""
+    snapshot = make_snapshot(
+        services=[
+            {
+                "name": "lb-mixed@file",
+                "status": "enabled",
+                "serverStatus": {"http://192.0.2.10:80": "DOWN", "http://backend.example.com:80": "UP"},
+            },
+            {"name": "healthy@file", "status": "enabled", "serverStatus": {"http://192.0.2.11:80": "UP"}},
+        ]
     )
-    entity = TraefikProxyAnyServiceFailingBinarySensor(entry, entry.runtime_data.coordinator)
+    entity = _aggregate(TraefikProxyAnyServiceFailingBinarySensor, snapshot)
+    assert entity.is_on is True
+    assert entity.extra_state_attributes["failing_service_names"] == ["lb-mixed@file"]
+
+
+def test_any_service_failing_off_when_all_enabled() -> None:
+    """All-enabled services: is_on False, count 0, names []."""
+    snapshot = make_snapshot(
+        services=[{"name": "ok-1@file", "status": "enabled"}, {"name": "ok-2@file", "status": "enabled"}]
+    )
+    entity = _aggregate(TraefikProxyAnyServiceFailingBinarySensor, snapshot)
     assert entity.is_on is False
-    assert entity.extra_state_attributes["failing_service_count"] == 0
-    assert entity.extra_state_attributes["failing_service_names"] == []
+    assert entity.extra_state_attributes == {"failing_service_count": 0, "failing_service_names": []}
 
 
 def test_any_middleware_failing_aggregates_status() -> None:
-    """TraefikProxyAnyMiddlewareFailingBinarySensor mirrors the service variant for middlewares."""
-    entry = _entry_with_data(
-        {
-            "http_middlewares": [
-                {"name": "auth", "status": "enabled"},
-                {"name": "rate-limit", "status": "warning"},
-                {"name": "strip@docker", "status": "enabled"},
-                # Disabled counts as failing (consistent with the router aggregate).
-                {"name": "off-mw", "status": "disabled"},
-            ],
-        }
+    """Warning and disabled middlewares both count as failing."""
+    snapshot = make_snapshot(
+        middlewares=[
+            {"name": "auth@file", "status": "enabled"},
+            {"name": "rate-limit@file", "status": "warning"},
+            {"name": "strip@docker", "status": "enabled"},
+            {"name": "off-mw@file", "status": "disabled"},
+        ]
     )
-    entity = TraefikProxyAnyMiddlewareFailingBinarySensor(entry, entry.runtime_data.coordinator)
+    entity = _aggregate(TraefikProxyAnyMiddlewareFailingBinarySensor, snapshot)
     assert entity.is_on is True
     attrs = entity.extra_state_attributes
     assert attrs["failing_middleware_count"] == 2
-    assert set(attrs["failing_middleware_names"]) == {"rate-limit", "off-mw"}
+    assert attrs["failing_middleware_names"] == ["off-mw@file", "rate-limit@file"]
 
 
-def test_any_failing_handles_missing_data() -> None:
-    """Cold start: coordinator.data is None → is_on=None, attributes empty."""
-    entry = _entry_with_data(None)
-    entry.runtime_data.coordinator.last_update_success = False
-    for cls in (
-        TraefikProxyAnyServiceFailingBinarySensor,
-        TraefikProxyAnyMiddlewareFailingBinarySensor,
-    ):
-        entity = cls(entry, entry.runtime_data.coordinator)
-        assert entity.is_on is None
-        # attributes always return a safe default
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_aggregates_from_capture(version: str) -> None:
+    """The captured scenario turns all three aggregates on with the known problems."""
+    snapshot = snapshot_from_fixture(version)
+    routers, services, middlewares = (_aggregate(cls, snapshot) for cls in _AGGREGATES)
+    assert routers.extra_state_attributes["failing_router_names"] == [
+        "broken-missing-service@file",
+        "chain-router@file",
+        "warn-unknown-entrypoint@file",
+    ]
+    assert services.extra_state_attributes["failing_service_names"] == ["lb-mixed@file"]
+    assert middlewares.extra_state_attributes["failing_middleware_names"] == ["broken-chain@file"]
+    assert routers.is_on and services.is_on and middlewares.is_on
+
+
+def test_empty_traefik_turns_every_aggregate_off() -> None:
+    """No routers, services or middlewares: all three aggregates are off with zero counts."""
+    snapshot = make_snapshot()
+    for cls in _AGGREGATES:
+        entity = _aggregate(cls, snapshot)
+        assert entity.is_on is False
         attrs = entity.extra_state_attributes
-        assert attrs[next(k for k in attrs if k.startswith("failing_") and k.endswith("_count"))] == 0
+        assert attrs[next(k for k in attrs if k.endswith("_count"))] == 0
+        assert attrs[next(k for k in attrs if k.endswith("_names"))] == []
 
 
 def test_any_failing_disabled_by_default() -> None:
-    """PITFALLS M-12: PROBLEM aggregates are entity_registry_enabled_default=False.
+    """The PROBLEM aggregates are registered disabled by default.
 
-    Both ``TraefikProxyAnyServiceFailingBinarySensor`` and
-    ``TraefikProxyAnyMiddlewareFailingBinarySensor`` follow the same opt-in
-    pattern as the router variant — they don't pollute the States panel
-    by default.
-
-    Note: HA's ``CachedProperties`` metaclass moves class-level
-    ``_attr_*`` attrs to ``__attr_*`` private names and wraps them in a
-    property; the public class-level read returns the property
-    descriptor, not the underlying value. We read the raw value out of
-    ``cls.__dict__`` (same pattern as
-    ``test_binary_sensor_tls_expiring.py::test_cert_expiry_disabled_by_default``).
+    HA's ``CachedProperties`` metaclass moves class-level ``_attr_*`` attrs
+    to ``__attr_*`` names, so the raw value is read from ``cls.__dict__``.
     """
-    for cls in (
-        TraefikProxyAnyServiceFailingBinarySensor,
-        TraefikProxyAnyMiddlewareFailingBinarySensor,
-    ):
+    for cls in _AGGREGATES:
         assert cls.__dict__.get("__attr_entity_registry_enabled_default") is False
