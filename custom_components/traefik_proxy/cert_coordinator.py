@@ -1,8 +1,8 @@
 """Cert-coordinator side of Phase 3: 6h TLS-handshake cycle with bounded concurrency.
 
-This module is the sibling coordinator (PITFALLS #6 — NOT a
-``runtime_data`` shape migration) that runs every 6 hours and probes
-every distinct hostname extracted from the main coordinator's
+This module is the cert coordinator (stored next to the main coordinator
+on ``entry.runtime_data``) that runs every 6 hours and probes every
+distinct hostname extracted from the main coordinator's
 ``http_routers`` cache. It is the data path Phase 3 entities depend on
 (TLS-03, TLS-04, TLS-05); the entity platforms land in plan 03-02 and
 the test surface lands in plan 03-03.
@@ -32,8 +32,8 @@ import asyncio
 import logging
 import re
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -46,13 +46,14 @@ from .const import (
 )
 from .tls import CertError, CertInfo, fetch_cert_info_async
 
+if TYPE_CHECKING:
+    from .data import TraefikProxyConfigEntry
+
 _LOGGER = logging.getLogger(__name__)
 
 # Pull the ``Host(`...`)`` substring out of a Traefik rule string. Copied
-# from ``binary_sensor.py`` (Phase 1 origin) to avoid a circular import
-# — the cert coordinator is imported by ``coordinator.py`` (for the
-# type-annotation forward-ref) which is itself imported by
-# ``binary_sensor.py`` via ``entity.py``.
+# from ``binary_sensor.py`` (Phase 1 origin) so this module does not import
+# a platform module.
 _HOST_FROM_RULE = re.compile(r"Host\(`([^`]+)`\)")
 
 
@@ -82,12 +83,12 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
     binary sensor re-renders immediately without re-handshaking.
     """
 
-    config_entry: ConfigEntry
+    config_entry: TraefikProxyConfigEntry
 
     def __init__(
         self,
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: TraefikProxyConfigEntry,
         *,
         threshold_days: int | None = None,
         sem: int = TLS_SEMAPHORE,
@@ -178,8 +179,8 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
     def _collect_hosts_from_main_coordinator(self) -> set[str]:
         """Build the deduplicated hostname set for this cycle.
 
-        Reads ``http_routers`` from the main coordinator's
-        ``self.config_entry.runtime_data.data`` (BLOCKER #1 — needs
+        Reads ``http_routers`` from the main coordinator's data via
+        ``self.config_entry.runtime_data.coordinator.data`` (needs
         ``config_entry=entry`` set in ``__init__``). The defensive
         ``.get`` and ``isinstance(list)`` checks handle the race where
         the main coordinator's first cycle has not yet populated
@@ -201,7 +202,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         / default cert — Traefik owns those) are skipped entirely —
         there is no useful probe target.
         """
-        routers = self.config_entry.runtime_data.data.get("http_routers")
+        routers = self.config_entry.runtime_data.coordinator.data.get("http_routers")
         if not isinstance(routers, list):
             return set()
 

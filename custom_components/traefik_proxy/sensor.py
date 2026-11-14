@@ -28,7 +28,8 @@ from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
     from .cert_coordinator import CertCoordinator
-    from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator
+    from .coordinator import TraefikProxyCoordinator
+    from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def async_setup_entry(
     (any key missing -> empty list) so we defensively coerce via the
     ``_dict_or_empty`` / ``_list_or_empty`` helpers below.
     """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data
+    coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
     data = _dict_or_empty(coordinator.data)
 
     # Per-entrypoint sensors (CONTEXT.md D-15).
@@ -74,97 +75,94 @@ async def async_setup_entry(
 
     async_add_entities(entrypoint_entities + service_entities + aggregate_entities)
 
-    # --- Phase 3 cert timestamp sensors (TLS-01) ---
-    # The cert coordinator is a sibling coordinator (PITFALLS #6 — NOT a
-    # runtime_data shape migration). Defensive ``getattr`` tolerates the
-    # brief window before Phase 3 wiring completes (e.g., during a partial
-    # install / test harness without ``__init__.py`` Task 3 wiring).
-    cert_coordinator: CertCoordinator | None = getattr(entry.runtime_data, "cert_coordinator", None)
-    if cert_coordinator is not None:
-        registry = er.async_get(hass)
+    # --- Cert timestamp sensors (TLS-01) ---
+    # The cert coordinator lives next to the main coordinator on the entry's
+    # runtime data; setup always creates it before forwarding platforms.
+    cert_coordinator: CertCoordinator = entry.runtime_data.cert_coordinator
+    registry = er.async_get(hass)
 
-        def _create_pending_cert_sensor_entities() -> None:
-            """Materialise one timestamp sensor per cached ``CertInfo`` row.
+    def _create_pending_cert_sensor_entities() -> None:
+        """Materialise one timestamp sensor per cached ``CertInfo`` row.
 
-            BLOCKER #2 fix — entity creation must fire on EVERY cert cycle
-            (not just on initial setup) so hosts discovered after the
-            cold-start empty-cache fallback in plan 03-01 Task 3 step
-            3d(iii) still get their entities registered. The cert cache is
-            populated asynchronously, so the first ``async_setup_entry``
-            call may see an empty cache (zero entities registered — correct)
-            and the next 6h cycle will fill the cache and re-trigger this
-            closure to add the missing entities.
+        BLOCKER #2 fix — entity creation must fire on EVERY cert cycle
+        (not just on initial setup) so hosts discovered after the
+        cold-start empty-cache fallback in plan 03-01 Task 3 step
+        3d(iii) still get their entities registered. The cert cache is
+        populated asynchronously, so the first ``async_setup_entry``
+        call may see an empty cache (zero entities registered — correct)
+        and the next 6h cycle will fill the cache and re-trigger this
+        closure to add the missing entities.
 
-            v0.2.1 fix: removed the ``if host in existing: continue`` check
-            that skipped already-registered hosts. ``async_add_entities``
-            deduplicates by ``unique_id`` itself — for a registered
-            entity whose live ``CoordinatorEntity`` instance has been
-            garbage-collected (HA restart with restored entities),
-            ``async_add_entities`` REPLACES the defunct instance with
-            the new one and wires it to the coordinator. The redundant
-            check was preventing exactly that re-bind, leaving restored
-            entities stuck at ``state="unavailable"`` + ``restored: true``
-            until the next 6h cert cycle.
-            """
-            cache = cert_coordinator.data
-            if not isinstance(cache, dict) or not cache:
-                return
-            new_entities: list[TraefikProxyCertTimestampSensor] = []
-            for host, cache_value in cache.items():
-                host = host.lower()
-                # Only timestamp sensors go on ``CertInfo`` rows. Error
-                # hosts get a ``binary_sensor`` only (per D-03 — the
-                # timestamp sensor makes no sense without a ``not_after``).
-                if is_error(cache_value):
-                    continue
-                # Type narrowing: ``is_error`` returned False so
-                # ``cache_value`` is a ``CertInfo`` dataclass.
-                info: CertInfo = cache_value  # type: ignore[assignment]
-                new_entities.append(TraefikProxyCertTimestampSensor(entry, cert_coordinator, host, info))
-            if new_entities:
-                async_add_entities(new_entities)
+        v0.2.1 fix: removed the ``if host in existing: continue`` check
+        that skipped already-registered hosts. ``async_add_entities``
+        deduplicates by ``unique_id`` itself — for a registered
+        entity whose live ``CoordinatorEntity`` instance has been
+        garbage-collected (HA restart with restored entities),
+        ``async_add_entities`` REPLACES the defunct instance with
+        the new one and wires it to the coordinator. The redundant
+        check was preventing exactly that re-bind, leaving restored
+        entities stuck at ``state="unavailable"`` + ``restored: true``
+        until the next 6h cert cycle.
+        """
+        cache = cert_coordinator.data
+        if not isinstance(cache, dict) or not cache:
+            return
+        new_entities: list[TraefikProxyCertTimestampSensor] = []
+        for host, cache_value in cache.items():
+            host = host.lower()
+            # Only timestamp sensors go on ``CertInfo`` rows. Error
+            # hosts get a ``binary_sensor`` only (per D-03 — the
+            # timestamp sensor makes no sense without a ``not_after``).
+            if is_error(cache_value):
+                continue
+            # Type narrowing: ``is_error`` returned False so
+            # ``cache_value`` is a ``CertInfo`` dataclass.
+            info: CertInfo = cache_value  # type: ignore[assignment]
+            new_entities.append(TraefikProxyCertTimestampSensor(entry, cert_coordinator, host, info))
+        if new_entities:
+            async_add_entities(new_entities)
 
-        def _remove_stale_cert_hosts() -> None:
-            """Drop timestamp-sensor entities whose host is no longer probed.
+    def _remove_stale_cert_hosts() -> None:
+        """Drop timestamp-sensor entities whose host is no longer probed.
 
-            WARNING #1 fix — this listener is registered ONLY in
-            ``sensor.py``; the matching ``_remove_stale_cert_expiring``
-            for the ``tls_expiring_`` prefix lives in ``binary_sensor.py``.
-            No duplicate registration. Gate on
-            ``cert_coordinator.last_update_success`` (Phase 2 D-18 pattern
-            replicated verbatim) so a transient cert-cycle failure cannot
-            mass-delete every TLS host entity.
-            """
-            if not cert_coordinator.last_update_success:
-                return
-            cache = cert_coordinator.data
-            current: set[str] = {h.lower() for h in cache} if isinstance(cache, dict) else set()
-            prefix = f"{entry.entry_id}_tls_cert_"
-            for reg_entry in list(registry.entities.values()):
-                unique_id = reg_entry.unique_id or ""
-                if not unique_id.startswith(prefix):
-                    continue
-                host = unique_id.removeprefix(prefix)
-                if host and host not in current:
-                    _LOGGER.debug("Removing stale cert timestamp entity: %s", reg_entry.entity_id)
-                    registry.async_remove(reg_entry.entity_id)
+        WARNING #1 fix — this listener is registered ONLY in
+        ``sensor.py``; the matching ``_remove_stale_cert_expiring``
+        for the ``tls_expiring_`` prefix lives in ``binary_sensor.py``.
+        No duplicate registration. Gate on
+        ``cert_coordinator.last_update_success`` (Phase 2 D-18 pattern
+        replicated verbatim) so a transient cert-cycle failure cannot
+        mass-delete every TLS host entity.
+        """
+        if not cert_coordinator.last_update_success:
+            return
+        cache = cert_coordinator.data
+        current: set[str] = {h.lower() for h in cache} if isinstance(cache, dict) else set()
+        prefix = f"{entry.entry_id}_tls_cert_"
+        for reg_entry in list(registry.entities.values()):
+            unique_id = reg_entry.unique_id or ""
+            if not unique_id.startswith(prefix):
+                continue
+            host = unique_id.removeprefix(prefix)
+            if host and host not in current:
+                _LOGGER.debug("Removing stale cert timestamp entity: %s", reg_entry.entity_id)
+                registry.async_remove(reg_entry.entity_id)
 
-        def _cert_update_listener() -> None:
-            """Combined cert-cycle listener — creation + cleanup in one tick.
+    def _cert_update_listener() -> None:
+        """Combined cert-cycle listener — creation + cleanup in one tick.
 
-            A single ``async_add_listener`` registration drives both the
-            BLOCKER #2 entity-creation closure (for newly-discovered hosts)
-            AND the WARNING #1 stale-cleanup callback. Folding both into
-            one function keeps the listener registration count to a minimum
-            and ensures both paths fire on every cert cycle (every 6h).
-            """
-            _create_pending_cert_sensor_entities()
-            _remove_stale_cert_hosts()
-
-        # Materialise any entities for hosts already in the cache at setup time.
+        A single ``async_add_listener`` registration drives both the
+        BLOCKER #2 entity-creation closure (for newly-discovered hosts)
+        AND the WARNING #1 stale-cleanup callback. Folding both into
+        one function keeps the listener registration count to a minimum
+        and ensures both paths fire on every cert cycle (every 6h).
+        """
         _create_pending_cert_sensor_entities()
-        # Register the combined listener for future cycles.
-        entry.async_on_unload(cert_coordinator.async_add_listener(_cert_update_listener))
+        _remove_stale_cert_hosts()
+
+    # Materialise any entities for hosts already in the cache at setup time.
+    _create_pending_cert_sensor_entities()
+    # Register the combined listener for future cycles.
+    entry.async_on_unload(cert_coordinator.async_add_listener(_cert_update_listener))
 
     # Stale entity cleanup (CONTEXT.md D-18, gatus binary_sensor.py:49-71).
     # Entrypoints + services that disappear from coordinator.data are removed

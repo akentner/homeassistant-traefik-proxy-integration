@@ -22,7 +22,8 @@ from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
     from .cert_coordinator import CertCoordinator
-    from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator
+    from .coordinator import TraefikProxyCoordinator
+    from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def async_setup_entry(
     if the relevant list disappears the sensor falls to OFF (no items
     failing) and stays.
     """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data
+    coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
 
     # Phase 2: read `http_routers` (was `routers` in Phase 1 — fetch_all now
     # returns the renamed key per CONTEXT.md D-04). filter_internal_items is
@@ -114,83 +115,80 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(_remove_stale_routers))
 
-    # --- Phase 3 cert expiry binary sensors (TLS-02) ---
-    # The cert coordinator is a sibling coordinator (PITFALLS #6 — NOT a
-    # runtime_data shape migration). Defensive ``getattr`` tolerates the
-    # brief window before Phase 3 wiring completes (e.g., during a partial
-    # install / test harness without ``__init__.py`` Task 3 wiring).
-    cert_coordinator: CertCoordinator | None = getattr(entry.runtime_data, "cert_coordinator", None)
-    if cert_coordinator is not None:
+    # --- Cert expiry binary sensors (TLS-02) ---
+    # The cert coordinator lives next to the main coordinator on the entry's
+    # runtime data; setup always creates it before forwarding platforms.
+    cert_coordinator: CertCoordinator = entry.runtime_data.cert_coordinator
 
-        def _create_pending_cert_binary_sensor_entities() -> None:
-            """Materialise one expiring binary sensor per cached cert row.
+    def _create_pending_cert_binary_sensor_entities() -> None:
+        """Materialise one expiring binary sensor per cached cert row.
 
-            BLOCKER #2 fix — entity creation must fire on EVERY cert cycle
-            (not just on initial setup) so hosts discovered after the
-            cold-start empty-cache fallback in plan 03-01 Task 3 step
-            3d(iii) still get their entities registered. Mirrors the
-            timestamp-sensor closure in ``sensor.py`` so the two
-            platforms stay in sync — when the cert coordinator discovers
-            a new host, BOTH the timestamp sensor AND the expiry binary
-            sensor register on the same cycle.
+        BLOCKER #2 fix — entity creation must fire on EVERY cert cycle
+        (not just on initial setup) so hosts discovered after the
+        cold-start empty-cache fallback in plan 03-01 Task 3 step
+        3d(iii) still get their entities registered. Mirrors the
+        timestamp-sensor closure in ``sensor.py`` so the two
+        platforms stay in sync — when the cert coordinator discovers
+        a new host, BOTH the timestamp sensor AND the expiry binary
+        sensor register on the same cycle.
 
-            v0.2.1 fix: removed the ``if host in existing: continue`` check.
-            ``async_add_entities`` deduplicates by ``unique_id`` — the
-            check was redundant AND broke the HA-restart restore path
-            (see ``sensor.py`` closure for the full explanation).
-            """
-            cache = cert_coordinator.data
-            if not isinstance(cache, dict) or not cache:
-                return
-            new_entities: list[TraefikProxyCertExpiryBinarySensor] = [
-                TraefikProxyCertExpiryBinarySensor(entry, cert_coordinator, host.lower(), cache_value)
-                for host, cache_value in cache.items()
-            ]
-            if new_entities:
-                async_add_entities(new_entities)
+        v0.2.1 fix: removed the ``if host in existing: continue`` check.
+        ``async_add_entities`` deduplicates by ``unique_id`` — the
+        check was redundant AND broke the HA-restart restore path
+        (see ``sensor.py`` closure for the full explanation).
+        """
+        cache = cert_coordinator.data
+        if not isinstance(cache, dict) or not cache:
+            return
+        new_entities: list[TraefikProxyCertExpiryBinarySensor] = [
+            TraefikProxyCertExpiryBinarySensor(entry, cert_coordinator, host.lower(), cache_value)
+            for host, cache_value in cache.items()
+        ]
+        if new_entities:
+            async_add_entities(new_entities)
 
-        def _remove_stale_cert_expiring() -> None:
-            """Drop expiry-binary-sensor entities whose host is no longer probed.
+    def _remove_stale_cert_expiring() -> None:
+        """Drop expiry-binary-sensor entities whose host is no longer probed.
 
-            WARNING #1 fix — this listener is registered ONLY in
-            ``binary_sensor.py``; the matching ``_remove_stale_cert_hosts``
-            for the ``tls_cert_`` prefix lives in ``sensor.py``. No
-            duplicate registration. Gate on
-            ``cert_coordinator.last_update_success`` (Phase 2 D-18 pattern
-            replicated verbatim) so a transient cert-cycle failure cannot
-            mass-delete every TLS host entity.
-            """
-            if not cert_coordinator.last_update_success:
-                return
-            cache = cert_coordinator.data
-            current: set[str] = {h.lower() for h in cache} if isinstance(cache, dict) else set()
-            prefix = f"{entry.entry_id}_tls_expiring_"
-            for reg_entry in list(registry.entities.values()):
-                unique_id = reg_entry.unique_id or ""
-                if not unique_id.startswith(prefix):
-                    continue
-                host = unique_id.removeprefix(prefix)
-                if host and host not in current:
-                    _LOGGER.debug("Removing stale cert expiring entity: %s", reg_entry.entity_id)
-                    registry.async_remove(reg_entry.entity_id)
+        WARNING #1 fix — this listener is registered ONLY in
+        ``binary_sensor.py``; the matching ``_remove_stale_cert_hosts``
+        for the ``tls_cert_`` prefix lives in ``sensor.py``. No
+        duplicate registration. Gate on
+        ``cert_coordinator.last_update_success`` (Phase 2 D-18 pattern
+        replicated verbatim) so a transient cert-cycle failure cannot
+        mass-delete every TLS host entity.
+        """
+        if not cert_coordinator.last_update_success:
+            return
+        cache = cert_coordinator.data
+        current: set[str] = {h.lower() for h in cache} if isinstance(cache, dict) else set()
+        prefix = f"{entry.entry_id}_tls_expiring_"
+        for reg_entry in list(registry.entities.values()):
+            unique_id = reg_entry.unique_id or ""
+            if not unique_id.startswith(prefix):
+                continue
+            host = unique_id.removeprefix(prefix)
+            if host and host not in current:
+                _LOGGER.debug("Removing stale cert expiring entity: %s", reg_entry.entity_id)
+                registry.async_remove(reg_entry.entity_id)
 
-        def _on_cert_update() -> None:
-            """Combined cert-cycle listener — creation + cleanup in one tick.
+    def _on_cert_update() -> None:
+        """Combined cert-cycle listener — creation + cleanup in one tick.
 
-            Single ``async_add_listener`` registration drives both the
-            BLOCKER #2 entity-creation closure (for newly-discovered
-            hosts) AND the WARNING #1 stale-cleanup callback. Folding
-            both into one function keeps the listener registration count
-            to a minimum and ensures both paths fire on every cert cycle
-            (every 6h).
-            """
-            _create_pending_cert_binary_sensor_entities()
-            _remove_stale_cert_expiring()
-
-        # Materialise any entities for hosts already in the cache at setup time.
+        Single ``async_add_listener`` registration drives both the
+        BLOCKER #2 entity-creation closure (for newly-discovered
+        hosts) AND the WARNING #1 stale-cleanup callback. Folding
+        both into one function keeps the listener registration count
+        to a minimum and ensures both paths fire on every cert cycle
+        (every 6h).
+        """
         _create_pending_cert_binary_sensor_entities()
-        # Register the combined listener for future cycles.
-        entry.async_on_unload(cert_coordinator.async_add_listener(_on_cert_update))
+        _remove_stale_cert_expiring()
+
+    # Materialise any entities for hosts already in the cache at setup time.
+    _create_pending_cert_binary_sensor_entities()
+    # Register the combined listener for future cycles.
+    entry.async_on_unload(cert_coordinator.async_add_listener(_on_cert_update))
 
 
 class TraefikProxyRouterBinarySensor(TraefikProxyEntity, BinarySensorEntity):

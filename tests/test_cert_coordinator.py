@@ -62,9 +62,10 @@ def _make_entry(
         options["tls_warn_days"] = tls_warn_days
     entry.options = options
     entry.runtime_data = MagicMock()
-    # ``data`` is the cache the main coordinator populates; tests
-    # override this per scenario.
-    entry.runtime_data.data = {}
+    # ``coordinator.data`` is the cache the main coordinator populates;
+    # tests override this per scenario.
+    entry.runtime_data.coordinator = MagicMock()
+    entry.runtime_data.coordinator.data = {}
     return entry
 
 
@@ -74,8 +75,8 @@ def _make_main_coord(
 ) -> Any:
     """Build a mock main coordinator wired to the entry's runtime_data.
 
-    The cert coordinator accesses ``self.config_entry.runtime_data.data["http_routers"]``
-    (BLOCKER #1 fix path). Tests populate ``runtime_data.data`` directly
+    The cert coordinator accesses ``self.config_entry.runtime_data.coordinator.data["http_routers"]``
+    (BLOCKER #1 fix path). Tests populate ``runtime_data.coordinator.data`` directly
     rather than going through ``aioclient_mock`` — these are pure
     unit tests, not integration tests.
     """
@@ -154,7 +155,7 @@ def test_timeout_default_is_5_seconds() -> None:
 def test_config_entry_wired_via_super_init() -> None:
     """BLOCKER #1 fix pin: ``super().__init__(config_entry=entry)`` wires the entry.
 
-    Without this, ``self.config_entry.runtime_data.data`` access in
+    Without this, ``self.config_entry.runtime_data.coordinator.data`` access in
     ``_collect_hosts_from_main_coordinator`` raises ``AttributeError``.
     """
     entry = _make_entry()
@@ -258,7 +259,7 @@ async def test_async_update_data_fans_out_via_gather() -> None:
     resulting data dict must have one row per host.
     """
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {
                 "name": "r1",
@@ -302,7 +303,7 @@ async def test_async_update_data_fans_out_via_gather() -> None:
 async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
     """Mixed success / error rows both surface in the cache (D-06)."""
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {
                 "name": "r1",
@@ -352,7 +353,7 @@ async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
 async def test_async_update_data_returns_empty_when_no_routers() -> None:
     """Defensive: empty ``http_routers`` returns an empty cache dict."""
     entry = _make_entry()
-    entry.runtime_data.data = {"http_routers": []}
+    entry.runtime_data.coordinator.data = {"http_routers": []}
     c = CertCoordinator(MagicMock(), entry)
 
     data = await c._async_update_data()
@@ -362,7 +363,7 @@ async def test_async_update_data_returns_empty_when_no_routers() -> None:
 async def test_async_update_data_handles_missing_runtime_data() -> None:
     """Main coordinator hasn't populated yet → empty cache, never raises."""
     entry = _make_entry()
-    entry.runtime_data.data = {}  # no http_routers key
+    entry.runtime_data.coordinator.data = {}  # no http_routers key
     c = CertCoordinator(MagicMock(), entry)
 
     data = await c._async_update_data()
@@ -387,7 +388,7 @@ def test_collect_hosts_extracts_union_of_domains_and_sans() -> None:
     ``domains[].main="h1.example.com"`` to a single host.
     """
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {
                 "name": "r1",
@@ -427,7 +428,7 @@ def test_collect_hosts_extracts_union_of_domains_and_sans() -> None:
 def test_collect_hosts_lowercases_for_dedup() -> None:
     """Mixed casing in rule + domains → lowercased + deduped."""
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {
                 "name": "r1",
@@ -453,7 +454,7 @@ def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
     setups leave the cert coordinator with no useful probe target.
     """
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {"name": "r1", "tls": {}, "rule": ""},  # TLS set but empty
             {"name": "r2", "tls": {"domains": []}, "rule": ""},  # empty domains list
@@ -480,7 +481,7 @@ def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
 def test_collect_hosts_handles_sans_as_string_or_list() -> None:
     """Sans can be a string OR a list (Traefik v3 spec)."""
     entry = _make_entry()
-    entry.runtime_data.data = {
+    entry.runtime_data.coordinator.data = {
         "http_routers": [
             {
                 "name": "r1",

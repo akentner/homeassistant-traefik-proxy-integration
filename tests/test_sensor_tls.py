@@ -342,12 +342,10 @@ async def test_restore_after_ha_restart_rebinds_existing_entities(hass: object, 
     }
     for entity in added:
         assert isinstance(entity, TraefikProxyCertTimestampSensor)
-        # Each entity is wired to the main coordinator (sibling-cert pattern,
-        # PITFALLS #6). The cert coordinator is reachable as
-        # ``entity.coordinator.cert_coordinator`` so the cert-update listener
-        # still fires for these entities.
-        assert entity.coordinator is entry.runtime_data
-        assert entity.coordinator.cert_coordinator is cert_coord
+        # Each entity subscribes to the main coordinator from the runtime
+        # data and reads its cert row from the cert coordinator it was given.
+        assert entity.coordinator is entry.runtime_data.coordinator
+        assert entity._coordinator is cert_coord
 
 
 # `patch` import deferred so the rest of the file keeps its existing

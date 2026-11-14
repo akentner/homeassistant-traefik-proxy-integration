@@ -24,7 +24,8 @@ from .const import DOMAIN
 from .entity import TraefikProxyEntity
 
 if TYPE_CHECKING:
-    from .coordinator import TraefikProxyConfigEntry, TraefikProxyCoordinator
+    from .coordinator import TraefikProxyCoordinator
+    from .data import TraefikProxyConfigEntry
 
 
 async def async_setup_entry(
@@ -38,7 +39,7 @@ async def async_setup_entry(
     config entry — never deleted, lives on the Diagnostics device per
     CONTEXT.md D-14/D-19).
     """
-    coordinator: TraefikProxyCoordinator = entry.runtime_data
+    coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
     async_add_entities([TraefikProxyReloadButton(hass, entry, coordinator)])
 
 
