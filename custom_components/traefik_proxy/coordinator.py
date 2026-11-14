@@ -72,6 +72,11 @@ def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikPro
     )
 
 
+def _interval_elapsed(since: datetime | None) -> bool:
+    """Return whether ``VERSION_RECHECK_INTERVAL`` has passed since ``since`` (False when unset)."""
+    return since is not None and dt_util.utcnow() - since >= VERSION_RECHECK_INTERVAL
+
+
 class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     """Single polling point for Traefik state.
 
@@ -85,7 +90,8 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     per ``VERSION_RECHECK_INTERVAL`` and on the first cycle after a failed
     one; the entrypoints are re-read only when the version or start date
     changed (Traefik restarted or was upgraded). While the client is
-    paginated, the hourly re-check also retries /api/rawdata once. Listeners
+    paginated, /api/rawdata is retried once per ``VERSION_RECHECK_INTERVAL``
+    on a clock of its own, so failed cycles cannot postpone it. Listeners
     are only notified when the snapshot differs from the previous one.
     """
 
@@ -104,6 +110,9 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         )
         self._version: TraefikVersion | None = None
         self._version_checked_at: datetime | None = None
+        # Last cycle that reached the rawdata probe arming; a post-failure
+        # version re-check does not move it.
+        self._probe_armed_at: datetime | None = None
         self._entrypoints: dict[str, Entrypoint] = {}
 
     @property
@@ -115,7 +124,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """Fetch the Traefik version and entrypoints once per setup."""
         try:
             self._version = await self.client.async_get_version()
-            self._version_checked_at = dt_util.utcnow()
+            self._version_checked_at = self._probe_armed_at = dt_util.utcnow()
             self._entrypoints = await self.client.async_get_entrypoints()
         except TraefikProxyAuthError as err:
             raise ConfigEntryAuthFailed from err
@@ -130,13 +139,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """
         if self._version is None or self._version_checked_at is None or not self.last_update_success:
             return True
-        return self._recheck_interval_elapsed()
-
-    def _recheck_interval_elapsed(self) -> bool:
-        """Return whether ``VERSION_RECHECK_INTERVAL`` has passed since the last successful version check."""
-        if self._version_checked_at is None:
-            return False
-        return dt_util.utcnow() - self._version_checked_at >= VERSION_RECHECK_INTERVAL
+        return _interval_elapsed(self._version_checked_at)
 
     async def _async_refresh_version(self) -> None:
         """Re-read the version; re-read the entrypoints when Traefik restarted.
@@ -162,13 +165,14 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     async def _async_update_data(self) -> TraefikSnapshot:
         """Fetch the HTTP state and build the snapshot for this cycle."""
         if self._version_due():
-            # Only the regular hourly re-check arms the rawdata probe; a
-            # post-failure re-check inside the interval does not, so probes
-            # stay at least VERSION_RECHECK_INTERVAL apart.
-            probe_rawdata = self._recheck_interval_elapsed()
             await self._async_refresh_version()
-            if probe_rawdata:
-                self.client.request_rawdata_probe()
+        if _interval_elapsed(self._probe_armed_at):
+            # The probe has its own clock: a post-failure version re-check
+            # neither arms it nor postpones it, so probes stay at least
+            # VERSION_RECHECK_INTERVAL apart and recurring failures cannot
+            # starve them. In rawdata mode the arming is a no-op.
+            self.client.request_rawdata_probe()
+            self._probe_armed_at = dt_util.utcnow()
         try:
             state = await self.client.async_get_state()
         except TraefikProxyAuthError as err:
