@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
@@ -23,8 +24,9 @@ from custom_components.traefik_proxy.const import (
     UID_ROUTERS_PROBLEM,
     UID_SERVICES_PROBLEM,
 )
+from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, SERVICES, missing_store_key
-from tests.conftest import make_traefik_entry, setup_traefik_entry, stub_traefik
+from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
 
 pytestmark = pytest.mark.usefixtures("mock_tls_probe")
 
@@ -254,3 +256,51 @@ async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
     issue = _get_issue(hass, ENTRY_ID)
     assert issue is not None
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "3"}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: the migration re-enables user-disabled routers")
+async def test_user_disabled_router_stays_disabled(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """A user-disabled 0.3.0 router binary sensor comes back as a user-disabled router sensor without state."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
+    entry.add_to_hass(hass)
+    disabled_old = _create(
+        hass,
+        entry,
+        "binary_sensor",
+        "http_router_file-ok@file",
+        object_id="traefik_http_router_file_ok_file",
+        disabled_by=er.RegistryEntryDisabler.USER,
+    )
+    enabled_old = _create(
+        hass, entry, "binary_sensor", "http_router_whoami@docker", object_id="traefik_http_router_whoami_docker"
+    )
+    registry = er.async_get(hass)
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    assert registry.async_get(disabled_old) is None
+    assert registry.async_get(enabled_old) is None
+    routers = next(
+        device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), ENTRY_ID)
+        if device_identifier(ENTRY_ID, TraefikDevice.ROUTERS) in device.identifiers
+    )
+
+    disabled_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_file-ok@file")
+    assert disabled_id == "sensor.traefik_http_router_file_ok_file"
+    disabled = registry.async_get(disabled_id)
+    assert disabled is not None
+    assert disabled.disabled_by is er.RegistryEntryDisabler.USER
+    assert disabled.name is None
+    assert disabled.device_id == routers.id
+    assert hass.states.get(disabled_id) is None
+
+    enabled_id = entity_id_for(hass, "sensor", f"{ENTRY_ID}_http_router_whoami@docker")
+    enabled = registry.async_get(enabled_id)
+    assert enabled is not None
+    assert enabled.disabled_by is None
+    assert hass.states.get(enabled_id) is not None
+
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "2"}
