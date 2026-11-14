@@ -402,7 +402,6 @@ async def test_disabled_router_replacement_keeps_disabled_state(
         )
 
 
-@pytest.mark.xfail(strict=True, reason="IN-05: hidden_by of router binary sensors is not carried over yet")
 @pytest.mark.parametrize(
     ("old_disabled_by", "hidden_by"),
     [
