@@ -214,4 +214,4 @@ None yet.
 Last session: 2026-11-14T22:57:35.327Z
 Stopped at: Phase 05 complete, ready to plan Phase 06
 Resume file: None
-Next: /gsd-execute-phase 4 (plan 04-02)
+Next: /gsd-plan-phase 6
