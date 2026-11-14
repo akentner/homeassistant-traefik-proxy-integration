@@ -22,8 +22,16 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-from custom_components.traefik_proxy.const import DOMAIN, ITEM_STATE_OPTIONS
+from custom_components.traefik_proxy.const import (
+    DOMAIN,
+    ITEM_STATE_OPTIONS,
+    UID_MIDDLEWARES_PROBLEM,
+    UID_ROUTERS_PROBLEM,
+    UID_SERVICES_PROBLEM,
+)
 from custom_components.traefik_proxy.entity_manager import (
+    CERT_EXPIRING,
+    CERT_EXPIRY,
     ENTRYPOINTS,
     ROUTERS,
     SERVICES,
@@ -660,3 +668,123 @@ async def test_router_and_service_with_same_name_are_separate(hass, aioclient_mo
     assert service_entry.unique_id == f"{entry.entry_id}_http_service_dup@file"
     assert router_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_routers")].id
     assert service_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_services")].id
+
+
+# ---------------------------------------------------------------------------
+# Per-item option: no router or service entities when it is off
+# ---------------------------------------------------------------------------
+
+PER_ITEM_OFF = {"per_item_entities": False}
+SNAPSHOT_UID_SUFFIXES = ("overview_routers_count", "version", "start_time")
+PROBLEM_UID_SUFFIXES = (UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM, UID_MIDDLEWARES_PROBLEM)
+
+
+def _kind_keys(hass: HomeAssistant, entry: Any, spec: KindSpec) -> list[str]:
+    """Return the keys of the entry's registry entries of ``spec``."""
+    return [
+        key
+        for reg_entry in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if reg_entry.domain == spec.domain and (key := spec.key_of(entry.entry_id, reg_entry.unique_id)) is not None
+    ]
+
+
+def _registered(hass: HomeAssistant, domain: str, unique_id: str) -> bool:
+    return er.async_get(hass).async_get_entity_id(domain, DOMAIN, unique_id) is not None
+
+
+def _sub_device_ids(entry: Any) -> dict[str, tuple[str, str]]:
+    return {sub: (DOMAIN, f"{entry.entry_id}_{sub}") for sub in SUB_DEVICES}
+
+
+def _assert_per_item_off(hass: HomeAssistant, entry: Any) -> None:
+    """No router/service entity or sub-device; everything else is still there."""
+    entry_id = entry.entry_id
+    assert _kind_keys(hass, entry, ROUTERS) == []
+    assert _kind_keys(hass, entry, SERVICES) == []
+    assert _kind_keys(hass, entry, ENTRYPOINTS)
+    assert _kind_keys(hass, entry, CERT_EXPIRY)
+    assert _kind_keys(hass, entry, CERT_EXPIRING)
+    for suffix in SNAPSHOT_UID_SUFFIXES:
+        assert _registered(hass, "sensor", f"{entry_id}_{suffix}"), suffix
+    for suffix in PROBLEM_UID_SUFFIXES:
+        assert _registered(hass, "binary_sensor", f"{entry_id}_{suffix}"), suffix
+
+    devices = _entry_devices(hass, entry)
+    subs = _sub_device_ids(entry)
+    assert (DOMAIN, entry_id) in devices
+    assert subs["certificates"] in devices
+    assert subs["routers"] not in devices
+    assert subs["services"] not in devices
+    assert dr.async_get(hass).async_get_device(identifiers={subs["routers"]}) is None
+    assert dr.async_get(hass).async_get_device(identifiers={subs["services"]}) is None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: per-item option not implemented yet")
+async def test_per_item_off_creates_no_router_or_service_entities(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """A fresh entry with the option off gets no router/service entity and no Routers/Services sub-device."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options=PER_ITEM_OFF))
+    _assert_per_item_off(hass, entry)
+    assert entry.runtime_data.entity_manager.missing_since(ROUTERS, ROUTER) is None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: per-item option not implemented yet")
+async def test_per_item_off_on_reload_removes_existing_entities(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, freezer, hass_storage
+) -> None:
+    """Turning the option off removes router/service entities and sub-devices right at the reload."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    router_entity_id = _router_entity_id(hass, entry)
+    service_entity_id = _service_entity_id(hass, entry)
+    # A router missing at the reload must not survive as a missing entity either.
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    assert hass_storage[_store_key(entry.entry_id)]["data"] == {"router": {ROUTER: dt_util.utcnow().isoformat()}}
+
+    hass.config_entries.async_update_entry(entry, options=PER_ITEM_OFF)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    _assert_per_item_off(hass, entry)
+    assert er.async_get(hass).async_get(router_entity_id) is None
+    assert er.async_get(hass).async_get(service_entity_id) is None
+    assert hass.states.get(router_entity_id) is None
+    assert hass.states.get(service_entity_id) is None
+    assert hass_storage[_store_key(entry.entry_id)]["data"] == {}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: per-item option not implemented yet")
+async def test_per_item_off_reload_is_idempotent(hass, aioclient_mock, mock_tls_probe, caplog) -> None:  # type: ignore[no-untyped-def]
+    """A second reload with the option still off removes nothing more and raises nothing."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    hass.config_entries.async_update_entry(entry, options=PER_ITEM_OFF)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    before_entities = {reg.entity_id for reg in er.async_entries_for_config_entry(registry, entry.entry_id)}
+    before_devices = set(_entry_devices(hass, entry))
+
+    caplog.set_level(logging.WARNING)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    _assert_per_item_off(hass, entry)
+    assert {reg.entity_id for reg in er.async_entries_for_config_entry(registry, entry.entry_id)} == before_entities
+    assert set(_entry_devices(hass, entry)) == before_devices
+    assert "Traceback" not in caplog.text
+    assert not [record for record in caplog.records if record.levelno >= logging.ERROR]
+
+
+async def test_per_item_default_keeps_router_and_service_entities(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """Without the option key router and service entities and all sub-devices exist as before."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    assert "per_item_entities" not in entry.options
+    assert ROUTER in _kind_keys(hass, entry, ROUTERS)
+    assert SERVICE in _kind_keys(hass, entry, SERVICES)
+    devices = _entry_devices(hass, entry)
+    assert set(_sub_device_ids(entry).values()) <= set(devices)
+    reg_entry = er.async_get(hass).async_get(_service_entity_id(hass, entry))
+    assert reg_entry is not None
+    assert reg_entry.device_id == devices[(DOMAIN, f"{entry.entry_id}_services")].id
