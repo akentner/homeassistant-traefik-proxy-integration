@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
+from homeassistant.util import dt as dt_util
 
 from .api import Auth, AuthMode, TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
 from .const import (
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# How often a healthy coordinator re-reads /api/version to detect a Traefik
+# restart or upgrade (/api/rawdata carries no start date).
+VERSION_RECHECK_INTERVAL = timedelta(hours=1)
 
 
 def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
@@ -74,10 +79,13 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     client from ``entry.runtime_data`` (see :class:`TraefikRuntimeData`), so
     the runtime data must be assigned before the first refresh.
 
-    Version and entrypoints are fetched once during setup; every cycle then
+    Version and entrypoints are fetched during setup; every cycle then
     fetches routers, services and middlewares and publishes them as one
-    immutable :class:`TraefikSnapshot`. Listeners are only notified when the
-    snapshot differs from the previous one.
+    immutable :class:`TraefikSnapshot`. The version is re-read at most once
+    per ``VERSION_RECHECK_INTERVAL`` and on the first cycle after a failed
+    one; the entrypoints are re-read only when the version or start date
+    changed (Traefik restarted or was upgraded). Listeners are only
+    notified when the snapshot differs from the previous one.
     """
 
     config_entry: TraefikProxyConfigEntry
@@ -94,6 +102,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
             always_update=False,
         )
         self._version: TraefikVersion | None = None
+        self._version_checked_at: datetime | None = None
         self._entrypoints: dict[str, Entrypoint] = {}
 
     @property
@@ -105,14 +114,48 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """Fetch the Traefik version and entrypoints once per setup."""
         try:
             self._version = await self.client.async_get_version()
+            self._version_checked_at = dt_util.utcnow()
             self._entrypoints = await self.client.async_get_entrypoints()
         except TraefikProxyAuthError as err:
             raise ConfigEntryAuthFailed from err
         except TraefikProxyApiError as err:
             raise UpdateFailed(str(err)) from err
 
+    def _version_due(self) -> bool:
+        """Return whether this cycle re-reads /api/version.
+
+        ``last_update_success`` still describes the previous cycle here:
+        Home Assistant updates it only after ``_async_update_data`` returns.
+        """
+        if self._version is None or self._version_checked_at is None or not self.last_update_success:
+            return True
+        return dt_util.utcnow() - self._version_checked_at >= VERSION_RECHECK_INTERVAL
+
+    async def _async_refresh_version(self) -> None:
+        """Re-read the version; re-read the entrypoints when Traefik restarted.
+
+        The stored version is replaced only after a needed entrypoint fetch
+        succeeded, so a failure there is retried on the next cycle.
+        """
+        try:
+            version = await self.client.async_get_version()
+            previous = self._version
+            if previous is None or (version.version, version.start_date) != (
+                previous.version,
+                previous.start_date,
+            ):
+                self._entrypoints = await self.client.async_get_entrypoints()
+        except TraefikProxyAuthError as err:
+            raise ConfigEntryAuthFailed from err
+        except TraefikProxyApiError as err:
+            raise UpdateFailed(str(err)) from err
+        self._version = version
+        self._version_checked_at = dt_util.utcnow()
+
     async def _async_update_data(self) -> TraefikSnapshot:
         """Fetch the HTTP state and build the snapshot for this cycle."""
+        if self._version_due():
+            await self._async_refresh_version()
         try:
             state = await self.client.async_get_state()
         except TraefikProxyAuthError as err:

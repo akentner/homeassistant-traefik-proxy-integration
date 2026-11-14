@@ -7,6 +7,7 @@ hass.config_entries.async_setup (the proper HA entry machinery).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -22,7 +23,7 @@ from custom_components.traefik_proxy.const import (
     CONF_VERIFY_SSL,
     DOMAIN,
 )
-from custom_components.traefik_proxy.coordinator import TraefikProxyCoordinator
+from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL, TraefikProxyCoordinator
 from custom_components.traefik_proxy.data import TraefikRuntimeData
 from custom_components.traefik_proxy.models import TraefikSnapshot
 from tests.conftest import MOCK_URL, load_fixture, snapshot_from_fixture, stub_traefik, stub_traefik_paginated
@@ -258,3 +259,143 @@ async def test_equal_snapshots_do_not_notify_listeners(hass, aioclient_mock, moc
 
     assert set(coordinator.data.routers) == {"only@file"}
     assert len(calls) == after_first + 1
+
+
+def _version_started_later(hours: int) -> dict[str, str]:
+    """The v3.7 /api/version payload with a start date ``hours`` later (a restarted Traefik)."""
+    payload = dict(load_fixture("v3.7", "version.json"))
+    start = datetime.fromisoformat(payload["startDate"]) + timedelta(hours=hours)
+    payload["startDate"] = start.isoformat()
+    return payload
+
+
+async def _refresh_paths(hass, aioclient_mock, coordinator: TraefikProxyCoordinator) -> list[str]:  # type: ignore[no-untyped-def]
+    """Run one coordinator cycle and return the paths it requested."""
+    aioclient_mock.mock_calls.clear()
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+    return _requested_paths(aioclient_mock)
+
+
+async def test_request_budget_matrix(hass, aioclient_mock, freezer, mock_tls_probe) -> None:
+    """Exact requests per scenario: setup, steady, hourly, post-failure and restart."""
+    assert timedelta(hours=1) == VERSION_RECHECK_INTERVAL
+    stub_traefik(aioclient_mock)
+
+    # (1) Setup reads version, entrypoints and the state.
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata"]
+
+    # (2) A steady cycle is one request.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (3) After the re-check interval the version is re-read; the same start date
+    # means no restart, so the entrypoints are not requested.
+    freezer.tick(timedelta(hours=1, seconds=1))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (4) A failed cycle makes the next successful one re-check the version.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=500)
+    stub_traefik(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+    assert coordinator.last_update_success is False
+    aioclient_mock.clear_requests()
+    stub_traefik(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (5) A changed start date (Traefik restarted) re-reads the entrypoints.
+    restarted = _version_started_later(hours=1)
+    aioclient_mock.clear_requests()
+    stub_traefik(aioclient_mock, version_payload=restarted)
+    freezer.tick(timedelta(hours=1))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == [
+        "/api/version",
+        "/api/entrypoints",
+        "/api/rawdata",
+    ]
+    assert coordinator.data.version.start_date == datetime.fromisoformat(restarted["startDate"])
+
+    # The next hourly re-check sees the stored pair again: no entrypoints request.
+    freezer.tick(timedelta(hours=1))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+
+
+def _stub_failing_step(aioclient_mock, freezer, step: str, status: int) -> None:  # type: ignore[no-untyped-def]
+    """Make one step of the next cycle answer ``status``; earlier steps are healthy and due."""
+    aioclient_mock.clear_requests()
+    if step == "state":
+        aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=status)
+        stub_traefik(aioclient_mock)
+        return
+    freezer.tick(VERSION_RECHECK_INTERVAL)
+    if step == "version":
+        aioclient_mock.get(f"{MOCK_URL}/api/version", status=status)
+        stub_traefik(aioclient_mock)
+        return
+    aioclient_mock.get(f"{MOCK_URL}/api/entrypoints", status=status)
+    stub_traefik(aioclient_mock, version_payload=_version_started_later(hours=1))
+
+
+@pytest.mark.parametrize("step", ["state", "version", "entrypoints"])
+async def test_cycle_auth_error_starts_reauth(hass, aioclient_mock, freezer, mock_tls_probe, step: str) -> None:
+    """A 401 in any cycle step becomes ConfigEntryAuthFailed and starts a reauth flow."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+    _stub_failing_step(aioclient_mock, freezer, step, 401)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coordinator.last_update_success is False
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+    assert flows[0]["context"]["source"] == "reauth"
+    assert flows[0]["context"]["entry_id"] == entry.entry_id
+
+
+@pytest.mark.parametrize("step", ["state", "version", "entrypoints"])
+async def test_cycle_server_error_keeps_previous_snapshot(
+    hass, aioclient_mock, freezer, mock_tls_probe, step: str
+) -> None:
+    """A 500 in any cycle step becomes UpdateFailed; the entry stays loaded on the previous snapshot."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    previous = coordinator.data
+
+    _stub_failing_step(aioclient_mock, freezer, step, 500)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert coordinator.last_update_success is False
+    assert coordinator.data is previous
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+
+async def test_failed_entrypoint_refetch_is_retried(hass, aioclient_mock, freezer, mock_tls_probe) -> None:
+    """A restart whose entrypoint fetch failed is detected again on the next cycle."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+
+    _stub_failing_step(aioclient_mock, freezer, "entrypoints", 500)
+    await coordinator.async_refresh()
+    assert coordinator.last_update_success is False
+
+    restarted = _version_started_later(hours=1)
+    aioclient_mock.clear_requests()
+    stub_traefik(aioclient_mock, version_payload=restarted)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == [
+        "/api/version",
+        "/api/entrypoints",
+        "/api/rawdata",
+    ]
+    assert coordinator.data.version.start_date == datetime.fromisoformat(restarted["startDate"])
