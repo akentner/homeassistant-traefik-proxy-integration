@@ -184,7 +184,6 @@ def _entry_devices(hass: HomeAssistant, entry: Any) -> dict[tuple[str, str], dr.
     }
 
 
-@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
 async def test_router_sensor_on_routers_sub_device(hass, aioclient_mock, mock_tls_probe, caplog) -> None:  # type: ignore[no-untyped-def]
     """Main device and sub-devices are registered, named and linked; router sensors sit on Routers."""
     caplog.set_level(logging.WARNING)
@@ -215,7 +214,6 @@ async def test_router_sensor_on_routers_sub_device(hass, aioclient_mock, mock_tl
     assert "Detected that custom integration 'traefik_proxy'" not in caplog.text
 
 
-@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
 @pytest.mark.parametrize(
     ("url", "expected"),
     [
@@ -236,7 +234,6 @@ def test_dashboard_url_variants(url: str, expected: str | None) -> None:
     assert dashboard_url(url) == expected
 
 
-@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
 def test_entry_host_falls_back_to_title() -> None:
     """The device host is the URL hostname, or the entry title when the URL has none."""
     from custom_components.traefik_proxy.entity import entry_host

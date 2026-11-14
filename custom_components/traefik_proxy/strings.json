@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect to Traefik",
-        "description": "Provide the URL of your Traefik instance and the API key from your Traefik static config (api.dashboard / api.insecure). Plain HTTP transmits the bearer token in cleartext — use HTTPS whenever possible.",
+        "description": "Provide the URL of your Traefik instance and the API key from your Traefik static config (api.dashboard / api.insecure). Plain HTTP transmits the bearer token in cleartext \u2014 use HTTPS whenever possible.",
         "data": {
           "url": "Traefik base URL",
           "api_key": "Bearer token (optional \u2014 leave empty for Traefik with no api auth)",
@@ -65,6 +65,33 @@
   "exceptions": {
     "cert_unavailable": {
       "message": "TLS probe failed \u2014 {error}. See logbook for details."
+    }
+  },
+  "device": {
+    "main": {
+      "name": "Traefik ({host})"
+    },
+    "routers": {
+      "name": "Traefik routers ({host})"
+    },
+    "services": {
+      "name": "Traefik services ({host})"
+    },
+    "certificates": {
+      "name": "Traefik certificates ({host})"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "router": {
+        "state": {
+          "enabled": "Enabled",
+          "warning": "Warning",
+          "error": "Error",
+          "disabled": "Disabled",
+          "missing": "Missing"
+        }
+      }
     }
   }
 }

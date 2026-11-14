@@ -66,5 +66,32 @@
     "cert_unavailable": {
       "message": "TLS probe failed \u2014 {error}. See logbook for details."
     }
+  },
+  "device": {
+    "main": {
+      "name": "Traefik ({host})"
+    },
+    "routers": {
+      "name": "Traefik routers ({host})"
+    },
+    "services": {
+      "name": "Traefik services ({host})"
+    },
+    "certificates": {
+      "name": "Traefik certificates ({host})"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "router": {
+        "state": {
+          "enabled": "Enabled",
+          "warning": "Warning",
+          "error": "Error",
+          "disabled": "Disabled",
+          "missing": "Missing"
+        }
+      }
+    }
   }
 }

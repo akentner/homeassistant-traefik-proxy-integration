@@ -29,6 +29,7 @@ from .const import (
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
+from .entity import async_setup_devices
 from .entity_manager import TraefikEntityManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -222,7 +223,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
        ``ConfigEntryNotReady``. On failure an empty cache is seeded via
        ``async_set_updated_data({})`` so the platforms see a defined state
        instead of awaiting an unfinished refresh.
-    4. Forward platforms (sensor, binary_sensor, button).
+    4. Register the main device and the Routers / Services / Certificates
+       sub-devices.
+    5. Forward platforms (sensor, binary_sensor, button).
     """
     client = build_api_client(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
@@ -251,6 +254,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         # Seed an empty cache so the platforms see a defined state
         # instead of awaiting an unfinished refresh.
         cert_coordinator.async_set_updated_data({})
+
+    # Every device exists, named and linked, before the first entity attaches.
+    async_setup_devices(hass, entry)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

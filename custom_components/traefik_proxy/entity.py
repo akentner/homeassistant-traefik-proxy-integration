@@ -6,13 +6,15 @@ from abc import abstractmethod
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Final
+from urllib.parse import urlsplit
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .cert_coordinator import CertCoordinator
-from .const import DEFAULT_NAME, DOMAIN
+from .const import CONF_URL, DEFAULT_NAME, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
 from .entity_manager import KindSpec
@@ -42,6 +44,69 @@ def traefik_device_info(entry: TraefikProxyConfigEntry, device: TraefikDevice) -
     the main device) before the platforms are set up.
     """
     return DeviceInfo(identifiers={device_identifier(entry.entry_id, device)})
+
+
+def entry_host(entry: TraefikProxyConfigEntry) -> str:
+    """Return the host of the entry URL for device names, or the entry title without one."""
+    try:
+        host = urlsplit(entry.data[CONF_URL]).hostname
+    except ValueError:
+        host = None
+    return host or entry.title
+
+
+def dashboard_url(url: str) -> str | None:
+    """Return the Traefik dashboard URL for an API base URL.
+
+    Keeps scheme, host, port and path prefix; drops userinfo, query and
+    fragment. None for non-http(s) URLs, URLs without a host and invalid ports.
+    """
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    host = parts.hostname
+    if parts.scheme not in ("http", "https") or not host:
+        return None
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = host if port is None else f"{host}:{port}"
+    return f"{parts.scheme}://{netloc}{parts.path.rstrip('/')}/dashboard/"
+
+
+@callback
+def async_setup_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> dr.DeviceEntry:
+    """Register the main device and its sub-devices; return the main device.
+
+    Runs before the platforms are set up, so entities attach to named devices.
+    Sub-devices are linked to the main device through the registry, the one
+    linking API available on every supported Home Assistant version.
+    """
+    device_registry = dr.async_get(hass)
+    placeholders = {"host": entry_host(entry)}
+    main = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={device_identifier(entry.entry_id, TraefikDevice.MAIN)},
+        translation_key=TraefikDevice.MAIN.value,
+        translation_placeholders=placeholders,
+        manufacturer="Traefik",
+        entry_type=DeviceEntryType.SERVICE,
+        configuration_url=dashboard_url(entry.data[CONF_URL]),
+        sw_version=entry.runtime_data.coordinator.data.version.version,
+    )
+    for device in (TraefikDevice.ROUTERS, TraefikDevice.SERVICES, TraefikDevice.CERTIFICATES):
+        sub = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={device_identifier(entry.entry_id, device)},
+            translation_key=device.value,
+            translation_placeholders=placeholders,
+            manufacturer="Traefik",
+            entry_type=DeviceEntryType.SERVICE,
+        )
+        if sub.via_device_id != main.id:
+            device_registry.async_update_device(sub.id, via_device_id=main.id)
+    return main
 
 
 _UNWRITTEN: Final = object()
