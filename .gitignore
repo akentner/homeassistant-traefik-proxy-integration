@@ -29,3 +29,6 @@ uv.lock
 
 # OS
 .DS_Store
+
+# Capture harness (tests/traefik/capture.py): generated throwaway TLS cert + key
+tests/traefik/certs/

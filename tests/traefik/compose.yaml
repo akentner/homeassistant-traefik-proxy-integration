@@ -1,0 +1,49 @@
+# Throwaway Traefik harness for capturing real API fixtures.
+#
+# Never started by pytest. Run it through the capture script, which brings the
+# stack up, captures and redacts the API responses, and tears it down again:
+#
+#   uv run python tests/traefik/capture.py
+#
+# Images are pinned by exact version tag and sha256 digest. The API is reachable
+# only on 127.0.0.1 and only through the basicAuth middleware defined in
+# dynamic/scenario.yml (insecure API mode stays off).
+name: traefik-harness
+
+services:
+  traefik-v3:
+    image: traefik:v3.7.19@sha256:b7b1b31e6440de0b1f7c4e0f6cf0a0f3f004866761d30c025fe00c80daaf7d9c
+    command:
+      - --log.level=INFO
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.udp-ep.address=:9999/udp
+      - --entrypoints.traefik.address=:8080
+      - --api=true
+      - --api.dashboard=true
+      - --api.insecure=false
+      - --ping=true
+      - --ping.entrypoint=traefik
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+    ports:
+      - "127.0.0.1:18370:8080"
+    volumes:
+      - ./dynamic:/etc/traefik/dynamic:ro
+      - ./certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  whoami:
+    image: traefik/whoami:v1.12.0@sha256:c4717a8d1f0134a7444e24f881160e033991f23027c6c5a9a3f8fd22e70d1d44
+    networks:
+      default:
+        aliases:
+          - backend.example.com
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.whoami.rule=Host(`whoami.example.com`)
+      - traefik.http.routers.whoami.entrypoints=web
+      - traefik.http.routers.whoami.service=whoami
+      - traefik.http.services.whoami.loadbalancer.server.port=80

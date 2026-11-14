@@ -1,0 +1,32 @@
+# File-provider scenario for the capture harness (tests/traefik/capture.py).
+#
+# The basicAuth entry is the bcrypt hash of the harness-only password
+# HARNESS_PASSWORD in capture.py. It protects a throwaway local container and is
+# not a real credential; the capture redacts it from every fixture anyway.
+http:
+  routers:
+    traefik-api:
+      entryPoints:
+        - traefik
+      rule: PathPrefix(`/api`)
+      service: api@internal
+      middlewares:
+        - api-auth
+
+    file-ok:
+      entryPoints:
+        - web
+      rule: Host(`app.example.com`)
+      service: file-ok-svc
+
+  middlewares:
+    api-auth:
+      basicAuth:
+        users:
+          - "capture:$2a$10$TCcTVgiMkhTFW4uIRwht7uIrhtWXc.SK/NF4UaMkg5qPbMwrFumzW"
+
+  services:
+    file-ok-svc:
+      loadBalancer:
+        servers:
+          - url: http://backend.example.com:80

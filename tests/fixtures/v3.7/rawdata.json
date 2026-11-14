@@ -1,0 +1,155 @@
+{
+  "middlewares": {
+    "api-auth@file": {
+      "basicAuth": {
+        "users": [
+          "redacted:redacted"
+        ]
+      },
+      "status": "enabled",
+      "usedBy": [
+        "traefik-api@file"
+      ]
+    }
+  },
+  "routers": {
+    "file-ok@file": {
+      "entryPoints": [
+        "web"
+      ],
+      "observability": {
+        "accessLogs": true,
+        "metrics": true,
+        "traceVerbosity": "minimal",
+        "tracing": true
+      },
+      "priority": 23,
+      "rule": "Host(`app.example.com`)",
+      "service": "file-ok-svc",
+      "status": "enabled",
+      "using": [
+        "web"
+      ]
+    },
+    "ping@internal": {
+      "entryPoints": [
+        "traefik"
+      ],
+      "observability": {
+        "accessLogs": true,
+        "metrics": true,
+        "traceVerbosity": "minimal",
+        "tracing": true
+      },
+      "priority": 9223372036854775807,
+      "rule": "PathPrefix(`/ping`)",
+      "ruleSyntax": "default",
+      "service": "ping@internal",
+      "status": "enabled",
+      "using": [
+        "traefik"
+      ]
+    },
+    "traefik-api@file": {
+      "entryPoints": [
+        "traefik"
+      ],
+      "middlewares": [
+        "api-auth@file"
+      ],
+      "observability": {
+        "accessLogs": true,
+        "metrics": true,
+        "traceVerbosity": "minimal",
+        "tracing": true
+      },
+      "priority": 18,
+      "rule": "PathPrefix(`/api`)",
+      "service": "api@internal",
+      "status": "enabled",
+      "using": [
+        "traefik"
+      ]
+    },
+    "whoami@docker": {
+      "entryPoints": [
+        "web"
+      ],
+      "observability": {
+        "accessLogs": true,
+        "metrics": true,
+        "traceVerbosity": "minimal",
+        "tracing": true
+      },
+      "priority": 26,
+      "rule": "Host(`whoami.example.com`)",
+      "service": "whoami",
+      "status": "enabled",
+      "using": [
+        "web"
+      ]
+    }
+  },
+  "services": {
+    "api@internal": {
+      "status": "enabled",
+      "usedBy": [
+        "traefik-api@file"
+      ]
+    },
+    "dashboard@internal": {
+      "status": "enabled"
+    },
+    "file-ok-svc@file": {
+      "loadBalancer": {
+        "passHostHeader": true,
+        "responseForwarding": {
+          "flushInterval": "100ms"
+        },
+        "servers": [
+          {
+            "url": "http://backend.example.com:80"
+          }
+        ],
+        "strategy": "wrr"
+      },
+      "serverStatus": {
+        "http://backend.example.com:80": "UP"
+      },
+      "status": "enabled",
+      "usedBy": [
+        "file-ok@file"
+      ]
+    },
+    "noop@internal": {
+      "status": "enabled"
+    },
+    "ping@internal": {
+      "status": "enabled",
+      "usedBy": [
+        "ping@internal"
+      ]
+    },
+    "whoami@docker": {
+      "loadBalancer": {
+        "passHostHeader": true,
+        "responseForwarding": {
+          "flushInterval": "100ms"
+        },
+        "servers": [
+          {
+            "url": "http://192.0.2.1:80"
+          }
+        ],
+        "strategy": "wrr"
+      },
+      "serverStatus": {
+        "http://192.0.2.1:80": "UP"
+      },
+      "status": "enabled",
+      "usedBy": [
+        "whoami@docker"
+      ]
+    }
+  }
+}
