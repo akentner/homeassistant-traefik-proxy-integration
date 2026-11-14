@@ -230,7 +230,7 @@ async def test_rawdata_snapshot_reaches_entities(hass, aioclient_mock, mock_tls_
 async def test_rawdata_404_switches_to_pages_once(
     hass, aioclient_mock, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
 ) -> None:
-    """A Traefik without /api/rawdata is read through the pages, and rawdata is never asked for again."""
+    """A Traefik without /api/rawdata is read through the pages; rawdata is not requested again before the hourly re-check."""
     index = load_fixture("v3.7", "pages/index.json")
     monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", index["per_page"])
     stub_traefik_paginated(aioclient_mock, version="v3.7")
@@ -280,6 +280,30 @@ async def test_equal_snapshots_do_not_notify_listeners(hass, aioclient_mock, moc
 
     assert set(coordinator.data.routers) == {"only@file"}
     assert len(calls) == after_first + 1
+
+
+async def test_switch_back_to_rawdata_publishes_no_change(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """Pages and rawdata yield the same snapshot: switching back notifies no listener."""
+    index = load_fixture("v3.7", "pages/index.json")
+    monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", index["per_page"])
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    calls: list[None] = []
+    entry.async_on_unload(coordinator.async_add_listener(lambda: calls.append(None)))
+    before = coordinator.data
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", json=load_fixture("v3.7", "rawdata.json"))
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    freezer.tick(VERSION_RECHECK_INTERVAL)
+
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata"]
+    assert coordinator.last_update_success is True
+    assert coordinator.data == before
+    assert calls == []
 
 
 def _version_started_later(hours: int) -> dict[str, str]:
@@ -365,6 +389,34 @@ async def test_request_budget_matrix(
 
     # (7) A steady paginated cycle reads the pages only.
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    # (8) One second before the re-check interval: still no probe.
+    freezer.tick(VERSION_RECHECK_INTERVAL - timedelta(seconds=1))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    # (9) Exactly on the interval: version re-check plus one rawdata probe;
+    # the probe gets 404 again, so the same cycle is served from the pages.
+    freezer.tick(timedelta(seconds=1))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata", *pages]
+    assert coordinator.last_update_success is True
+
+    # (10) Still paginated: the pages only.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    # (10a) A failing page fails the cycle.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", params={"per_page": index["per_page"], "page": 1}, status=500)
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/http/routers"]
+    assert coordinator.last_update_success is False
+
+    # (10b) The post-failure version re-check inside the interval arms no probe.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", *pages]
+    assert coordinator.last_update_success is True
 
     # (11) Rawdata is back, but the re-check interval has not elapsed: no probe.
     aioclient_mock.clear_requests()

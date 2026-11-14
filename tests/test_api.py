@@ -14,6 +14,7 @@ every request, request host pinning and the router refresh POST.
 from __future__ import annotations
 
 import ast
+import asyncio
 import base64
 import logging
 from pathlib import Path
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
@@ -472,6 +474,150 @@ async def test_list_endpoint_404_in_paginated_mode_raises_not_found(hass, aiocli
 
     assert err.value.path == "/api/http/routers"
     assert _paths(aioclient_mock) == [RAWDATA_PATH, "/api/http/routers"]
+
+
+# --- Rawdata probe while paginated -------------------------------------------
+
+
+def _page_paths() -> list[str]:
+    """Paths of one paginated read of the v3.7 capture, one entry per page."""
+    index = load_fixture("v3.7", "pages/index.json")
+    return [f"/api/http/{kind}" for kind in ("routers", "services", "middlewares") for _page in index[kind]]
+
+
+async def _paginated_client(hass, aioclient_mock) -> TraefikProxyApiClient:  # type: ignore[no-untyped-def]
+    """A client that fell back to the pages on a rawdata 404; recorded calls are cleared."""
+    per_page = load_fixture("v3.7", "pages/index.json")["per_page"]
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    client = _client(hass, page_size=per_page)
+    await client.async_get_state()
+    assert client._paginated is True
+    aioclient_mock.mock_calls.clear()
+    return client
+
+
+def _restub_rawdata(aioclient_mock, **rawdata: Any) -> None:  # type: ignore[no-untyped-def]
+    """Answer /api/rawdata with ``rawdata``; the pages stay served (their 404 rawdata mock is shadowed)."""
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", **rawdata)
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+
+
+async def test_rawdata_probe_success_switches_back(hass, aioclient_mock) -> None:
+    """An armed probe that gets rawdata returns its state and the client stays in rawdata mode."""
+    client = await _paginated_client(hass, aioclient_mock)
+    payload = load_fixture("v3.7", "rawdata.json")
+    _restub_rawdata(aioclient_mock, json=payload)
+
+    client.request_rawdata_probe()
+    state = await client.async_get_state()
+
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+    assert client._paginated is False
+    assert state == parse_rawdata(payload)
+
+    aioclient_mock.mock_calls.clear()
+    await client.async_get_state()
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+
+
+async def test_rawdata_probe_404_stays_paginated_once(hass, aioclient_mock) -> None:
+    """A probe answered 404 costs one extra request; the next call reads the pages only."""
+    client = await _paginated_client(hass, aioclient_mock)
+
+    client.request_rawdata_probe()
+    await client.async_get_state()
+    assert _paths(aioclient_mock) == [RAWDATA_PATH, *_page_paths()]
+
+    aioclient_mock.mock_calls.clear()
+    await client.async_get_state()
+    assert _paths(aioclient_mock) == _page_paths()
+    assert client._paginated is True
+
+
+async def test_rawdata_probe_empty_payload_switches_back(hass, aioclient_mock) -> None:
+    """An empty but valid rawdata payload is a successful probe: empty state, rawdata mode."""
+    client = await _paginated_client(hass, aioclient_mock)
+    _restub_rawdata(aioclient_mock, json={})
+
+    client.request_rawdata_probe()
+    state = await client.async_get_state()
+
+    assert state.routers == {}
+    assert state.services == {}
+    assert state.middlewares == {}
+    assert client._paginated is False
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+
+
+async def test_request_rawdata_probe_is_noop_in_rawdata_mode(hass, aioclient_mock) -> None:
+    """In rawdata mode arming changes nothing: one rawdata request, no pending probe."""
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", json=load_fixture("v3.7", "rawdata.json"))
+    client = _client(hass)
+
+    client.request_rawdata_probe()
+    await client.async_get_state()
+
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+    assert client._rawdata_probe_due is False
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_rawdata_probe_auth_error_propagates(hass, aioclient_mock, status: int) -> None:
+    """A rejected credential on the probe raises at once; no page is requested with it."""
+    client = await _paginated_client(hass, aioclient_mock)
+    _restub_rawdata(aioclient_mock, status=status)
+
+    client.request_rawdata_probe()
+    with pytest.raises(TraefikProxyAuthError):
+        await client.async_get_state()
+
+    assert _paths(aioclient_mock) == [RAWDATA_PATH]
+    assert client._paginated is True
+
+
+@pytest.mark.parametrize(
+    "rawdata",
+    [
+        {"status": 500},
+        {"exc": aiohttp.ClientConnectionError()},
+        {"json": []},
+        {"text": "not json"},
+    ],
+    ids=["http-500", "connection-error", "unexpected-shape", "invalid-json"],
+)
+async def test_rawdata_probe_other_failures_read_pages(hass, aioclient_mock, rawdata: dict[str, Any]) -> None:
+    """Any other probe failure keeps the client paginated and serves the call from the pages."""
+    client = await _paginated_client(hass, aioclient_mock)
+    _restub_rawdata(aioclient_mock, **rawdata)
+
+    client.request_rawdata_probe()
+    state = await client.async_get_state()
+
+    assert state == parse_rawdata(load_fixture("v3.7", "rawdata.json"))
+    assert _paths(aioclient_mock) == [RAWDATA_PATH, *_page_paths()]
+    assert client._paginated is True
+
+
+async def test_one_probe_per_arming_under_overlapping_calls(hass, aioclient_mock) -> None:
+    """Two overlapping calls after one arming request /api/rawdata exactly once."""
+    client = await _paginated_client(hass, aioclient_mock)
+
+    async def _slow_404(method: str, url: Any, _data: Any) -> AiohttpClientMockResponse:
+        # Yield to the loop so the second call runs while the probe is in flight.
+        for _ in range(3):
+            await asyncio.sleep(0)
+        return AiohttpClientMockResponse(method, url, status=404)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", side_effect=_slow_404)
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+
+    client.request_rawdata_probe()
+    await asyncio.gather(client.async_get_state(), client.async_get_state())
+
+    assert _paths(aioclient_mock).count(RAWDATA_PATH) == 1
+    assert client._paginated is True
 
 
 # --- Router refresh POST -----------------------------------------------------

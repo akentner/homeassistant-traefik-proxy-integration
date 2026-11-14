@@ -86,6 +86,12 @@ types stay exactly as they are in this phase.
   `X-Next-Page` header) and remembers the choice for the client's lifetime.
   The termination rule for `X-Next-Page` must be taken from the captured
   headers (do not guess); add a hard page cap (e.g. 100 pages) as a loop guard.
+  **Amended (M27, 2026-11-14, plan 04-09):** while paginated, the coordinator
+  cycle that performs the hourly version re-check retries `GET /api/rawdata`
+  once; success switches back to rawdata, a 404 or any other non-auth failure
+  keeps the pages, an auth failure propagates. At most one extra rawdata
+  request per hour. This replaces the rule that the client keeps the
+  paginated choice for good.
 - **D-08:** `Auth` is a frozen dataclass with `mode: AuthMode`
   (`StrEnum`: `none`, `basic`, `bearer`) and optional `username`, `password`,
   `token`. The `Authorization` header is built per request (`Basic` via
