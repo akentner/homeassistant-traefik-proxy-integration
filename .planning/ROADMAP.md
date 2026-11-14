@@ -268,11 +268,24 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
      do not fire when two consecutive snapshots are equal; the full test suite,
      `ruff` and `mypy --strict` are green and the existing entity set still
      reports correct states on both fixture generations.
-**Plans**: TBD
+**Plans**: 6 plans in 5 waves
 
 Plans:
+**Wave 1**
+- [ ] 04-01-PLAN.md — Docker capture harness + redacted, digest-pinned v2.11/v3.7 fixtures with privacy and scenario guards (DATA-07)
+- [ ] 04-02-PLAN.md — Typed `TraefikRuntimeData` (client, coordinator, cert_coordinator), single client owner (DATA-05)
 
-- [ ] TBD (run /gsd-plan-phase 4 to break down)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 04-03-PLAN.md — Frozen typed models parsed from both payload shapes, proven equal on both real generations; single fixture loader (DATA-01)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 04-04-PLAN.md — Tracer: real pages -> models -> client -> `TraefikSnapshot` coordinator (`always_update=False`) -> all consumers; paginated reads (DATA-01, DATA-06, DATA-02)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 04-05-PLAN.md — Client contract: auth none/basic/bearer, error taxonomy, no asserts, config-flow D-11 mapping, synthetic fixtures deleted (DATA-03, DATA-04, DATA-07)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 04-06-PLAN.md — One `GET /api/rawdata` per cycle + paginated fallback, restart detection, request-budget matrix, real-fixture entity proof (DATA-02, DATA-07)
 
 ### Phase 5: Entity model + lifecycle
 
@@ -467,7 +480,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 1. Foundation | 4/4 | Complete    | 2026-07-05 |
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
-| 4. Data layer (correct + lean) | 0/TBD | Not started | - |
+| 4. Data layer (correct + lean) | 0/6 | Planned | - |
 | 5. Entity model + lifecycle | 0/TBD | Not started | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
