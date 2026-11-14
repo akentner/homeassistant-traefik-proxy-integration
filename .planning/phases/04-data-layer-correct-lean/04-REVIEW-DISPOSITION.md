@@ -5,11 +5,11 @@ titles: json
 findings:
   - id: WR-09
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The rawdata probe can be starved indefinitely: every post-failure version re-check resets its clock"
   - id: WR-10
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "The switch to pagination is committed even when the page reads fail in the same cycle (outage-wide 404)"
   - id: IN-08
     severity: info
@@ -29,15 +29,15 @@ findings:
     title: "Cert entities keep a redundant `_coordinator` alias of `self.coordinator`"
   - id: CR-01
     severity: critical
-    disposition: open
+    disposition: fixed
     title: "Cert entities no longer update after a cert cycle or threshold change (regression from `always_update=False`)"
   - id: WR-01
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "A transient 404 on `/api/rawdata` switches the client to pagination for its whole lifetime"
   - id: WR-02
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "aiohttp `ValueError` escapes the error taxonomy (URL with userinfo plus token)"
   - id: WR-03
     severity: warning
@@ -91,24 +91,24 @@ findings:
     severity: info
     disposition: open
     title: "Dead `TYPE_CHECKING` block; sequential paginated reads contradict the stated constraint"
-open: 18
+open: 13
 total: 22
-recorded: 2026-11-14T02:42:06.836Z
+recorded: 2026-11-14T02:59:03.248Z
 ---
 
 # Phase 04: Code Review Disposition
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| WR-09 | warning | open | - |
-| WR-10 | warning | open | - |
+| WR-09 | warning | fixed | 04-REVIEW-FIX.md |
+| WR-10 | warning | fixed | 04-REVIEW-FIX.md |
 | IN-08 | info | open | - |
 | IN-09 | info | open | - |
 | IN-10 | info | open | - |
 | IN-11 | info | open | - |
-| CR-01 | critical | fixed | Plan 04-07 (a845757..90af13a); confirmed resolved by re-review cc26dfc |
-| WR-01 | warning | fixed | Plan 04-09 (87061f6..a93762a); confirmed resolved as scoped by re-review cc26dfc, follow-ups WR-09/WR-10 |
-| WR-02 | warning | fixed | Plan 04-08 (6890f51..73986d3); confirmed resolved by re-review cc26dfc, follow-ups IN-08/IN-09 |
+| CR-01 | critical | fixed | Plan 04-07 (a845757..90af13a); confirmed resolved by re-review cc26dfc (not in the current review) |
+| WR-01 | warning | fixed | Plan 04-09 (87061f6..a93762a); confirmed resolved as scoped by re-review cc26dfc, follow-ups WR-09/WR-10 (not in the current review) |
+| WR-02 | warning | fixed | Plan 04-08 (6890f51..73986d3); confirmed resolved by re-review cc26dfc, follow-ups IN-08/IN-09 (not in the current review) |
 | WR-03 | warning | open | - (not in the current review) |
 | WR-04 | warning | deferred | Phase 5 (M28): entity manager with grace period (not in the current review) |
 | WR-05 | warning | deferred | Phase 5 (M28): entity manager adds only new unique_ids (not in the current review) |
