@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
-import re
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
 import aiohttp
@@ -30,69 +33,132 @@ DEFAULT_PAGE_SIZE = 500
 # instead of silently returning a truncated list.
 MAX_PAGES = 100
 
-# Matches Traefik's auto-generated *internal* items (CONTEXT.md D-06 /
-# PITFALLS #2). Traefik itself exposes built-in API/dashboard/ping/etc.
-# under the literal ``internal`` provider, so the only truly Traefik-internal
-# items carry the suffix ``@internal`` (e.g. ``api@internal``,
-# ``dashboard@internal``, ``web-to-websecure@internal``).
-#
-# The previous regex ``r"@\w+"`` was too aggressive — it also matched
-# provider-suffixed USER items like ``ha-nextgen@file``,
-# ``n8n@docker``, ``strip@docker`` (Traefik's universal naming scheme
-# appends the provider name after every user-defined resource). With the
-# old regex, every user router got dropped from the count and the
-# overview sensors read 0 even when 9 user routers were configured
-# (v0.1.5 bug).
-#
-# Traefik HA entity-IDs can handle ``@`` via ``slugify`` (``@`` → ``_``)
-# so we only need to drop the Traefik-internal ones, not all
-# provider-suffixed items.
-_INTERNAL_ITEM_RE = re.compile(r"@internal$")
+_REFRESH_PATH = "/api/http/routers/refresh"
+
+
+class AuthMode(StrEnum):
+    """How the client authenticates against the Traefik API."""
+
+    none = "none"
+    basic = "basic"
+    bearer = "bearer"
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(char) < 32 or ord(char) == 127 for char in value)
+
+
+@dataclass(frozen=True, slots=True)
+class Auth:
+    """Authentication mode plus its credentials.
+
+    The credentials are excluded from ``repr()``. Validation errors name the
+    offending field only, never its value.
+    """
+
+    mode: AuthMode = AuthMode.none
+    username: str | None = field(default=None, repr=False)
+    password: str | None = field(default=None, repr=False)
+    token: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        """Reject credential combinations the mode cannot use."""
+        if self.mode is AuthMode.basic:
+            if not self.username:
+                raise ValueError("basic auth requires a username")
+            if ":" in self.username:
+                raise ValueError("basic auth username must not contain ':'")
+            if not self.password:
+                raise ValueError("basic auth requires a password")
+            unused = {"token": self.token}
+        elif self.mode is AuthMode.bearer:
+            if not self.token:
+                raise ValueError("bearer auth requires a token")
+            unused = {"username": self.username, "password": self.password}
+        else:
+            unused = {"username": self.username, "password": self.password, "token": self.token}
+        for name, value in unused.items():
+            if value is not None:
+                raise ValueError(f"{self.mode} auth does not use a {name}")
+        for name in ("username", "password", "token"):
+            value = getattr(self, name)
+            if value is not None and _has_control_chars(value):
+                raise ValueError(f"{name} must not contain control characters")
+
+    def header(self) -> dict[str, str]:
+        """Return the Authorization header for one request (empty for mode none)."""
+        if self.mode is AuthMode.basic and self.username and self.password:
+            # RFC 7617 with UTF-8 credentials. Built here because aiohttp 3.14
+            # deprecates BasicAuth and the aiohttp of older Home Assistant
+            # releases lacks its replacement.
+            credentials = f"{self.username}:{self.password}".encode()
+            return {"Authorization": f"Basic {base64.b64encode(credentials).decode('ascii')}"}
+        if self.mode is AuthMode.bearer and self.token:
+            return {"Authorization": f"Bearer {self.token}"}
+        return {}
 
 
 class TraefikProxyApiError(Exception):
-    """Raised for non-auth Traefik API failures (5xx, network, parse)."""
+    """Base class of every error the client raises.
+
+    The message is ``"<path>: <detail>"`` where the detail is an HTTP status,
+    an exception type name or a fixed description; it never contains a URL,
+    a header or a credential.
+    """
+
+    def __init__(self, path: str, detail: str, *, status: int | None = None) -> None:
+        super().__init__(f"{path}: {detail}")
+        self.path = path
+        self.status = status
 
 
 class TraefikProxyAuthError(TraefikProxyApiError):
-    """Raised on 401/403 — caller maps to ConfigEntryAuthFailed."""
+    """Traefik answered 401 or 403."""
+
+
+class TraefikProxyNotFoundError(TraefikProxyApiError):
+    """Traefik answered 404 (endpoint missing or API disabled)."""
+
+
+class TraefikProxyConnectionError(TraefikProxyApiError):
+    """The request failed below HTTP (connection, timeout, OS error)."""
+
+
+class TraefikProxyInvalidUrlError(TraefikProxyConnectionError):
+    """aiohttp rejected the configured URL."""
 
 
 class TraefikProxyPayloadError(TraefikProxyApiError):
-    """Raised when Traefik answers with a payload of an unexpected shape."""
+    """Traefik answered with invalid JSON or a payload of an unexpected shape."""
 
 
-def filter_internal_items(
-    items: list[dict[str, Any]],
-    *,
-    name_key: str = "name",
-) -> list[dict[str, Any]]:
-    """Drop Traefik-internal ``@internal`` suffixed items.
+def _status_error(path: str, status: int) -> TraefikProxyApiError:
+    """Map a non-2xx status of a read request to the taxonomy."""
+    detail = f"HTTP {status}"
+    if status in (401, 403):
+        return TraefikProxyAuthError(path, detail, status=status)
+    if status == 404:
+        return TraefikProxyNotFoundError(path, detail, status=status)
+    return TraefikProxyApiError(path, detail, status=status)
 
-    Reused by services, middlewares, and routers platforms (CONTEXT.md D-06).
-    Matches the literal suffix ``@internal`` only (Traefik's auto-generated
-    API / dashboard / ping / redirect items) — does NOT drop provider-
-    suffixed user items like ``ha-nextgen@file`` or ``strip@docker``
-    which are user-named resources that Traefik just suffixes with the
-    provider name. Use ``homeassistant.util.slugify`` to render
-    ``@``-containing names into HA-valid entity IDs.
 
-    :param items: list of dicts each with a ``name`` (or ``name_key``) field.
-    :param name_key: name of the key whose value carries the item's display
-        name. Defaults to ``"name"``.
-    :return: filtered list with internal items removed.
-    """
-    return [item for item in items if not _INTERNAL_ITEM_RE.search(str(item.get(name_key, "")))]
+def _is_success(status: int) -> bool:
+    return 200 <= status < 300
 
 
 class TraefikProxyApiClient:
-    """Async client for Traefik's HTTP API (v2.11+ / v3.x)."""
+    """Async client for Traefik's HTTP API (v2.11+ / v3.x).
+
+    Runs on a caller-provided session (Home Assistant's shared one). The
+    Authorization header is passed with each request and never stored on
+    the session.
+    """
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
         base_url: str,
-        api_key: str,
+        auth: Auth,
         *,
         verify_ssl: bool = True,
         request_timeout: float = 10.0,
@@ -100,26 +166,20 @@ class TraefikProxyApiClient:
     ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key
+        self._auth = auth
         self._verify_ssl = verify_ssl
         self._request_timeout = request_timeout
         self._page_size = DEFAULT_PAGE_SIZE if page_size is None else page_size
 
-    def _headers(self) -> dict[str, str]:
-        """Per-request auth header — never default header on session."""
-        if self._api_key:
-            return {"Authorization": f"Bearer {self._api_key}"}
-        return {}
-
-    async def _get_response(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
-        """GET ``path`` and return the JSON payload and the raw ``X-Next-Page`` header."""
+    async def _request(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
+        """GET ``path`` and return the decoded JSON payload and the raw ``X-Next-Page`` header."""
         url = f"{self._base_url}{path}"
         try:
             async with asyncio.timeout(self._request_timeout):
                 async with self._session.get(
                     url,
-                    headers=self._headers(),
                     params=params,
+                    headers=self._auth.header(),
                     ssl=self._verify_ssl,
                 ) as response:
                     _LOGGER.debug(
@@ -128,22 +188,21 @@ class TraefikProxyApiClient:
                         params.get("page") if params else None,
                         response.status,
                     )
-                    if response.status in (401, 403):
-                        raise TraefikProxyAuthError(f"Auth failed for {path}: {response.status}")
-                    response.raise_for_status()
-                    payload = await response.json(content_type=None)
-                    return payload, response.headers.get("X-Next-Page")
-        except aiohttp.ClientResponseError as err:
-            # raise_for_status already raised; re-classify for safety
-            if err.status in (401, 403):
-                raise TraefikProxyAuthError(str(err)) from err
-            raise TraefikProxyApiError(str(err)) from err
-        except (TimeoutError, aiohttp.ClientConnectorError, aiohttp.InvalidUrlClientError) as err:
-            raise TraefikProxyApiError(str(err)) from err
-
-    async def _get(self, path: str) -> Any:
-        payload, _ = await self._get_response(path)
-        return payload
+                    if not _is_success(response.status):
+                        raise _status_error(path, response.status)
+                    body = await response.read()
+                    next_page = response.headers.get("X-Next-Page")
+        except aiohttp.InvalidUrlClientError as err:
+            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
+        except (aiohttp.ClientError, TimeoutError, OSError) as err:
+            raise TraefikProxyConnectionError(path, type(err).__name__) from err
+        # Decoded outside the network block: a decode ValueError must never be
+        # mistaken for aiohttp's invalid-URL error (also a ValueError).
+        try:
+            payload = json.loads(body)
+        except ValueError as err:
+            raise TraefikProxyPayloadError(path, "invalid JSON") from err
+        return payload, next_page
 
     async def _get_paginated(self, path: str) -> list[Any]:
         """Collect every page of a Traefik list endpoint.
@@ -157,9 +216,9 @@ class TraefikProxyApiClient:
         items: list[Any] = []
         page = 1
         while True:
-            payload, next_page = await self._get_response(path, {"per_page": self._page_size, "page": page})
+            payload, next_page = await self._request(path, {"per_page": self._page_size, "page": page})
             if not isinstance(payload, list):
-                raise TraefikProxyPayloadError(f"{path}: unexpected payload shape")
+                raise TraefikProxyPayloadError(path, "unexpected payload shape")
             items.extend(payload)
             try:
                 announced = int(next_page) if next_page is not None else None
@@ -168,26 +227,26 @@ class TraefikProxyApiClient:
             if announced is None or announced <= page:
                 return items
             if announced > MAX_PAGES:
-                raise TraefikProxyPayloadError(f"{path}: more than {MAX_PAGES} pages")
+                raise TraefikProxyPayloadError(path, f"more than {MAX_PAGES} pages")
             page = announced
 
     async def async_get_version(self) -> TraefikVersion:
         """GET /api/version as a parsed model."""
         path = "/api/version"
-        payload = await self._get(path)
+        payload, _ = await self._request(path)
         try:
             return parse_version(payload)
         except (ValueError, TypeError, KeyError) as err:
-            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+            raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
 
     async def async_get_entrypoints(self) -> dict[str, Entrypoint]:
         """GET /api/entrypoints as parsed models keyed by name."""
         path = "/api/entrypoints"
-        payload = await self._get(path)
+        payload, _ = await self._request(path)
         try:
             return parse_entrypoints(payload)
         except (ValueError, TypeError, KeyError) as err:
-            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+            raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
 
     async def async_get_state(self) -> TraefikState:
         """Fetch HTTP routers, services and middlewares as parsed models.
@@ -203,128 +262,34 @@ class TraefikProxyApiClient:
             path = "/api/http/middlewares"
             middlewares = parse_middlewares(await self._get_paginated(path))
         except (ValueError, TypeError, KeyError) as err:
-            raise TraefikProxyPayloadError(f"{path}: unexpected payload shape") from err
+            raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
         return TraefikState(routers=routers, services=services, middlewares=middlewares)
 
-    # --- Read endpoints ---
-    async def get_version(self) -> dict[str, Any]:
-        """GET /api/version — returns {Version, Codename, StartDate}."""
-        result = await self._get("/api/version")
-        assert isinstance(result, dict)
-        return result
-
-    async def get_entrypoints(self) -> list[dict[str, Any]]:
-        """GET /api/entrypoints — list of configured TCP/UDP entrypoints."""
-        result = await self._get("/api/entrypoints")
-        assert isinstance(result, list)
-        return result
-
-    async def get_routers(self) -> list[dict[str, Any]]:
-        """GET /api/http/routers."""
-        result = await self._get("/api/http/routers")
-        assert isinstance(result, list)
-        return result
-
-    async def get_http_services(self) -> list[dict[str, Any]]:
-        """GET /api/http/services — list of HTTP service definitions."""
-        result = await self._get("/api/http/services")
-        assert isinstance(result, list)
-        return result
-
-    async def get_http_middlewares(self) -> list[dict[str, Any]]:
-        """GET /api/http/middlewares — list of HTTP middleware definitions."""
-        result = await self._get("/api/http/middlewares")
-        assert isinstance(result, list)
-        return result
-
-    async def get_overview(self) -> dict[str, Any]:
-        """GET /api/overview — used by config flow for auth probe."""
-        result = await self._get("/api/overview")
-        assert isinstance(result, dict)
-        return result
-
-    # --- Write endpoints ---
     async def reload_routers(self) -> None:
-        """POST /api/http/routers/refresh — ask Traefik to reload routers.
+        """POST /api/http/routers/refresh and return once Traefik answers 2xx.
 
-        Returns ``None`` on 2xx. Raises ``TraefikProxyAuthError`` on 401/403 and
-        ``TraefikProxyApiError`` on other non-2xx. Does NOT poll — the reload
-        service handler (plan 02-04) is responsible for verifying that the
-        reload actually completed (CONTEXT.md D-05/D-12).
-
-        PITFALLS #15 — Traefik returns 202 before the reload finishes; we do
-        not block here. The empty POST body requires an explicit
-        ``Content-Length: 0`` header — aiohttp would otherwise hang waiting
-        for the writer to flush.
+        Raises ``TraefikProxyAuthError`` on 401/403, ``TraefikProxyApiError``
+        on any other non-2xx status and ``TraefikProxyConnectionError`` on
+        network failures. Traefik answers before a reload completes, so the
+        caller verifies the effect itself. The empty body needs an explicit
+        ``Content-Length: 0`` header.
         """
-        url = f"{self._base_url}/api/http/routers/refresh"
+        path = _REFRESH_PATH
+        url = f"{self._base_url}{path}"
         try:
             async with asyncio.timeout(self._request_timeout):
                 async with self._session.post(
                     url,
-                    headers={**self._headers(), "Content-Length": "0"},
+                    headers={**self._auth.header(), "Content-Length": "0"},
                     ssl=self._verify_ssl,
                 ) as response:
-                    _LOGGER.debug("path=%s status=%s", "/api/http/routers/refresh", response.status)
-                    if response.status in (401, 403):
-                        raise TraefikProxyAuthError(f"Auth failed for /api/http/routers/refresh: {response.status}")
-                    response.raise_for_status()
-                    return None
-        except aiohttp.ClientResponseError as err:
-            if err.status in (401, 403):
-                raise TraefikProxyAuthError(str(err)) from err
-            raise TraefikProxyApiError(str(err)) from err
-        except (TimeoutError, aiohttp.ClientConnectorError, aiohttp.InvalidUrlClientError) as err:
-            raise TraefikProxyApiError(str(err)) from err
-
-    # --- Aggregated fetch ---
-    async def fetch_all(self) -> dict[str, Any]:
-        """Phase 2 parallel fetch: all six endpoints in one asyncio.gather.
-
-        Per CONTEXT.md D-07, partial-failure policy is: auth failures raise
-        immediately (the coordinator maps them to ConfigEntryAuthFailed), and
-        any other exception bubbles to the first non-auth error so the
-        coordinator surfaces a single ``UpdateFailed`` per cycle. Successful
-        sections are NOT returned on partial failure — the caller decides
-        whether to fall back to stale coordinator data (the DataUpdateCoordinator
-        default keeps last-known-good data).
-        """
-        version, entrypoints, http_routers, http_services, http_middlewares, overview = await asyncio.gather(
-            self.get_version(),
-            self.get_entrypoints(),
-            self.get_routers(),
-            self.get_http_services(),
-            self.get_http_middlewares(),
-            self.get_overview(),
-            return_exceptions=True,
-        )
-        # Auth failures always win — never swallow them (PITFALLS).
-        for result in (version, entrypoints, http_routers, http_services, http_middlewares, overview):
-            if isinstance(result, TraefikProxyAuthError):
-                raise result
-        # First non-auth exception wins (CONTEXT.md D-07).
-        first_exc = next(
-            (
-                r
-                for r in (
-                    version,
-                    entrypoints,
-                    http_routers,
-                    http_services,
-                    http_middlewares,
-                    overview,
-                )
-                if isinstance(r, BaseException)
-            ),
-            None,
-        )
-        if first_exc is not None:
-            raise first_exc
-        return {
-            "version": version,
-            "entrypoints": entrypoints,
-            "http_routers": http_routers,
-            "http_services": http_services,
-            "http_middlewares": http_middlewares,
-            "overview": overview,
-        }
+                    _LOGGER.debug("path=%s status=%s", path, response.status)
+                    status = response.status
+        except aiohttp.InvalidUrlClientError as err:
+            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
+        except (aiohttp.ClientError, TimeoutError, OSError) as err:
+            raise TraefikProxyConnectionError(path, type(err).__name__) from err
+        if status in (401, 403):
+            raise TraefikProxyAuthError(path, f"HTTP {status}", status=status)
+        if not _is_success(status):
+            raise TraefikProxyApiError(path, f"HTTP {status}", status=status)

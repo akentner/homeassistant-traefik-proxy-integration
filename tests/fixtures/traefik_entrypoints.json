@@ -1,4 +1,0 @@
-[
-  {"name": "websecure", "address": ":443", "transport": "tcp", "tls": {}},
-  {"name": "web", "address": ":80", "transport": "tcp"}
-]

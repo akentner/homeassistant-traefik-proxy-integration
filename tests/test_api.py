@@ -83,7 +83,13 @@ def test_auth_header_per_mode() -> None:
     assert api.Auth(mode=api.AuthMode.none).header() == {}
     assert api.Auth().header() == {}
     assert _auth("bearer").header() == {"Authorization": f"Bearer {TOKEN}"}
-    assert _auth("basic").header() == {"Authorization": aiohttp.BasicAuth(USERNAME, PASSWORD).encode()}
+    assert _auth("basic").header() == {"Authorization": f"Basic {_basic_token(USERNAME, PASSWORD)}"}
+
+
+def test_basic_header_encodes_utf8_credentials() -> None:
+    """Non-ASCII basic credentials are encoded as UTF-8 (RFC 7617)."""
+    auth = api.Auth(mode=api.AuthMode.basic, username="jürgen", password="pässwort")
+    assert auth.header() == {"Authorization": f"Basic {_basic_token('jürgen', 'pässwort')}"}
 
 
 def test_auth_mode_members() -> None:
@@ -347,7 +353,7 @@ async def test_reload_routers_success_sends_auth_and_empty_body(hass, aioclient_
     assert await _client(hass, _auth("basic")).reload_routers() is None
 
     method, url, _data, headers = aioclient_mock.mock_calls[0]
-    assert method == "post"
+    assert method.upper() == "POST"
     assert str(url) == f"{MOCK_URL}{REFRESH_PATH}"
     assert headers == {**_auth("basic").header(), "Content-Length": "0"}
 
