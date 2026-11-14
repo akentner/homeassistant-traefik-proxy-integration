@@ -79,41 +79,11 @@ async def async_setup_entry(
         ]
     )
 
-    # Stale entity cleanup (CONTEXT.md D-18, gatus binary_sensor.py:49-71).
-    # Routers that disappear from coordinator.data are removed from the
-    # entity registry on the next refresh cycle. Aggregate entities
-    # (``TraefikProxyAnyRouterFailingBinarySensor``) are NEVER deleted
-    # (CONTEXT.md D-19 — single instance per entry, category='diagnostics'
-    # so its unique_id prefix differs from ``http_router_`` and is skipped
-    # below).
-    registry = er.async_get(hass)
-
-    def _remove_stale_routers() -> None:
-        """Drop registry entries for routers no longer in coordinator.data.
-
-        Defensive: if the coordinator fetch failed, skip cleanup — we
-        don't want a transient outage to delete every entity (PITFALLS
-        "stale-state-on-network-blip").
-        """
-        if not coordinator.last_update_success:
-            return
-        current_routers = set(coordinator.data.routers)
-        prefix = f"{entry.entry_id}_http_router_"
-        for reg_entry in list(registry.entities.values()):
-            unique_id = reg_entry.unique_id
-            if not unique_id or not unique_id.startswith(prefix):
-                continue
-            router_name = unique_id.removeprefix(prefix)
-            if router_name and router_name not in current_routers:
-                _LOGGER.debug("Removing stale router entity: %s", reg_entry.entity_id)
-                registry.async_remove(reg_entry.entity_id)
-
-    entry.async_on_unload(coordinator.async_add_listener(_remove_stale_routers))
-
     # --- Cert expiry binary sensors (TLS-02) ---
     # The cert coordinator lives next to the main coordinator on the entry's
     # runtime data; setup always creates it before forwarding platforms.
     cert_coordinator: CertCoordinator = entry.runtime_data.cert_coordinator
+    registry = er.async_get(hass)
 
     def _create_pending_cert_binary_sensor_entities() -> None:
         """Materialise one expiring binary sensor per cached cert row.

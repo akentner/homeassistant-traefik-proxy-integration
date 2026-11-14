@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import socket
 import ssl
@@ -16,6 +17,9 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Ensure custom_components is importable from the project root
@@ -29,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # to the real production module rather than the testing_config stub
 # that ships with ``pytest_homeassistant_custom_component``.
 from custom_components.traefik_proxy import tls as _tls_module  # pre-import for in-fixture patching
+from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
 from custom_components.traefik_proxy.models import (
     TraefikSnapshot,
     TraefikState,
@@ -151,6 +156,56 @@ def stub_traefik_paginated(aioclient_mock: Any, *, version: str = "v3.7", base_u
                 json=load_fixture(version, f"pages/{page['file']}"),
                 headers={"X-Next-Page": next_page} if next_page is not None else None,
             )
+
+
+def rawdata_copy(version: str = "v3.7") -> dict[str, Any]:
+    """Return a deep copy of the capture's rawdata, safe to mutate."""
+    return copy.deepcopy(load_fixture(version, "rawdata.json"))
+
+
+def restub_traefik(aioclient_mock: Any, **kwargs: Any) -> None:
+    """Drop every registered mock and serve a Traefik again through ``stub_traefik``."""
+    aioclient_mock.clear_requests()
+    stub_traefik(aioclient_mock, **kwargs)
+
+
+def make_traefik_entry(*, options: dict[str, Any] | None = None, **kwargs: Any) -> MockConfigEntry:
+    """Build a Traefik config entry for ``MOCK_URL``; ``kwargs`` override MockConfigEntry fields."""
+    params: dict[str, Any] = {
+        "domain": DOMAIN,
+        "title": "Traefik",
+        "data": {CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+        "unique_id": "traefik.example.com",
+        "options": options or {},
+    }
+    params.update(kwargs)
+    return MockConfigEntry(**params)
+
+
+async def setup_traefik_entry(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    entry: MockConfigEntry | None = None,
+    *,
+    version: str = "v3.7",
+    rawdata: Any = None,
+) -> MockConfigEntry:
+    """Serve a capture, set up ``entry`` (a fresh one by default) and assert it loaded."""
+    stub_traefik(aioclient_mock, version=version, rawdata=rawdata)
+    if entry is None:
+        entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str:
+    """Return the entity_id registered for ``unique_id`` in ``domain``; fail when there is none."""
+    entity_id = er.async_get(hass).async_get_entity_id(domain, DOMAIN, unique_id)
+    assert entity_id is not None, f"no {domain} entity with unique_id {unique_id}"
+    return entity_id
 
 
 @pytest.fixture

@@ -16,6 +16,11 @@ DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = 15  # seconds (CONTEXT.md D-12)
 DEFAULT_NAME: Final = "Traefik Proxy"
 
+# Per-item entity states: the Traefik item status plus ``missing`` for an item
+# that vanished from the last successful snapshot. Order is the ENUM options order.
+STATE_MISSING: Final = "missing"
+ITEM_STATE_OPTIONS: Final = ("enabled", "warning", "error", "disabled", STATE_MISSING)
+
 # Clamps for Options Flow (Phase 2 — Plan 02-02 fills these in).
 # MIN_SCAN_INTERVAL/MAX_SCAN_INTERVAL bound the scan-interval knob
 # (CONTEXT.md D-09 — 15s lower bound keeps the API polite; 300s upper bound

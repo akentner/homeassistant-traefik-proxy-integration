@@ -1,9 +1,13 @@
-"""Base entity for the Traefik integration."""
+"""Base entities and device topology of the Traefik integration."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Final
+from abc import abstractmethod
+from datetime import datetime
+from enum import StrEnum
+from typing import Any, ClassVar, Final
 
+from homeassistant.core import callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
@@ -11,10 +15,110 @@ from .cert_coordinator import CertCoordinator
 from .const import DEFAULT_NAME, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
+from .entity_manager import KindSpec
 from .models import TraefikSnapshot
 
-if TYPE_CHECKING:
-    pass
+
+class TraefikDevice(StrEnum):
+    """Devices of one config entry; the values are the device translation keys."""
+
+    MAIN = "main"
+    ROUTERS = "routers"
+    SERVICES = "services"
+    CERTIFICATES = "certificates"
+
+
+def device_identifier(entry_id: str, device: TraefikDevice) -> tuple[str, str]:
+    """Return the device registry identifier of ``device`` for an entry."""
+    if device is TraefikDevice.MAIN:
+        return (DOMAIN, entry_id)
+    return (DOMAIN, f"{entry_id}_{device}")
+
+
+def traefik_device_info(entry: TraefikProxyConfigEntry, device: TraefikDevice) -> DeviceInfo:
+    """Return the DeviceInfo that attaches an entity to ``device``.
+
+    Identifiers only: the devices are registered (names, entry type, link to
+    the main device) before the platforms are set up.
+    """
+    return DeviceInfo(identifiers={device_identifier(entry.entry_id, device)})
+
+
+_UNWRITTEN: Final = object()
+
+
+class _TraefikEntityBase[CoordinatorT: DataUpdateCoordinator[Any]](CoordinatorEntity[CoordinatorT]):
+    """Common base: device attachment and write-on-change.
+
+    A coordinator update writes the state only when availability or the
+    entity's state token changed since the last write.
+    """
+
+    _attr_has_entity_name = True
+    _traefik_device: ClassVar[TraefikDevice] = TraefikDevice.MAIN
+
+    def __init__(self, coordinator: CoordinatorT, entry: TraefikProxyConfigEntry, unique_id: str) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = unique_id
+        self._attr_device_info = traefik_device_info(entry, self._traefik_device)
+        self._written_token: object = _UNWRITTEN
+
+    def _state_token(self) -> object:
+        """Return a value that changes whenever the written state would change."""
+        return (self.state, self.extra_state_attributes)
+
+    def _write_token(self) -> object:
+        return (self.available, self._state_token())
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._written_token = self._write_token()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        token = self._write_token()
+        if token == self._written_token:
+            return
+        self._written_token = token
+        self.async_write_ha_state()
+
+
+class TraefikEntity(_TraefikEntityBase[TraefikProxyCoordinator]):
+    """Entity that listens to the main Traefik coordinator."""
+
+    def __init__(self, entry: TraefikProxyConfigEntry, unique_id: str) -> None:
+        super().__init__(entry.runtime_data.coordinator, entry, unique_id)
+
+
+class TraefikItemEntity[ModelT](TraefikEntity):
+    """Entity for one Traefik item; holds only the item key.
+
+    The model is looked up in the latest snapshot on every update. An item
+    absent from the snapshot is missing since the time the entry's entity
+    manager recorded.
+    """
+
+    _spec: ClassVar[KindSpec]
+
+    def __init__(self, entry: TraefikProxyConfigEntry, key: str) -> None:
+        super().__init__(entry, self._spec.unique_id(entry.entry_id, key))
+        self._key = key
+        self._attr_name = key
+
+    @abstractmethod
+    def _model(self) -> ModelT | None:
+        """Return the current model of the item, or None when it is missing."""
+
+    def _missing_since(self) -> datetime | None:
+        return self._entry.runtime_data.entity_manager.missing_since(self._spec, self._key)
+
+    def _state_token(self) -> object:
+        return (self._model(), self._missing_since())
+
+    def _missing_attributes(self) -> dict[str, Any]:
+        since = self._missing_since()
+        return {"missing_since": since.isoformat() if since is not None else None}
 
 
 # Per-category model labels for the multi-device model (CONTEXT.md D-01).

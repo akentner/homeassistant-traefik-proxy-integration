@@ -29,6 +29,7 @@ from .const import (
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
+from .entity_manager import TraefikEntityManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -230,6 +231,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         client=client,
         coordinator=coordinator,
         cert_coordinator=cert_coordinator,
+        entity_manager=TraefikEntityManager(hass, entry),
     )
 
     await coordinator.async_config_entry_first_refresh()

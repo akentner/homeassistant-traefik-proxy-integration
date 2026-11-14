@@ -1,6 +1,8 @@
 """Sensor entities for the Traefik integration.
 
 Entity count per config entry (after `async_setup_entry` returns):
+- 1 `TraefikRouterSensor` per Traefik HTTP router (Routers device), managed by
+  the entry's entity manager
 - 1 `TraefikProxyEntrypointSensor` per Traefik entrypoint (HTTP Entrypoints device)
 - 1 `TraefikProxyServiceSensor` per Traefik HTTP service (HTTP Services device;
   Traefik-internal ``@internal`` services are not part of the snapshot)
@@ -16,11 +18,15 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import slugify
 
-from .entity import TraefikProxyCertEntity, TraefikProxyEntity
-from .models import Entrypoint, Service, StatusCounts
+from .const import ITEM_STATE_OPTIONS, STATE_MISSING
+from .entity import TraefikDevice, TraefikItemEntity, TraefikProxyCertEntity, TraefikProxyEntity
+from .entity_manager import ROUTERS
+from .models import Entrypoint, Router, Service, StatusCounts
 from .tls import CertError, CertInfo, is_error
 
 if TYPE_CHECKING:
@@ -32,9 +38,9 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: Any,
+    hass: HomeAssistant,
     entry: TraefikProxyConfigEntry,
-    async_add_entities: Any,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up Traefik sensor entities for a config entry.
 
@@ -43,6 +49,14 @@ async def async_setup_entry(
     """
     coordinator: TraefikProxyCoordinator = entry.runtime_data.coordinator
     snapshot = coordinator.data
+
+    entry.runtime_data.entity_manager.async_add_kind(
+        ROUTERS,
+        coordinator=coordinator,
+        keys=lambda: coordinator.data.routers,
+        factory=lambda key: TraefikRouterSensor(entry, key),
+        async_add_entities=async_add_entities,
+    )
 
     entrypoint_entities = [TraefikProxyEntrypointSensor(entry, coordinator, ep) for ep in snapshot.entrypoints.values()]
     service_entities = [TraefikProxyServiceSensor(entry, coordinator, svc) for svc in snapshot.services.values()]
@@ -54,7 +68,7 @@ async def async_setup_entry(
         TraefikProxyMiddlewaresCountSensor(entry),
     ]
 
-    async_add_entities(entrypoint_entities + service_entities + aggregate_entities)
+    async_add_entities([*entrypoint_entities, *service_entities, *aggregate_entities])
 
     # --- Cert timestamp sensors (TLS-01) ---
     # The cert coordinator lives next to the main coordinator on the entry's
@@ -181,6 +195,47 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(_remove_stale_entrypoints))
     entry.async_on_unload(coordinator.async_add_listener(_remove_stale_services))
+
+
+class TraefikRouterSensor(TraefikItemEntity[Router], SensorEntity):
+    """One ENUM sensor per Traefik HTTP router.
+
+    State = the router status, or ``missing`` while the router is absent
+    from the snapshot (attribute ``missing_since``).
+    """
+
+    _spec = ROUTERS
+    _traefik_device = TraefikDevice.ROUTERS
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_translation_key = "router"
+
+    def __init__(self, entry: TraefikProxyConfigEntry, key: str) -> None:
+        super().__init__(entry, key)
+        self._attr_options = list(ITEM_STATE_OPTIONS)
+
+    def _model(self) -> Router | None:
+        return self.coordinator.data.routers.get(self._key)
+
+    @property
+    def native_value(self) -> str:
+        """Return the router status, or ``missing``."""
+        router = self._model()
+        return STATE_MISSING if router is None else str(router.status)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        router = self._model()
+        if router is None:
+            return self._missing_attributes()
+        return {
+            "rule": router.rule,
+            "service": router.service,
+            "provider": router.provider,
+            "entry_points": list(router.entry_points),
+            "middlewares": list(router.middlewares),
+            "tls": router.tls,
+            "errors": list(router.errors),
+        }
 
 
 class TraefikProxyEntrypointSensor(TraefikProxyEntity, SensorEntity):
