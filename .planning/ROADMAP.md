@@ -400,7 +400,7 @@ redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
 **Depends on**: Phase 6
 **Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, DIAG-04
 **Audit items**: A-15 flow part, A-17, A-18, A-22, U-03, U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (§4.4 moot: services removed in Phase 5)
-**Carry-over (Phase 4 review, `04-REVIEW.md`)**: IN-01 (an http-to-https redirect drops the Authorization header and surfaces as `invalid_auth` / reauth instead of a clear "use https" error); IN-04 (a stored token the new `Auth` rejects fails setup instead of starting reauth). WR-03 (update-listener leak) is already covered by SC2.
+**Carry-over (Phase 4 review, `04-REVIEW.md`)**: IN-01 (an http-to-https redirect drops the Authorization header and surfaces as `invalid_auth` / reauth instead of a clear "use https" error); IN-04 (a stored token the new `Auth` rejects fails setup instead of starting reauth); IN-08 (a stored entry with credentials in the URL plus a token retries setup forever and only shows "/api/version: ValueError"; the basic-auth selector and migration must move URL userinfo into the credential fields or raise a repair telling the user what to fix); IN-09 (`InvalidUrl(url)` in `config_flow.py` keeps the URL including its userinfo password in the exception args; raise it without the URL). WR-03 (update-listener leak) is already covered by SC2.
 **Success Criteria** (what must be TRUE):
 
   1. The user step offers an auth selector (none / basic username+password /
