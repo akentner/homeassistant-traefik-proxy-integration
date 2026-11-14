@@ -32,6 +32,7 @@ from tests.conftest import (
 ROUTER = "file-ok@file"
 ROUTER_ATTRIBUTES = {"rule", "service", "provider", "entry_points", "middlewares", "tls", "errors"}
 DUPLICATE_ID_MESSAGE = "does not generate unique IDs"
+SUB_DEVICES = ("routers", "services", "certificates")
 
 
 def _router_entity_id(hass: HomeAssistant, entry: Any, key: str = ROUTER) -> str:
@@ -171,6 +172,81 @@ async def test_router_change_writes_only_that_router(hass, aioclient_mock, mock_
         state = hass.states.get(entity_id)
         assert state is not None
         assert state.last_reported == before[entity_id], entity_id
+
+
+def _entry_devices(hass: HomeAssistant, entry: Any) -> dict[tuple[str, str], dr.DeviceEntry]:
+    """Return the entry's devices keyed by their Traefik identifier."""
+    return {
+        identifier: device
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        for identifier in device.identifiers
+        if identifier[0] == DOMAIN
+    }
+
+
+@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
+async def test_router_sensor_on_routers_sub_device(hass, aioclient_mock, mock_tls_probe, caplog) -> None:  # type: ignore[no-untyped-def]
+    """Main device and sub-devices are registered, named and linked; router sensors sit on Routers."""
+    caplog.set_level(logging.WARNING)
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    devices = _entry_devices(hass, entry)
+    assert {(DOMAIN, entry.entry_id), *((DOMAIN, f"{entry.entry_id}_{sub}") for sub in SUB_DEVICES)} <= set(devices)
+    main = devices[(DOMAIN, entry.entry_id)]
+    routers = devices[(DOMAIN, f"{entry.entry_id}_routers")]
+    services = devices[(DOMAIN, f"{entry.entry_id}_services")]
+    certificates = devices[(DOMAIN, f"{entry.entry_id}_certificates")]
+
+    reg_entry = er.async_get(hass).async_get(_router_entity_id(hass, entry))
+    assert reg_entry is not None
+    assert reg_entry.device_id == routers.id
+    for sub in (routers, services, certificates):
+        assert sub.via_device_id == main.id
+    assert main.via_device_id is None
+    assert main.entry_type is dr.DeviceEntryType.SERVICE
+    assert main.manufacturer == "Traefik"
+    assert main.name == "Traefik (traefik.example.com)"
+    assert main.configuration_url == "https://traefik.example.com:8080/dashboard/"
+    assert main.sw_version == entry.runtime_data.coordinator.data.version.version
+    assert main.sw_version
+    assert routers.name == "Traefik routers (traefik.example.com)"
+    assert services.name == "Traefik services (traefik.example.com)"
+    assert certificates.name == "Traefik certificates (traefik.example.com)"
+    assert "via_device" not in caplog.text
+    assert "Detected that custom integration 'traefik_proxy'" not in caplog.text
+
+
+@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://user:pw@traefik.example.com:8080/", "https://traefik.example.com:8080/dashboard/"),
+        ("http://[::1]:8080", "http://[::1]:8080/dashboard/"),
+        ("https://h.example.com/traefik/?x=1#f", "https://h.example.com/traefik/dashboard/"),
+        ("HTTPS://H.example.com", "https://h.example.com/dashboard/"),
+        ("ftp://h.example.com", None),
+        ("https:///path", None),
+        ("https://h.example.com:99999", None),
+        ("not a url", None),
+    ],
+)
+def test_dashboard_url_variants(url: str, expected: str | None) -> None:
+    """The dashboard URL keeps scheme, host, port and path prefix; drops userinfo, query and fragment."""
+    from custom_components.traefik_proxy.entity import dashboard_url
+
+    assert dashboard_url(url) == expected
+
+
+@pytest.mark.xfail(strict=True, reason="RED: device registration not implemented yet")
+def test_entry_host_falls_back_to_title() -> None:
+    """The device host is the URL hostname, or the entry title when the URL has none."""
+    from custom_components.traefik_proxy.entity import entry_host
+
+    entry = MagicMock(title="Traefik", data={"url": "https://user:pw@traefik.example.com:8080"})
+    assert entry_host(entry) == "traefik.example.com"
+    entry.data = {"url": "http://[::1"}
+    assert entry_host(entry) == "Traefik"
+    entry.data = {"url": "no host"}
+    assert entry_host(entry) == "Traefik"
 
 
 class _FakeCoordinator:
