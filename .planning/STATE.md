@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 05
 current_phase_name: Entity model + lifecycle
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-11-14T21:23:50.570Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-11-14T21:30:41.910Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 05 execution started
-state_head: 7ba72dc20a2076c437ed338ffb9daab02b5915d6
+state_head: 5af7be126590928d10e721d1ddc7d45289030dd6
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 27
-  completed_plans: 23
+  completed_plans: 24
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 05 (Entity model + lifecycle) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 05 execution started
 
@@ -87,6 +87,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | Phase 04 P09 | 6min | 2 tasks | 5 files |
 | Phase 05 P01 | 12min | 2 tasks | 11 files |
 | Phase 05 P02 | 261min | 2 tasks | 10 files |
+| Phase 05 P04 | 5min | 1 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -152,6 +153,7 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-02: missing_since persisted per entry in a helpers.storage.Store (traefik_proxy.missing.<entry_id>); stored times of kinds not registered yet are carried through every write
 - [Phase 05]: 05-02: deadline check by async_track_time_interval every 5 min (cancel_on_shutdown); deadline inclusive (>= 24 h); removal lands within one interval
 - [Phase 05]: 05-02: future stored missing_since values are clamped to now at load; the Store is created in async_load
+- [Phase 05]: 05-04: per-item option read once per setup; off purges router/service registry entries and Routers/Services sub-devices without grace (change applies on next reload until Phase 7)
 
 ### Pending Todos
 
@@ -193,7 +195,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T09:28:05.150Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-11-14T21:30:41.824Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
