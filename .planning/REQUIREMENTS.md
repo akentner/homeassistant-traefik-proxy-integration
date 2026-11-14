@@ -196,7 +196,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       (A-15 client part, A-16)
 - [ ] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
       dataclass holding client, coordinator and cert coordinator. (A-11)
-- [ ] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
+- [x] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
       `dict[name, Model]` per kind and aggregates (counts per status, problem
       lists) computed once per cycle; `always_update=False`. (P-02)
 - [ ] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
@@ -441,7 +441,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-03 | Phase 4 | Gaps Found |
 | DATA-04 | Phase 4 | Gaps Found |
 | DATA-05 | Phase 4 | Gaps Found |
-| DATA-06 | Phase 4 | Gaps Found |
+| DATA-06 | Phase 4 | Complete |
 | DATA-07 | Phase 4 | Gaps Found |
 | ENT-01 | Phase 5 | Pending |
 | ENT-02 | Phase 5 | Pending |

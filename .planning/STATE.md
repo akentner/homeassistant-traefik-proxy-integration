@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-11-14T02:04:57.694Z"
+stopped_at: Completed 04-07-PLAN.md
+last_updated: "2026-11-14T02:14:55.250Z"
 last_activity: 2026-11-14
-last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: a940fbe27e46755413f5b1aaebecf670d4a83c60
+last_activity_desc: Phase 04 execution started
+state_head: 90af13a674d61b13304f93befe4bb1bba69ac700
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 20
-  completed_plans: 17
+  completed_plans: 18
 milestone_name: milestone
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 4 — Data layer (correct + lean). Branch `feat/marketplace-polish`; Phases 4–8 replace the old Phase 4 (see ROADMAP.md).
+**Current focus:** Phase 04 — Data layer (correct + lean)
 
 ## Current Position
 
-Phase: 04 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: 6 of 6
+Phase: 04 (Data layer (correct + lean)) — EXECUTING
+Plan: 8 of 9
 Status: Ready to execute
-Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
+Last activity: 2026-11-14 — Phase 04 execution started
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
 
@@ -81,6 +81,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P04 | 9min | 3 tasks | 14 files |
 | Phase 04 P05 | 8min | 2 tasks | 14 files |
 | Phase 04 P06 | 7 min | 3 tasks | 10 files |
+| Phase 04 P07 | 6 min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -135,6 +136,7 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-06: One GET /api/rawdata per steady cycle; a rawdata 404 switches the client to the paginated list endpoints for its lifetime; 401/500/shape errors do not fall back
 - [Phase 04]: 04-06: /api/version re-checked hourly and after a failed cycle; /api/entrypoints only when version or start date changed; stored version replaced only after the entrypoint fetch succeeded
 - [Phase 04]: 04-06: A failing version re-check fails the whole cycle with the D-16 mapping (auth -> reauth, else UpdateFailed keeping the previous snapshot)
+- [Phase 04]: 04-07: cert entities bind to the cert coordinator via TraefikProxyCertEntity(_TraefikProxyBaseEntity[CertCoordinator]); availability depends only on the cert cycle; sw_version from the main snapshot
 
 ### Pending Todos
 
@@ -176,7 +178,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T01:16:51.351Z
-Stopped at: Completed 04-06-PLAN.md
+Last session: 2026-11-14T02:14:55.195Z
+Stopped at: Completed 04-07-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
