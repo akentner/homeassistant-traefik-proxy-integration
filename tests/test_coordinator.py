@@ -7,6 +7,7 @@ hass.config_entries.async_setup (the proper HA entry machinery).
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
@@ -92,6 +93,26 @@ async def test_network_failure_triggers_setup_retry(hass, aioclient_mock) -> Non
     assert result is False
     # SETUP_RETRY is what HA shows when ConfigEntryNotReady is raised.
     assert entry.state is ConfigEntryState.SETUP_RETRY
+
+
+async def test_request_construction_error_retries_setup_without_traceback(hass, aioclient_mock, caplog) -> None:
+    """aiohttp refusing to build the request => invalid-URL error => SETUP_RETRY, no traceback logged."""
+    aioclient_mock.get(
+        f"{MOCK_URL}/api/version",
+        exc=ValueError("Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"),
+    )
+
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert result is False
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert "Unexpected error fetching" not in caplog.text
+    # HA itself logs ConfigEntryNotReady as a DEBUG "Full exception" record
+    # with exc_info; nothing above DEBUG may carry a traceback.
+    assert [record for record in caplog.records if record.exc_info and record.levelno > logging.DEBUG] == []
 
 
 async def test_5xx_triggers_setup_retry(hass, aioclient_mock) -> None:

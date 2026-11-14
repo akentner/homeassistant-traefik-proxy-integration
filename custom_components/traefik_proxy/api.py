@@ -127,7 +127,7 @@ class TraefikProxyConnectionError(TraefikProxyApiError):
 
 
 class TraefikProxyInvalidUrlError(TraefikProxyConnectionError):
-    """aiohttp rejected the configured URL."""
+    """aiohttp rejected the configured URL or refused to build the request for it."""
 
 
 class TraefikProxyPayloadError(TraefikProxyApiError):
@@ -201,6 +201,10 @@ class TraefikProxyApiClient:
             raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
         except (aiohttp.ClientError, TimeoutError, OSError) as err:
             raise TraefikProxyConnectionError(path, type(err).__name__) from err
+        except ValueError as err:
+            # aiohttp refused to build the request, e.g. URL credentials
+            # combined with an Authorization header.
+            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
         # Decoded outside the network block: a decode ValueError must never be
         # mistaken for aiohttp's invalid-URL error (also a ValueError).
         try:
@@ -311,6 +315,10 @@ class TraefikProxyApiClient:
             raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
         except (aiohttp.ClientError, TimeoutError, OSError) as err:
             raise TraefikProxyConnectionError(path, type(err).__name__) from err
+        except ValueError as err:
+            # aiohttp refused to build the request, e.g. URL credentials
+            # combined with an Authorization header.
+            raise TraefikProxyInvalidUrlError(path, type(err).__name__) from err
         if status in (401, 403):
             raise TraefikProxyAuthError(path, f"HTTP {status}", status=status)
         if not _is_success(status):

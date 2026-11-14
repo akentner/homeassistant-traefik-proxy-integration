@@ -263,6 +263,30 @@ async def test_userinfo_url_with_bearer_token_raises_invalid_url_error() -> None
             assert "192.0.2.1" not in str(err.value)
 
 
+CONSTRUCTION_ERROR = "Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "call"),
+    [
+        pytest.param("get", VERSION_PATH, "async_get_version", id="read-path"),
+        pytest.param("post", REFRESH_PATH, "reload_routers", id="reload_routers"),
+    ],
+)
+async def test_request_construction_value_error_maps_to_invalid_url(
+    hass, aioclient_mock, method: str, path: str, call: str
+) -> None:
+    """A ValueError raised while aiohttp builds the request maps to the invalid-URL error."""
+    getattr(aioclient_mock, method)(f"{MOCK_URL}{path}", exc=ValueError(CONSTRUCTION_ERROR))
+
+    with pytest.raises(api.TraefikProxyInvalidUrlError) as err:
+        await getattr(_client(hass, _auth("bearer")), call)()
+
+    assert isinstance(err.value, api.TraefikProxyConnectionError)
+    assert isinstance(err.value, TraefikProxyApiError)
+    assert str(err.value) == f"{path}: ValueError"
+
+
 def test_taxonomy_hierarchy() -> None:
     """Every client error is a TraefikProxyApiError; invalid URL is a connection error."""
     for name in (
@@ -305,6 +329,10 @@ _ERROR_SCENARIOS = [
     pytest.param({"status": 500}, id="500"),
     pytest.param({"exc": aiohttp.ServerDisconnectedError()}, id="connection"),
     pytest.param({"exc": aiohttp.InvalidUrlClientError(USERINFO_URL)}, id="invalid-url"),
+    pytest.param(
+        {"exc": ValueError("Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL")},
+        id="request-construction",
+    ),
     pytest.param({"text": "not json"}, id="invalid-json"),
     pytest.param({"json": ["unexpected"]}, id="payload-shape"),
 ]
