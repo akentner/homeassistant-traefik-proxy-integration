@@ -14,8 +14,8 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import PERCENTAGE, EntityCategory
 
 from custom_components.traefik_proxy.const import DOMAIN, ITEM_STATE_OPTIONS, STATE_MISSING
 from custom_components.traefik_proxy.models import TraefikSnapshot
@@ -388,3 +388,146 @@ def test_entrypoint_sensor_missing_and_latest_snapshot() -> None:
     entry.runtime_data.entity_manager.missing_since.return_value = MISSING_SINCE
     assert entity.native_value == STATE_MISSING
     assert entity.extra_state_attributes == {"missing_since": MISSING_SINCE.isoformat()}
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic snapshot sensors: counts, version, start time, healthy ratio
+# ---------------------------------------------------------------------------
+
+SNAPSHOT_KEYS = ("routers_count", "services_count", "middlewares_count", "version", "start_time", "healthy_ratio")
+SNAPSHOT_UNIQUE_IDS = {
+    "routers_count": "test-entry_overview_routers_count",
+    "services_count": "test-entry_overview_services_count",
+    "middlewares_count": "test-entry_overview_middlewares_count",
+    "version": "test-entry_version",
+    "start_time": "test-entry_start_time",
+    "healthy_ratio": "test-entry_healthy_ratio",
+}
+COUNT_ATTRIBUTES = {"enabled", "warning", "error", "disabled"}
+
+
+def _snapshot_sensor(key: str, snapshot: TraefikSnapshot) -> tuple[Any, MagicMock]:
+    from custom_components.traefik_proxy.sensor import SNAPSHOT_SENSORS, TraefikSnapshotSensor
+
+    entry, coord = _entry_with_snapshot(snapshot)
+    description = next(d for d in SNAPSHOT_SENSORS if d.key == key)
+    return TraefikSnapshotSensor(entry, description), coord
+
+
+@pytest.mark.xfail(strict=True, reason="RED: SNAPSHOT_SENSORS not implemented yet")
+def test_snapshot_descriptions() -> None:
+    """Six diagnostic descriptions; only healthy_ratio is disabled by default."""
+    from custom_components.traefik_proxy import sensor
+
+    descriptions = {d.key: d for d in sensor.SNAPSHOT_SENSORS}
+    assert tuple(descriptions) == SNAPSHOT_KEYS
+    for key, description in descriptions.items():
+        assert description.translation_key == key
+        assert description.entity_category is EntityCategory.DIAGNOSTIC, key
+        assert description.entity_registry_enabled_default is (key != "healthy_ratio"), key
+    for key in ("routers_count", "services_count", "middlewares_count", "healthy_ratio"):
+        assert descriptions[key].state_class is SensorStateClass.MEASUREMENT, key
+    assert descriptions["start_time"].device_class is SensorDeviceClass.TIMESTAMP
+    assert descriptions["healthy_ratio"].native_unit_of_measurement == PERCENTAGE
+    assert sensor.PARALLEL_UPDATES == 0
+
+
+@pytest.mark.xfail(strict=True, reason="RED: TraefikSnapshotSensor not implemented yet")
+@pytest.mark.parametrize("key", SNAPSHOT_KEYS)
+def test_snapshot_sensor_unique_id_and_main_device(key: str) -> None:
+    """Count unique_ids are kept; all six sit on the main device without an explicit entity_id."""
+    entity, _coord = _snapshot_sensor(key, make_snapshot())
+    assert entity.unique_id == SNAPSHOT_UNIQUE_IDS[key]
+    assert entity.device_info == {"identifiers": {(DOMAIN, "test-entry")}}
+    assert entity.entity_id is None
+    assert entity.translation_key == key
+
+
+@pytest.mark.xfail(strict=True, reason="RED: TraefikSnapshotSensor not implemented yet")
+@pytest.mark.parametrize("version", FIXTURE_VERSIONS)
+def test_count_sensors_from_capture_canonical_attributes(version: str) -> None:
+    """Counts of the real captures with exactly enabled/warning/error/disabled as attributes."""
+    snapshot = snapshot_from_fixture(version)
+    expected = {
+        "routers_count": (128, {"enabled": 125, "warning": 1, "error": 2, "disabled": 0}),
+        "services_count": (4, {"enabled": 4, "warning": 0, "error": 0, "disabled": 0}),
+        "middlewares_count": (2, {"enabled": 1, "warning": 0, "error": 1, "disabled": 0}),
+    }
+    for key, (total, attrs) in expected.items():
+        entity, _coord = _snapshot_sensor(key, snapshot)
+        assert entity.native_value == total, key
+        assert entity.extra_state_attributes == attrs, key
+
+
+@pytest.mark.xfail(strict=True, reason="RED: TraefikSnapshotSensor not implemented yet")
+def test_count_sensors_exclude_internal_items_and_follow_snapshot() -> None:
+    """Internal items are not counted; the counts follow every new snapshot."""
+    entity, coord = _snapshot_sensor(
+        "routers_count", make_snapshot(routers=[{"name": "user-router@file"}, {"name": "api@internal"}])
+    )
+    assert entity.native_value == 1
+    coord.data = make_snapshot(
+        routers=[
+            *_routers("enabled", "enabled", "warning", "disabled"),
+            {"name": "err@file", "status": "disabled", "error": ["the service does not exist"]},
+        ]
+    )
+    assert entity.native_value == 5
+    assert entity.extra_state_attributes == {"enabled": 2, "warning": 1, "error": 1, "disabled": 1}
+
+    services, _ = _snapshot_sensor(
+        "services_count", make_snapshot(services=[{"name": "a@file"}, {"name": "b@file"}, {"name": "api@internal"}])
+    )
+    middlewares, _ = _snapshot_sensor(
+        "middlewares_count",
+        make_snapshot(
+            middlewares=[{"name": "x@file", "status": "enabled"}, {"name": "s@internal", "status": "enabled"}]
+        ),
+    )
+    assert (services.native_value, middlewares.native_value) == (2, 1)
+
+
+@pytest.mark.xfail(strict=True, reason="RED: TraefikSnapshotSensor not implemented yet")
+def test_empty_traefik_reads_zero_counts_and_full_ratio() -> None:
+    """No items: every count is 0 with zero attributes, the healthy ratio is 100.0."""
+    for key in ("routers_count", "services_count", "middlewares_count"):
+        entity, _coord = _snapshot_sensor(key, make_snapshot())
+        assert entity.native_value == 0, key
+        assert entity.extra_state_attributes == dict.fromkeys(COUNT_ATTRIBUTES, 0), key
+    ratio, _coord = _snapshot_sensor("healthy_ratio", make_snapshot())
+    assert ratio.native_value == 100.0
+
+
+@pytest.mark.xfail(strict=True, reason="RED: TraefikSnapshotSensor not implemented yet")
+@pytest.mark.parametrize(("version", "expected"), [("v2.11", "2.11.63"), ("v3.7", "3.7.19")])
+def test_version_and_start_time_from_capture(version: str, expected: str) -> None:
+    """version reads the Traefik version with its codename; start_time is the timezone-aware start date."""
+    snapshot = snapshot_from_fixture(version)
+    entity, _coord = _snapshot_sensor("version", snapshot)
+    assert entity.native_value == expected
+    assert entity.extra_state_attributes == {"codename": snapshot.version.codename}
+    start, _coord = _snapshot_sensor("start_time", snapshot)
+    assert start.native_value == snapshot.version.start_date
+    assert start.native_value.tzinfo is not None
+    assert start.extra_state_attributes is None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: healthy_ratio not implemented yet")
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        ((), 100.0),
+        (("disabled", "disabled"), 100.0),
+        (("enabled", "enabled", "warning", "error", *("disabled",) * 5), 50.0),
+        (("enabled", "warning", "error"), 33.3),
+        (("enabled",), 100.0),
+    ],
+)
+def test_healthy_ratio(statuses: tuple[str, ...], expected: float) -> None:
+    """enabled / (enabled + warning + error) in percent, one decimal; 100.0 without non-disabled routers."""
+    from custom_components.traefik_proxy.sensor import healthy_ratio
+
+    snapshot = make_snapshot(routers=_routers(*statuses))
+    assert healthy_ratio(snapshot.router_counts) == expected
+    entity, _coord = _snapshot_sensor("healthy_ratio", snapshot)
+    assert entity.native_value == expected

@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN, ITEM_STATE_OPTIONS
@@ -192,3 +193,52 @@ async def test_problem_aggregates_enabled_and_on(hass, loaded: TraefikSnapshot) 
     assert "broken-missing-service@file" in loaded.router_problems
     assert loaded.routers["broken-missing-service@file"].status is Status.error
     assert "lb-mixed@file" in loaded.service_problems
+
+
+COUNT_ATTRIBUTES = {"enabled", "warning", "error", "disabled"}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: snapshot sensors not implemented yet")
+async def test_snapshot_sensors(hass, loaded: TraefikSnapshot) -> None:
+    """Counts, version and start time are diagnostic and enabled; healthy_ratio is diagnostic and disabled."""
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    registry = er.async_get(hass)
+    main_device = _device_id(hass, entry.entry_id, entry.entry_id)
+
+    for suffix, counts in (
+        ("overview_routers_count", loaded.router_counts),
+        ("overview_services_count", loaded.service_counts),
+        ("overview_middlewares_count", loaded.middleware_counts),
+    ):
+        state = hass.states.get(entity_id_for(hass, "sensor", f"{entry.entry_id}_{suffix}"))
+        assert state is not None, suffix
+        assert int(state.state) == counts.total, suffix
+        assert set(state.attributes) - {"state_class", "friendly_name"} == COUNT_ATTRIBUTES, suffix
+        assert state.attributes["enabled"] == counts.enabled, suffix
+        assert state.attributes["error"] == counts.error, suffix
+
+    version = hass.states.get(entity_id_for(hass, "sensor", f"{entry.entry_id}_version"))
+    assert version is not None
+    assert version.state == loaded.version.version
+    assert version.attributes["codename"] == loaded.version.codename
+    start = hass.states.get(entity_id_for(hass, "sensor", f"{entry.entry_id}_start_time"))
+    assert start is not None
+    assert dt_util.parse_datetime(start.state) == loaded.version.start_date
+
+    for suffix in (
+        "overview_routers_count",
+        "overview_services_count",
+        "overview_middlewares_count",
+        "version",
+        "start_time",
+    ):
+        reg_entry = registry.async_get(entity_id_for(hass, "sensor", f"{entry.entry_id}_{suffix}"))
+        assert reg_entry is not None, suffix
+        assert reg_entry.entity_category is EntityCategory.DIAGNOSTIC, suffix
+        assert reg_entry.disabled_by is None, suffix
+        assert reg_entry.device_id == main_device, suffix
+    ratio = registry.async_get(entity_id_for(hass, "sensor", f"{entry.entry_id}_healthy_ratio"))
+    assert ratio is not None
+    assert ratio.entity_category is EntityCategory.DIAGNOSTIC
+    assert ratio.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert ratio.device_id == main_device
