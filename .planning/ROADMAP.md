@@ -298,6 +298,7 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
 **Depends on**: Phase 4
 **Requirements**: ENT-01, ENT-02, ENT-03, ENT-04, ENT-05, ENT-06, ENT-07, ENT-08, ENT-09, ENT-10
 **Audit items**: A-01..A-04, A-07..A-09, A-13, A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04..U-08, U-15, S-06, S-08
+**Carry-over (Phase 4 review, `04-REVIEW.md`)**: WR-04 (a paginated read can silently drop items that move between pages; the stale-entity cleanup must then not delete their registry entries, so the 24 h grace period has to cover "missing because of a short read"); WR-05 (every cert-coordinator notification re-adds all cert entities and HA logs ERROR "does not generate unique IDs" per host and platform; the entity manager must add only new unique_ids). The CR-01 gap fix in Phase 4 binds the cert entities to the cert coordinator but leaves the re-add listeners in place.
 **Success Criteria** (what must be TRUE):
 
   1. In an integration test, changing a router's status `enabled → error`
@@ -390,6 +391,7 @@ redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
 **Depends on**: Phase 6
 **Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, DIAG-04
 **Audit items**: A-15 flow part, A-17, A-18, A-22, U-03, U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (§4.4 moot: services removed in Phase 5)
+**Carry-over (Phase 4 review, `04-REVIEW.md`)**: IN-01 (an http-to-https redirect drops the Authorization header and surfaces as `invalid_auth` / reauth instead of a clear "use https" error); IN-04 (a stored token the new `Auth` rejects fails setup instead of starting reauth). WR-03 (update-listener leak) is already covered by SC2.
 **Success Criteria** (what must be TRUE):
 
   1. The user step offers an auth selector (none / basic username+password /
@@ -433,6 +435,7 @@ tag and catalog PR themselves remain the user's action.
 **Depends on**: Phase 7
 **Requirements**: REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, DIST-04, DOCS-02, DOCS-04
 **Audit items**: A-19, B-01..B-06, H-01..H-10, H-12; research §2, §3, §6 Q1/Q7/Q8
+**Carry-over (Phase 4 review)**: `pyproject.toml` `addopts` measures `--cov=custom_components.traefik`, a package that no longer exists; switch to `--cov=custom_components.traefik_proxy` and gate CI on it. Clear `.planning/phases/04-data-layer-correct-lean/deferred-items.md` (SyntaxWarning from the non-raw docstring in `tests/test_binary_sensor.py:35`) as part of the docstring sweep.
 **Success Criteria** (what must be TRUE):
 
   1. `manifest.json` declares `"categories": ["computers_network.monitoring"]`

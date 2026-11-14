@@ -21,11 +21,11 @@ findings:
     title: "Update listener leaks across reloads; reconfigure plus update listener breaks in HA 2026.12.0"
   - id: WR-04
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "Paginated reads can silently drop items, and the stale-entity cleanup then deletes their registry entries"
   - id: WR-05
     severity: warning
-    disposition: open
+    disposition: deferred
     title: "Every cert cycle and options save logs ERROR \"does not generate unique IDs\" per host and platform"
   - id: WR-06
     severity: warning
@@ -41,7 +41,7 @@ findings:
     title: "Impossible-state guard: `isinstance(match, str)` on single-group `findall` results"
   - id: IN-01
     severity: info
-    disposition: open
+    disposition: deferred
     title: "Redirects: http-to-https redirects drop the token and surface as `invalid_auth` / reauth (known open question, Phase 7/8)"
   - id: IN-02
     severity: info
@@ -53,7 +53,7 @@ findings:
     title: "A quick Traefik restart is detected up to 1 h late; a failing `/api/version` takes down the whole cycle"
   - id: IN-04
     severity: info
-    disposition: open
+    disposition: deferred
     title: "A stored token the new `Auth` rejects fails setup instead of starting reauth"
   - id: IN-05
     severity: info
@@ -67,7 +67,7 @@ findings:
     severity: info
     disposition: open
     title: "Dead `TYPE_CHECKING` block; sequential paginated reads contradict the stated constraint"
-open: 16
+open: 12
 total: 16
 recorded: 2026-11-14T01:26:55.869Z
 ---
@@ -80,15 +80,15 @@ recorded: 2026-11-14T01:26:55.869Z
 | WR-01 | warning | open | - |
 | WR-02 | warning | open | - |
 | WR-03 | warning | open | - |
-| WR-04 | warning | open | - |
-| WR-05 | warning | open | - |
+| WR-04 | warning | deferred | Phase 5 (M28): entity manager with grace period |
+| WR-05 | warning | deferred | Phase 5 (M28): entity manager adds only new unique_ids |
 | WR-06 | warning | open | - |
 | WR-07 | warning | open | - |
 | WR-08 | warning | open | - |
-| IN-01 | info | open | - |
+| IN-01 | info | deferred | Phase 7 (M28): config flow / redirect handling |
 | IN-02 | info | open | - |
 | IN-03 | info | open | - |
-| IN-04 | info | open | - |
+| IN-04 | info | deferred | Phase 7 (M28): rejected stored token starts reauth |
 | IN-05 | info | open | - |
 | IN-06 | info | open | - |
 | IN-07 | info | open | - |
