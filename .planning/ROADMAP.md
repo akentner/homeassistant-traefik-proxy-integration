@@ -268,7 +268,7 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
      do not fire when two consecutive snapshots are equal; the full test suite,
      `ruff` and `mypy --strict` are green and the existing entity set still
      reports correct states on both fixture generations.
-**Plans**: 7/9 plans executed (6 executed in 5 waves; 3 gap-closure plans in 2 waves)
+**Plans**: 8/9 plans executed (6 executed in 5 waves; 3 gap-closure plans in 2 waves)
 
 Plans:
 **Wave 1**
@@ -291,7 +291,7 @@ Plans:
 
 **Gap wave 1**
 - [x] 04-07-PLAN.md — CR-01: cert entities bound to the cert coordinator; full-setup HA-state tests for cert cycle, threshold, options and availability (DATA-06, SC5)
-- [ ] 04-08-PLAN.md — WR-02: aiohttp request-construction `ValueError` mapped to `TraefikProxyInvalidUrlError`; userinfo URLs rejected in the config flows (DATA-04)
+- [x] 04-08-PLAN.md — WR-02: aiohttp request-construction `ValueError` mapped to `TraefikProxyInvalidUrlError`; userinfo URLs rejected in the config flows (DATA-04)
 
 **Gap wave 2** *(blocked on 04-08: shares `api.py`)*
 - [ ] 04-09-PLAN.md — WR-01 / M27: paginated fallback revocable on the hourly version re-check, at most one extra rawdata request per hour; D-07 amended (DATA-02)
@@ -492,7 +492,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 1. Foundation | 4/4 | Complete    | 2026-07-05 |
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
-| 4. Data layer (correct + lean) | 7/9 | In Progress | - |
+| 4. Data layer (correct + lean) | 8/9 | In Progress | - |
 | 5. Entity model + lifecycle | 0/TBD | Not started | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |

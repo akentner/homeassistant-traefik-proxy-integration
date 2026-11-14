@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 04
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-07-PLAN.md
-last_updated: "2026-11-14T02:14:55.250Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-11-14T02:21:05.828Z"
 last_activity: 2026-11-14
 last_activity_desc: Phase 04 execution started
-state_head: 90af13a674d61b13304f93befe4bb1bba69ac700
+state_head: 73986d3d2b8090421aa493822840d30733a64faa
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 20
-  completed_plans: 18
+  completed_plans: 19
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 04 (Data layer (correct + lean)) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 Last activity: 2026-11-14 — Phase 04 execution started
 
@@ -82,6 +82,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P05 | 8min | 2 tasks | 14 files |
 | Phase 04 P06 | 7 min | 3 tasks | 10 files |
 | Phase 04 P07 | 6 min | 2 tasks | 6 files |
+| Phase 04 P08 | 7min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -137,6 +138,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-06: /api/version re-checked hourly and after a failed cycle; /api/entrypoints only when version or start date changed; stored version replaced only after the entrypoint fetch succeeded
 - [Phase 04]: 04-06: A failing version re-check fails the whole cycle with the D-16 mapping (auth -> reauth, else UpdateFailed keeping the previous snapshot)
 - [Phase 04]: 04-07: cert entities bind to the cert coordinator via TraefikProxyCertEntity(_TraefikProxyBaseEntity[CertCoordinator]); availability depends only on the cert cycle; sw_version from the main snapshot
+- [Phase 04]: 04-08: aiohttp request-construction ValueError maps to TraefikProxyInvalidUrlError (setup retries, no traceback)
+- [Phase 04]: 04-08: URL userinfo rejected in user/reconfigure via strict allow_userinfo=False default; reauth_confirm and YAML import opt out (W19)
 
 ### Pending Todos
 
@@ -178,7 +181,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T02:14:55.195Z
-Stopped at: Completed 04-07-PLAN.md
+Last session: 2026-11-14T02:21:05.770Z
+Stopped at: Completed 04-08-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
