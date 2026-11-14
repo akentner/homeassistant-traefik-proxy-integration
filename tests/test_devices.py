@@ -11,15 +11,15 @@ import logging
 from typing import Any
 
 import pytest
-from homeassistant.config_entries import ConfigEntryDisabler
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.traefik_proxy.const import DOMAIN
+from custom_components.traefik_proxy.const import CONF_PER_ITEM_ENTITIES, DOMAIN
 from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
-from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, ENTRYPOINTS, SERVICES
+from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, ENTRYPOINTS, ROUTERS, SERVICES
 from tests.conftest import load_fixture, make_traefik_entry, rawdata_copy, restub_traefik, setup_traefik_entry
 
 pytestmark = pytest.mark.usefixtures("mock_tls_probe")
@@ -254,3 +254,34 @@ async def test_sub_devices_linked_without_deprecation(
         assert "via_device" not in message, message
         assert "report_usage" not in message, message
         assert "Detected that custom integration 'traefik_proxy'" not in message, message
+
+
+@pytest.mark.xfail(strict=True, reason="RED: per-item off removes sub-devices without a reference check")
+@pytest.mark.parametrize("disabled_by", [None, er.RegistryEntryDisabler.USER], ids=["enabled", "user-disabled"])
+async def test_per_item_off_keeps_referenced_sub_device(
+    hass: HomeAssistant, aioclient_mock: Any, disabled_by: er.RegistryEntryDisabler | None
+) -> None:
+    """With per-item entities off, a sub-device another integration's entity uses is kept; an unused one is removed."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(entry_id=ENTRY_ID, minor_version=2))
+    devices = _devices(hass, ENTRY_ID)
+    routers = devices[device_identifier(ENTRY_ID, TraefikDevice.ROUTERS)]
+    assert device_identifier(ENTRY_ID, TraefikDevice.SERVICES) in devices
+    registry = er.async_get(hass)
+    foreign = registry.async_get_or_create(
+        "sensor", "derivative", "foreign-helper", device_id=routers.id, disabled_by=disabled_by
+    )
+
+    hass.config_entries.async_update_entry(entry, options={CONF_PER_ITEM_ENTITIES: False})
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    devices = _devices(hass, ENTRY_ID)
+    assert devices[device_identifier(ENTRY_ID, TraefikDevice.ROUTERS)].id == routers.id
+    assert device_identifier(ENTRY_ID, TraefikDevice.SERVICES) not in devices
+    foreign_entry = registry.async_get(foreign.entity_id)
+    assert foreign_entry is not None
+    assert foreign_entry.device_id == routers.id
+    assert foreign_entry.disabled_by is disabled_by
+    prefixes = (f"{ENTRY_ID}_{ROUTERS.prefix}", f"{ENTRY_ID}_{SERVICES.prefix}")
+    assert not [e for e in er.async_entries_for_config_entry(registry, ENTRY_ID) if e.unique_id.startswith(prefixes)]
