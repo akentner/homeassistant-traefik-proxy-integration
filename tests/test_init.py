@@ -1,278 +1,137 @@
-"""Tests for the Traefik integration __init__.py service registration + reload handler.
+"""Tests for the package module and the "Refresh now" button.
 
 Covers:
-- module-level async_setup registers traefik.reload_routers
-- service handler returns verified=True when router set changes
-- service handler returns verified=False after budget exhaustion
-- service handler propagates TraefikProxyApiError on non-2xx POST
-- TraefikProxyReloadButton.async_press dispatches through the service
-- reload_routers is admin-only: non-admin callers get Unauthorized, admin
-  callers reach the handler
-
-Hermetic — uses aioclient_mock + AsyncMock for client.reload_routers so the
-tests don't depend on a live Traefik instance or the 5s polling budget
-finishing in real wall-clock time.
+- the integration registers no service; the package module has neither
+  ``async_setup`` nor ``CONFIG_SCHEMA`` (D-16, ENT-07)
+- the refresh button's registry entry: unique_id, diagnostic category, no
+  device class, main device (D-17, ENT-08)
+- with two loaded entries a press refreshes only its own entry's two
+  coordinators (D-17, A-09, S-08)
+- setup, refreshes and a real press send only GET requests to Traefik (ENT-07)
 """
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import AsyncMock
+import importlib
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from homeassistant.core import Context
-from homeassistant.exceptions import Unauthorized
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import EntityCategory
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
-from custom_components.traefik_proxy.api import TraefikProxyApiError
-from custom_components.traefik_proxy.button import TraefikProxyReloadButton
-from custom_components.traefik_proxy.const import DOMAIN
-from tests.conftest import MOCK_URL, make_snapshot, stub_traefik
+from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
+from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
+from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
+
+pytestmark = pytest.mark.xfail(strict=True, reason="05-06 RED: refresh button not implemented yet")
+
+SECOND_URL = "https://traefik2.example.com:8080"
 
 
-def _make_entry() -> MockConfigEntry:
-    """Build a loaded Traefik MockConfigEntry."""
-    return MockConfigEntry(
-        domain=DOMAIN,
-        title="Traefik",
-        data={"url": MOCK_URL, "api_key": "k", "verify_ssl": True},
-        unique_id="traefik.example.com",
+def _refresh_unique_id(entry_id: str) -> str:
+    return f"{entry_id}_refresh"
+
+
+async def test_no_service_registered(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """After setup the integration owns no service."""
+    await setup_traefik_entry(hass, aioclient_mock)
+
+    assert DOMAIN not in hass.services.async_services()
+
+
+def test_package_module_has_no_setup_or_config_schema() -> None:
+    """Without a module-level async_setup there is nothing for CONFIG_SCHEMA to guard."""
+    module = importlib.import_module("custom_components.traefik_proxy")
+
+    assert not hasattr(module, "async_setup")
+    assert not hasattr(module, "CONFIG_SCHEMA")
+
+
+def test_button_module_serializes_presses() -> None:
+    """button.py declares PARALLEL_UPDATES = 1."""
+    module = importlib.import_module("custom_components.traefik_proxy.button")
+
+    assert module.PARALLEL_UPDATES == 1
+
+
+async def test_refresh_button_registry_entry(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """One diagnostic refresh button per entry, without device class, on the main device."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+
+    entity_id = entity_id_for(hass, "button", _refresh_unique_id(entry.entry_id))
+    reg_entry = er.async_get(hass).async_get(entity_id)
+    assert reg_entry is not None
+    assert reg_entry.unique_id == f"{entry.entry_id}_refresh"
+    assert reg_entry.translation_key == "refresh"
+    assert reg_entry.entity_category is EntityCategory.DIAGNOSTIC
+    assert reg_entry.original_device_class is None
+
+    main = dr.async_get(hass).async_get_device(identifiers={device_identifier(entry.entry_id, TraefikDevice.MAIN)})
+    assert main is not None
+    assert reg_entry.device_id == main.id
+
+    buttons = [e for e in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id) if e.domain == "button"]
+    assert [e.unique_id for e in buttons] == [f"{entry.entry_id}_refresh"]
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.attributes["friendly_name"].endswith("Refresh now")
+
+
+async def test_press_refreshes_only_own_entry(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """Pressing entry A's button refreshes A's two coordinators once each and B's not at all."""
+    entry_a = await setup_traefik_entry(hass, aioclient_mock)
+    entry_b = make_traefik_entry(
+        data={CONF_URL: SECOND_URL, CONF_API_KEY: "k2", CONF_VERIFY_SSL: True},
+        unique_id="traefik2.example.com",
     )
-
-
-def _rawdata(*routers: str) -> dict[str, Any]:
-    """A /api/rawdata payload (map form, key = name) holding enabled routers ``routers``."""
-    return {
-        "routers": {
-            name: {"status": "enabled", "rule": f"Host(`{name.split('@')[0]}.example.com`)"} for name in routers
-        }
-    }
-
-
-async def test_async_setup_registers_reload_service(hass) -> None:
-    """Module-level async_setup registers traefik.reload_routers (PITFALLS M5)."""
-    from custom_components.traefik_proxy import async_setup
-
-    assert await async_setup(hass, {}) is True
-    assert hass.services.has_service(DOMAIN, "reload_routers")
-
-
-async def test_reload_service_verified_true_when_routers_change(hass, aioclient_mock) -> None:
-    """Reload handler: router set changes -> verified=True with name_diff."""
-    from custom_components.traefik_proxy import _async_handle_reload_routers
-
-    # Setup serves routers A and B; every later cycle serves A and C.
-    initial = _rawdata("router-a", "router-b")
-    updated = _rawdata("router-a", "router-c")
-    rawdata_calls = {"count": 0}
-
-    async def _rawdata_response(method, url, data):  # type: ignore[no-untyped-def]
-        """side_effect callback returning an AiohttpClientMockResponse."""
-        from pytest_homeassistant_custom_component.test_util.aiohttp import (
-            AiohttpClientMockResponse,
-        )
-
-        rawdata_calls["count"] += 1
-        payload = updated if rawdata_calls["count"] > 1 else initial
-        return AiohttpClientMockResponse(method, url, json=payload)
-
-    # Registered first, so it wins over the rawdata mock of stub_traefik.
-    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", side_effect=_rawdata_response)
-    stub_traefik(aioclient_mock, rawdata={})
-    # Refresh POST returns 202.
-    aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
-
-    entry = _make_entry()
-    entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
+    stub_traefik(aioclient_mock, base_url=SECOND_URL)
+    entry_b.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry_b.entry_id)
     await hass.async_block_till_done()
+    assert entry_b.state is ConfigEntryState.LOADED
 
-    # Stub client.reload_routers to do nothing extra (the POST is mocked above).
-    runtime = entry.runtime_data
-    runtime.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
-        return_value=None
-    )
-
-    # Drive the service handler via a ServiceCall.
-    call = _make_service_call(hass)
-    result = await _async_handle_reload_routers(call)
-
-    assert result["verified"] is True
-    assert result["attempts"] >= 1
-    assert sorted(result["name_diff"]["added"]) == ["router-c"]
-    assert sorted(result["name_diff"]["removed"]) == ["router-b"]
-    assert "elapsed_ms" in result
-    assert isinstance(result["elapsed_ms"], int)
-
-
-async def test_reload_service_verified_false_when_no_change_within_budget(hass, aioclient_mock) -> None:
-    """If router set never changes, verified=False after max attempts."""
-    from custom_components.traefik_proxy import _async_handle_reload_routers
-
-    stub_traefik(aioclient_mock, rawdata=_rawdata("stable-router"))
-    aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
-
-    entry = _make_entry()
-    entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    runtime = entry.runtime_data
-    runtime.client.reload_routers = AsyncMock(  # type: ignore[attr-defined]
-        return_value=None
-    )
-
-    call = _make_service_call(hass)
-    result = await _async_handle_reload_routers(call)
-
-    # Router set never changed -> verified=False after the 5s budget elapses.
-    # Exact attempt count depends on per-iteration sleep timing (200ms -> 5s
-    # backoff caps at attempt ~5 with mocked instant refresh); semantic check
-    # is just that we exited via the budget guard, not via a router-set change.
-    assert result["verified"] is False
-    assert result["attempts"] >= 1
-    assert result["attempts"] <= 10
-    assert result["name_diff"]["added"] == []
-    assert result["name_diff"]["removed"] == []
-    assert result["elapsed_ms"] >= 0
-
-
-async def test_reload_service_propagates_api_errors(hass, aioclient_mock) -> None:
-    """Non-2xx POST raises TraefikProxyApiError -> HA surfaces as service failure."""
-    from custom_components.traefik_proxy import _async_handle_reload_routers
-
-    stub_traefik(aioclient_mock, rawdata={})
-    # POST returns 500 -> reload_routers raises TraefikProxyApiError.
-    aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=500)
-
-    entry = _make_entry()
-    entry.add_to_hass(hass)
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    # No need to stub reload_routers — the real client will hit the mocked POST.
-
-    call = _make_service_call(hass)
-    with pytest.raises(TraefikProxyApiError):
-        await _async_handle_reload_routers(call)
-
-
-async def test_reload_button_async_press_calls_service(hass, aioclient_mock) -> None:
-    """TraefikProxyReloadButton.async_press dispatches via hass.services.async_call.
-
-    Proof of dispatch chain (button -> service -> handler -> client):
-    1. Replace ``entry.runtime_data.client.reload_routers`` with an AsyncMock spy.
-    2. Press the button.
-    3. Assert the spy was called -> the handler ran -> the button dispatched
-       via the service (NOT a direct client call).
-
-    We can't patch ``_async_handle_reload_routers`` after registration because
-    the ServiceRegistry captures the handler reference at registration time;
-    instead we observe the handler's downstream effect (the client call).
-    """
-    stub_traefik(aioclient_mock, rawdata={})
-    aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
-
-    entry = _make_entry()
-    entry.add_to_hass(hass)
-    # Register the service (module-level setup hasn't fired in tests — call it).
-    from custom_components.traefik_proxy import async_setup
-
-    await async_setup(hass, {})
-
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    runtime = entry.runtime_data
-    coordinator = runtime.coordinator
-    # Spy on the handler's downstream effect: ``client.reload_routers`` is
-    # only called from inside the service handler.
-    spy = AsyncMock(return_value=None)
-    runtime.client.reload_routers = spy  # type: ignore[attr-defined]
-    # Make the polling loop's ``async_request_refresh`` instant so the press
-    # doesn't wait for the 5s budget. The router set never changes (mocked
-    # routers are stable) so the handler still returns verified=False.
-    coordinator.async_request_refresh = AsyncMock(  # type: ignore[attr-defined]
-        return_value=None
-    )
-
-    button = TraefikProxyReloadButton(hass, entry, coordinator)
-    await button.async_press()
-    await hass.async_block_till_done()
-
-    # If the button dispatched via the service -> the handler ran ->
-    # ``client.reload_routers`` was called. Without the service dispatch, the
-    # button would never reach the handler and the spy stays at 0 calls.
-    assert spy.call_count >= 1, (
-        f"Expected client.reload_routers to be called via service dispatch, got {spy.call_count} calls"
-    )
-
-
-async def _setup_with_service(hass, aioclient_mock):  # type: ignore[no-untyped-def]
-    """Register the service, load an entry and return its coordinator + reload spy."""
-    from custom_components.traefik_proxy import async_setup
-
-    stub_traefik(aioclient_mock, rawdata={})
-    entry = _make_entry()
-    entry.add_to_hass(hass)
-    await async_setup(hass, {})
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    runtime = entry.runtime_data
-    spy = AsyncMock(return_value=None)
-    runtime.client.reload_routers = spy  # type: ignore[attr-defined]
-    coordinator = runtime.coordinator
-    return coordinator, spy
-
-
-async def test_reload_service_rejects_non_admin_user(hass, aioclient_mock, hass_read_only_user) -> None:
-    """A non-admin user calling reload_routers gets Unauthorized; the handler never runs."""
-    _coordinator, spy = await _setup_with_service(hass, aioclient_mock)
-
-    with pytest.raises(Unauthorized):
+    mocks = {(name, attr): AsyncMock() for name in ("a", "b") for attr in ("coordinator", "cert_coordinator")}
+    runtimes = {"a": entry_a.runtime_data, "b": entry_b.runtime_data}
+    with (
+        patch.object(runtimes["a"].coordinator, "async_request_refresh", mocks["a", "coordinator"]),
+        patch.object(runtimes["a"].cert_coordinator, "async_request_refresh", mocks["a", "cert_coordinator"]),
+        patch.object(runtimes["b"].coordinator, "async_request_refresh", mocks["b", "coordinator"]),
+        patch.object(runtimes["b"].cert_coordinator, "async_request_refresh", mocks["b", "cert_coordinator"]),
+    ):
         await hass.services.async_call(
-            DOMAIN,
-            "reload_routers",
-            {},
+            "button",
+            "press",
+            {"entity_id": entity_id_for(hass, "button", _refresh_unique_id(entry_a.entry_id))},
             blocking=True,
-            context=Context(user_id=hass_read_only_user.id),
         )
+        await hass.async_block_till_done()
 
-    assert spy.call_count == 0
+    mocks["a", "coordinator"].assert_awaited_once_with()
+    mocks["a", "cert_coordinator"].assert_awaited_once_with()
+    mocks["b", "coordinator"].assert_not_awaited()
+    mocks["b", "cert_coordinator"].assert_not_awaited()
 
 
-async def test_reload_service_allows_admin_user(hass, aioclient_mock, hass_admin_user) -> None:
-    """An admin user reaches the handler; verification exits on the first attempt."""
-    coordinator, spy = await _setup_with_service(hass, aioclient_mock)
-
-    async def _refresh_with_new_router() -> None:
-        coordinator.data = make_snapshot(routers=[{"name": "new@docker"}])
-
-    coordinator.async_request_refresh = AsyncMock(  # type: ignore[attr-defined]
-        side_effect=_refresh_with_new_router
-    )
+async def test_only_get_requests_reach_traefik(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
+    """Setup, a refresh and a real button press send GET requests only."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    runtime = entry.runtime_data
+    await runtime.coordinator.async_refresh()
+    await runtime.cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    calls_before_press = len(aioclient_mock.mock_calls)
 
     await hass.services.async_call(
-        DOMAIN,
-        "reload_routers",
-        {},
+        "button",
+        "press",
+        {"entity_id": entity_id_for(hass, "button", _refresh_unique_id(entry.entry_id))},
         blocking=True,
-        context=Context(user_id=hass_admin_user.id),
     )
+    await hass.async_block_till_done()
 
-    spy.assert_awaited_once()
-    assert coordinator.async_request_refresh.await_count == 1
-
-
-def _make_service_call(hass):  # type: ignore[no-untyped-def]
-    """Build a ServiceCall for direct handler invocation."""
-    from homeassistant.core import Context, ServiceCall
-
-    return ServiceCall(
-        hass,
-        DOMAIN,
-        "reload_routers",
-        data={},
-        context=Context(),
-    )
+    # The press reached Traefik through the main coordinator's refresh.
+    assert len(aioclient_mock.mock_calls) > calls_before_press
+    methods = {str(method).upper() for method, _url, _data, _headers in aioclient_mock.mock_calls}
+    assert methods == {"GET"}
