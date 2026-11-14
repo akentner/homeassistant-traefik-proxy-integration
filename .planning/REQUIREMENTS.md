@@ -173,11 +173,11 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Data layer (DATA) — Phase 4
 
-- [x] **DATA-01**: API responses are parsed once, in the client, into frozen
+- [ ] **DATA-01**: API responses are parsed once, in the client, into frozen
       dataclasses in `models.py` (`Router`, `Service`, `Middleware`,
       `Entrypoint`, `TraefikVersion`, `TraefikSnapshot`) with a `Status`
       `StrEnum`; platforms never inspect raw API dicts. (A-10)
-- [x] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
+- [ ] **DATA-02**: One scan cycle issues one request, `GET /api/rawdata`
       (unpaginated; routers, services incl. `serverStatus`, middlewares);
       `/api/version` and `/api/entrypoints` are fetched at setup; the version is
       re-checked at most hourly and after a failed cycle recovers, and
@@ -185,21 +185,21 @@ Requirements for initial release. Each maps to a roadmap phase.
       `/api/rawdata` is unavailable the
       client falls back to the paginated list endpoints and follows
       `X-Next-Page`. HTTP objects only; TCP/UDP data is ignored. (A-06, P-01)
-- [x] **DATA-03**: The client supports auth modes none / basic (username +
+- [ ] **DATA-03**: The client supports auth modes none / basic (username +
       password) / bearer; the `Authorization` header is built per request and
       credentials never appear in logs or exception messages.
-- [x] **DATA-04**: The client raises only subclasses of `TraefikProxyApiError`:
+- [ ] **DATA-04**: The client raises only subclasses of `TraefikProxyApiError`:
       `TraefikProxyAuthError` (401/403), `TraefikProxyNotFoundError` (404),
       `TraefikProxyConnectionError` (any `aiohttp.ClientError`, timeout,
       `OSError`) or `TraefikProxyPayloadError` (invalid JSON or shape);
       production code contains no `assert`.
       (A-15 client part, A-16)
-- [x] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
+- [ ] **DATA-05**: `entry.runtime_data` is a typed `TraefikRuntimeData`
       dataclass holding client, coordinator and cert coordinator. (A-11)
-- [x] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
+- [ ] **DATA-06**: The main coordinator returns a `TraefikSnapshot` with
       `dict[name, Model]` per kind and aggregates (counts per status, problem
       lists) computed once per cycle; `always_update=False`. (P-02)
-- [x] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
+- [ ] **DATA-07**: Test fixtures are captured from local Docker Traefik v2.11
       and v3.x, redacted, and regenerable from a committed script; they cover
       providers, `error[]`, `serverStatus`, TLS domains and >100 items on the
       paginated path. (A-05, H-11)
@@ -436,13 +436,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete (refined by DATA-07) |
 | TEST-04 | Phase 3 | Complete |
-| DATA-01 | Phase 4 | Complete |
-| DATA-02 | Phase 4 | Complete |
-| DATA-03 | Phase 4 | Complete |
-| DATA-04 | Phase 4 | Complete |
-| DATA-05 | Phase 4 | Complete |
-| DATA-06 | Phase 4 | Complete |
-| DATA-07 | Phase 4 | Complete |
+| DATA-01 | Phase 4 | Gaps Found |
+| DATA-02 | Phase 4 | Gaps Found |
+| DATA-03 | Phase 4 | Gaps Found |
+| DATA-04 | Phase 4 | Gaps Found |
+| DATA-05 | Phase 4 | Gaps Found |
+| DATA-06 | Phase 4 | Gaps Found |
+| DATA-07 | Phase 4 | Gaps Found |
 | ENT-01 | Phase 5 | Pending |
 | ENT-02 | Phase 5 | Pending |
 | ENT-03 | Phase 5 | Pending |
