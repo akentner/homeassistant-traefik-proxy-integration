@@ -206,46 +206,46 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Entity model + lifecycle (ENT) — Phase 5
 
-- [ ] **ENT-01**: One entity manager per entry adds entities for new items on
+- [x] **ENT-01**: One entity manager per entry adds entities for new items on
       each coordinator update, marks vanished items `missing`, removes them from
       the registry after a 24 h grace period and re-binds items that reappear;
       it reads only `er.async_entries_for_config_entry`, never the whole
       registry. Used for routers, services and (Phase 6) certificates; cert
       entities are never re-added for known hosts. (A-02, A-03, A-08, A-14, P-04)
-- [ ] **ENT-02**: Per-item entities store only their key and read the current
+- [x] **ENT-02**: Per-item entities store only their key and read the current
       model from the snapshot on every update; state is written only when the
       entity's model changed; redundant `available` overrides are removed.
       (A-01, A-20, P-03)
-- [ ] **ENT-03**: Entity bases `TraefikEntity` and `TraefikCertEntity`
+- [x] **ENT-03**: Entity bases `TraefikEntity` and `TraefikCertEntity`
       (subscribed to the cert coordinator) share one `DeviceInfo` factory: main
       device `Traefik (<host>)` with `entry_type=SERVICE`,
       `configuration_url=<url>/dashboard/` and `sw_version` kept current;
       sub-devices Routers / Services / Certificates linked to it via the
       registry `via_device_id` (no deprecated `DeviceInfo.via_device`). (A-07,
       A-21, U-04)
-- [ ] **ENT-04**: Routers and services are `sensor` entities with
+- [x] **ENT-04**: Routers and services are `sensor` entities with
       `device_class=enum` (`enabled`, `warning`, `error`, `disabled`,
       `missing`); services expose `servers_up`/`servers_total` (no URLs/IPs);
       each attribute has one canonical key. (U-07, U-08, S-06, P-09)
-- [ ] **ENT-05**: Problem aggregates `routers_problem`, `services_problem`,
+- [x] **ENT-05**: Problem aggregates `routers_problem`, `services_problem`,
       `middlewares_problem` (binary_sensor, `problem`) are enabled by default
       and implemented as one class plus entity descriptions. (U-01, A-13)
-- [ ] **ENT-06**: Counts, version, Traefik start time, entrypoints and an
+- [x] **ENT-06**: Counts, version, Traefik start time, entrypoints and an
       optional healthy-ratio sensor carry `EntityCategory.DIAGNOSTIC`;
       entrypoints and healthy ratio are disabled by default. (U-05, U-06, U-15)
-- [ ] **ENT-07**: The reload button, the `reload_routers` service,
+- [x] **ENT-07**: The reload button, the `reload_routers` service,
       `services.yaml` and the client refresh method are removed; a "Refresh
       now" button refreshes both coordinators of its own entry and needs no
       admin bypass. (A-04, A-09, S-08)
-- [ ] **ENT-08**: Static entity names use `translation_key` with entity
+- [x] **ENT-08**: Static entity names use `translation_key` with entity
       strings in `en.json` and `de.json`; `icons.json` provides default and
       state icons; every platform sets `PARALLEL_UPDATES`. (U-02)
-- [ ] **ENT-09**: Upgrading from 0.3.0 removes the old router/service
+- [x] **ENT-09**: Upgrading from 0.3.0 removes the old router/service
       `binary_sensor` and reload-button registry entries in a config-entry
       migration and shows a non-fixable, persistent repair notice (HA 2026.3
       API) that the user dismisses and that is deleted when the entry is
       removed (amended by M34: not deleted on unload).
-- [ ] **ENT-10**: The option "create per-router/per-service entities"
+- [x] **ENT-10**: The option "create per-router/per-service entities"
       (default on) is honoured; when off, no per-router or per-service entity
       exists (aggregate, diagnostic and certificate entities remain) and
       existing per-router/per-service entities are removed.
@@ -446,16 +446,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DATA-05 | Phase 4 | Complete |
 | DATA-06 | Phase 4 | Complete |
 | DATA-07 | Phase 4 | Complete |
-| ENT-01 | Phase 5 | Pending |
-| ENT-02 | Phase 5 | Pending |
-| ENT-03 | Phase 5 | Pending |
-| ENT-04 | Phase 5 | Pending |
-| ENT-05 | Phase 5 | Pending |
-| ENT-06 | Phase 5 | Pending |
-| ENT-07 | Phase 5 | Pending |
-| ENT-08 | Phase 5 | Pending |
-| ENT-09 | Phase 5 | Pending |
-| ENT-10 | Phase 5 | Pending |
+| ENT-01 | Phase 5 | Complete |
+| ENT-02 | Phase 5 | Complete |
+| ENT-03 | Phase 5 | Complete |
+| ENT-04 | Phase 5 | Complete |
+| ENT-05 | Phase 5 | Complete |
+| ENT-06 | Phase 5 | Complete |
+| ENT-07 | Phase 5 | Complete |
+| ENT-08 | Phase 5 | Complete |
+| ENT-09 | Phase 5 | Complete |
+| ENT-10 | Phase 5 | Complete |
 | CERT-01 | Phase 6 | Pending |
 | CERT-02 | Phase 6 | Pending |
 | CERT-03 | Phase 6 | Pending |

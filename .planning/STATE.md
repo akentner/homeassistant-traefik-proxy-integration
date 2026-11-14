@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 05
-current_phase_name: Entity model + lifecycle
-status: verifying
-stopped_at: Completed 05-08-PLAN.md
-last_updated: "2026-11-14T22:57:35.417Z"
-last_activity: 2026-11-14
-last_activity_desc: 05-08 gap closure executed
-state_head: 19cbb4272c9089e5036803bfcffea0f747432e31
+current_phase: 06
+current_phase_name: Certificates
+status: planning
+stopped_at: Phase 05 complete, ready to plan Phase 06
+last_updated: "2026-11-14T23:27:41.309Z"
+last_activity: 2026-11-15
+last_activity_desc: Phase 05 complete, transitioned to Phase 06
+state_head: d4caf4f1504fcb10a069d17797caf59646569752
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 28
   completed_plans: 28
+  percent: 63
 milestone_name: milestone
 ---
 
@@ -30,18 +31,18 @@ failing, and which TLS certificates are expiring soon.
 
 ## Current Position
 
-Phase: 05 (Entity model + lifecycle) — EXECUTED, READY FOR VERIFICATION
-Plan: 8 of 8
-Status: Phase complete — ready for verification
-Last activity: 2026-11-14 — 05-08 gap closure executed (CR-01, WR-01, WR-02)
+Phase: 06 — Certificates
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-11-15 — Phase 05 complete, transitioned to Phase 06
 
-Progress: [█████░░░░░] 50% (3 of 8 phases)
+Progress: [██████░░░░] 63% (3 of 8 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 18
+- Total plans completed: 26
 - Average duration: 13m
 - Total execution time: 1.7 hours
 
@@ -54,6 +55,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | 3. TLS Certificate Expiry | 3 | 3 | 16m |
 | 4. Data layer (correct + lean) | 0 | — | — |
 | 04 | 9 | - | - |
+| 05 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -210,6 +212,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-11-14T22:57:35.327Z
-Stopped at: Completed 05-08-PLAN.md
+Stopped at: Phase 05 complete, ready to plan Phase 06
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)

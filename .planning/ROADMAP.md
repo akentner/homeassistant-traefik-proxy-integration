@@ -36,7 +36,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Data layer (correct + lean)** — typed models, one `GET /api/rawdata` (completed 2026-11-14)
       per cycle, auth modes + error taxonomy in the client, real Traefik fixtures,
       `TraefikRuntimeData`, snapshot coordinator with precomputed aggregates
-- [ ] **Phase 5: Entity model + lifecycle** — entity manager (add / missing / 24 h
+- [x] **Phase 5: Entity model + lifecycle** — entity manager (add / missing / 24 h (completed 2026-11-15)
       grace / re-add), main device + sub-devices, router/service ENUM sensors,
       problem aggregates on by default, "Refresh now" button, translations + icons
 - [ ] **Phase 6: Certificates** — `/api/certificates` on Traefik ≥ 3.7, async
@@ -345,7 +345,7 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 8/8 plans executed (7 sequential waves; 1 gap-closure plan)
+**Plans**: 8/8 plans complete (7 sequential waves; 1 gap-closure plan)
 
 Plans:
 **Wave 1**
@@ -519,7 +519,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
-| 5. Entity model + lifecycle | 8/8 | In Progress | - |
+| 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
