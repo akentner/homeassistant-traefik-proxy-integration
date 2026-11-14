@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Completed 04-03-PLAN.md
-last_updated: "2026-11-14T00:43:17.423Z"
+stopped_at: Completed 04-04-PLAN.md
+last_updated: "2026-11-14T00:56:03.878Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: cb9c8bb949ccf79d45e2368dcf7789ed249f94b4
+state_head: 133ac583332bd3ea176b59758e93a23c3382d044
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 14
+  completed_plans: 15
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
@@ -78,6 +78,7 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 04 P01 | 8min | 2 tasks | 23 files |
 | Phase 04 P02 | 8min | 3 tasks | 15 files |
 | Phase 04 P03 | 7 min | 2 tasks | 3 files |
+| Phase 04 P04 | 9min | 3 tasks | 14 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-03: Service/Middleware type = list-form type, else lowercased single non-meta rawdata key
 - [Phase 04]: 04-03: parse_version uses startDate (StartDate accepted); missing -> KeyError, non-string -> TypeError, unparsable -> ValueError, naive -> UTC
 - [Phase 04]: 04-03: TDD RED commits carry an interface stub of models.py so RED fails on assertions (tdd.md treats import faults as INVALID_RED)
+- [Phase 04]: 04-04: X-Next-Page loop continues only while the header is an int greater than the current page; missing/non-integer header ends it; an announced page above MAX_PAGES raises TraefikProxyPayloadError
+- [Phase 04]: 04-04: per-item entities store _item_name plus the construction-time model and resolve the current model from coordinator.data on every read (fallback: last known model)
+- [Phase 04]: 04-04: cert host collection skips routers with Router.tls False; snapshot consumers never read raw API dicts
 
 ### Pending Todos
 
@@ -164,7 +168,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T00:43:17.373Z
-Stopped at: Completed 04-03-PLAN.md
+Last session: 2026-11-14T00:56:03.832Z
+Stopped at: Completed 04-04-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
