@@ -268,7 +268,7 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
      do not fire when two consecutive snapshots are equal; the full test suite,
      `ruff` and `mypy --strict` are green and the existing entity set still
      reports correct states on both fixture generations.
-**Plans**: 6/6 plans executed in 5 waves
+**Plans**: 9 plans (6 executed in 5 waves; 3 gap-closure plans in 2 waves)
 
 Plans:
 **Wave 1**
@@ -286,6 +286,15 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 - [x] 04-06-PLAN.md — One `GET /api/rawdata` per cycle + paginated fallback, restart detection, request-budget matrix, real-fixture entity proof (DATA-02, DATA-07)
+
+**Gap closure** (04-VERIFICATION.md; M26, M27)
+
+**Gap wave 1**
+- [ ] 04-07-PLAN.md — CR-01: cert entities bound to the cert coordinator; full-setup HA-state tests for cert cycle, threshold, options and availability (DATA-06, SC5)
+- [ ] 04-08-PLAN.md — WR-02: aiohttp request-construction `ValueError` mapped to `TraefikProxyInvalidUrlError`; userinfo URLs rejected in the config flows (DATA-04)
+
+**Gap wave 2** *(blocked on 04-08: shares `api.py`)*
+- [ ] 04-09-PLAN.md — WR-01 / M27: paginated fallback revocable on the hourly version re-check, at most one extra rawdata request per hour; D-07 amended (DATA-02)
 
 ### Phase 5: Entity model + lifecycle
 

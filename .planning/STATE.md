@@ -1,18 +1,18 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 3
+current_phase: 04
 current_phase_name: Data layer (correct + lean)
-status: verifying
+status: executing
 stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-11-14T01:16:51.401Z"
+last_updated: "2026-11-14T02:04:57.694Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: 308f6693f39978be65271a84ec94e1aeabd7876b
+state_head: a940fbe27e46755413f5b1aaebecf670d4a83c60
 progress:
   total_phases: 8
   completed_phases: 3
-  total_plans: 17
+  total_plans: 20
   completed_plans: 17
 milestone_name: milestone
 ---
@@ -30,9 +30,9 @@ failing, and which TLS certificates are expiring soon.
 
 ## Current Position
 
-Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
+Phase: 04 (Data layer (correct + lean)) — READY TO EXECUTE
 Plan: 6 of 6
-Status: Phase complete — ready for verification
+Status: Ready to execute
 Last activity: 2026-11-14 - 04-02 complete: typed TraefikRuntimeData (client, coordinator, cert_coordinator), single client owner
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
