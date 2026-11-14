@@ -118,6 +118,9 @@
       },
       "healthy_ratio": {
         "name": "Healthy routers"
+      },
+      "certificate_expiry": {
+        "name": "{host} expiry"
       }
     },
     "binary_sensor": {
@@ -129,6 +132,9 @@
       },
       "middlewares_problem": {
         "name": "Middleware problems"
+      },
+      "certificate_expiring": {
+        "name": "{host} expiring"
       }
     }
   }

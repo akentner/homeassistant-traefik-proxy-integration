@@ -32,6 +32,7 @@ from custom_components.traefik_proxy.const import (
 )
 from custom_components.traefik_proxy.entity_manager import (
     CERT_EXPIRING,
+    CERT_EXPIRY,
     ENTRYPOINTS,
     ROUTERS,
     SERVICES,
@@ -702,9 +703,10 @@ def _assert_per_item_off(hass: HomeAssistant, entry: Any) -> None:
     assert _kind_keys(hass, entry, ROUTERS) == []
     assert _kind_keys(hass, entry, SERVICES) == []
     assert _kind_keys(hass, entry, ENTRYPOINTS)
-    # The test probe reports every host unreachable: only the expiring binary
-    # sensor exists for an error host (timestamp sensors need a notAfter).
+    # The test probe reports every host unreachable; both cert kinds still
+    # exist for an error host and are unaffected by the per-item option.
     assert _kind_keys(hass, entry, CERT_EXPIRING)
+    assert sorted(_kind_keys(hass, entry, CERT_EXPIRY)) == sorted(_kind_keys(hass, entry, CERT_EXPIRING))
     for suffix in SNAPSHOT_UID_SUFFIXES:
         assert _registered(hass, "sensor", f"{entry_id}_{suffix}"), suffix
     for suffix in PROBLEM_UID_SUFFIXES:

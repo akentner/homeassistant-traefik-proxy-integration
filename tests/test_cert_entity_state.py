@@ -298,7 +298,6 @@ async def test_cert_notifications_do_not_grow_listeners(
     assert len(cert_coordinator._listeners) == listeners_after_setup
 
 
-@pytest.mark.xfail(strict=True, reason="RED: cert entities not on the entity manager yet")
 async def test_known_cert_hosts_are_never_added_again(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -320,7 +319,6 @@ async def test_known_cert_hosts_are_never_added_again(
     assert _state(hass, _expiring(hass, entry)).state == "on"
 
 
-@pytest.mark.xfail(strict=True, reason="RED: cert entities not on the entity manager yet")
 async def test_vanished_cert_host_unavailable_then_removed_after_grace(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, freezer: Any
 ) -> None:
@@ -359,7 +357,6 @@ async def test_vanished_cert_host_unavailable_then_removed_after_grace(
     assert registry.async_get(_expiring(hass, entry)) is not None
 
 
-@pytest.mark.xfail(strict=True, reason="RED: cert entities do not write on change only yet")
 async def test_unchanged_cert_notification_writes_nothing(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, freezer: Any
 ) -> None:
@@ -377,7 +374,6 @@ async def test_unchanged_cert_notification_writes_nothing(
         assert _state(hass, entity_id).last_reported == before[entity_id], entity_id
 
 
-@pytest.mark.xfail(strict=True, reason="RED: cert entities still on the per-category TLS device")
 async def test_cert_entities_on_certificates_sub_device(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
 ) -> None:
@@ -406,21 +402,3 @@ async def test_cert_entities_on_certificates_sub_device(
         f"{entry.entry_id}_tls_expiring_{OTHER_HOST}",
         f"{entry.entry_id}_tls_cert_{OTHER_HOST}",
     }
-
-
-async def test_cert_device_keeps_traefik_sw_version(
-    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
-) -> None:
-    """The TLS device shows the Traefik version of the main snapshot."""
-    entry = await _setup(hass, aioclient_mock)
-    # Lookup by config entry works on HA 2026.3 and on releases that deprecate async_get_device.
-    identifier = (DOMAIN, f"{entry.entry_id}_http_routers_tls")
-    devices = [
-        device
-        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
-        if identifier in device.identifiers
-    ]
-    assert len(devices) == 1
-    device = devices[0]
-    assert device.sw_version == entry.runtime_data.coordinator.data.version.version
-    assert device.sw_version

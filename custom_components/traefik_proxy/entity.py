@@ -19,6 +19,7 @@ from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
 from .entity_manager import KindSpec
 from .models import TraefikSnapshot
+from .tls import CertError, CertInfo
 
 
 class TraefikDevice(StrEnum):
@@ -195,6 +196,52 @@ class TraefikItemEntity[ModelT](TraefikEntity):
     def _missing_attributes(self) -> dict[str, Any]:
         since = self._missing_since()
         return {"missing_since": since.isoformat() if since is not None else None}
+
+
+def cert_hosts(coordinator: CertCoordinator) -> set[str]:
+    """Return the lowercase hosts of the cert data, with and without a certificate."""
+    return {host.lower() for host in coordinator.data or {}}
+
+
+class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
+    """Entity for the certificate of one TLS host; holds only the host.
+
+    Listens to the cert coordinator, because cert cycles and threshold
+    changes notify only its listeners. Available only while the last cert
+    cycle succeeded and the host's row is a certificate; a host absent from
+    the cert data (missing) or with a failed probe is unavailable.
+    ``homeassistant.update_entity`` requests a cert refresh.
+    """
+
+    _traefik_device = TraefikDevice.CERTIFICATES
+    _spec: ClassVar[KindSpec]
+
+    def __init__(self, entry: TraefikProxyConfigEntry, host: str) -> None:
+        host = host.lower()
+        super().__init__(entry.runtime_data.cert_coordinator, entry, self._spec.unique_id(entry.entry_id, host))
+        self._host = host
+        self._attr_translation_placeholders = {"host": host}
+
+    def _row(self) -> CertInfo | CertError | None:
+        """Return the host's row of the latest cert data, or None when the host is absent."""
+        return (self.coordinator.data or {}).get(self._host)
+
+    def _info(self) -> CertInfo | None:
+        """Return the host's certificate, or None when it is absent or its probe failed."""
+        row = self._row()
+        return row if isinstance(row, CertInfo) else None
+
+    def _error(self) -> CertError | None:
+        """Return the host's probe error, or None."""
+        row = self._row()
+        return None if row is None or isinstance(row, CertInfo) else row
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._info() is not None
+
+    def _state_token(self) -> object:
+        return (self._row(),)
 
 
 # Per-category model labels for the multi-device model (CONTEXT.md D-01).
