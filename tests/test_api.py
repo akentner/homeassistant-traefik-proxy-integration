@@ -234,6 +234,35 @@ async def test_invalid_url_raises_invalid_url_error(hass, aioclient_mock) -> Non
     assert str(err.value) == f"{VERSION_PATH}: InvalidUrlClientError"
 
 
+async def test_userinfo_url_with_bearer_token_raises_invalid_url_error() -> None:
+    """URL credentials plus a bearer header make aiohttp refuse the request; the client maps it.
+
+    Runs on a real aiohttp session because ``aioclient_mock`` replaces the
+    request method and so never builds a request. aiohttp raises before any
+    socket is opened, so no network access happens.
+    """
+    async with aiohttp.ClientSession() as session:
+        client = TraefikProxyApiClient(
+            session,
+            "https://u:p@192.0.2.1:1",
+            api.Auth(mode=api.AuthMode.bearer, token="t"),
+            request_timeout=1.0,
+        )
+        calls = [
+            (client.async_get_version, "/api/version"),
+            (client.async_get_state, "/api/rawdata"),
+            (client.reload_routers, REFRESH_PATH),
+        ]
+        for call, path in calls:
+            with pytest.raises(api.TraefikProxyInvalidUrlError) as err:
+                await call()
+
+            assert str(err.value) == f"{path}: ValueError"
+            assert isinstance(err.value.__cause__, ValueError)
+            assert "u:p" not in str(err.value)
+            assert "192.0.2.1" not in str(err.value)
+
+
 def test_taxonomy_hierarchy() -> None:
     """Every client error is a TraefikProxyApiError; invalid URL is a connection error."""
     for name in (
