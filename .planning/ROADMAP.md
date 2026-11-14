@@ -268,11 +268,11 @@ JSON. User-visible entities keep working unchanged on top of the new data layer
      do not fire when two consecutive snapshots are equal; the full test suite,
      `ruff` and `mypy --strict` are green and the existing entity set still
      reports correct states on both fixture generations.
-**Plans**: 6 plans in 5 waves
+**Plans**: 1/6 plans executed in 5 waves
 
 Plans:
 **Wave 1**
-- [ ] 04-01-PLAN.md — Docker capture harness + redacted, digest-pinned v2.11/v3.7 fixtures with privacy and scenario guards (DATA-07)
+- [x] 04-01-PLAN.md — Docker capture harness + redacted, digest-pinned v2.11/v3.7 fixtures with privacy and scenario guards (DATA-07)
 - [ ] 04-02-PLAN.md — Typed `TraefikRuntimeData` (client, coordinator, cert_coordinator), single client owner (DATA-05)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -480,7 +480,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 1. Foundation | 4/4 | Complete    | 2026-07-05 |
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
-| 4. Data layer (correct + lean) | 0/6 | Planned | - |
+| 4. Data layer (correct + lean) | 1/6 | In Progress | - |
 | 5. Entity model + lifecycle | 0/TBD | Not started | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |

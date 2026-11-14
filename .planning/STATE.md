@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 3
 current_phase_name: Data layer (correct + lean)
 status: executing
-stopped_at: Milestone v1.0 restructured into Phases 4-8; planning Phase 4
-last_updated: "2026-11-14T00:08:41.947Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-11-14T00:21:32.960Z"
 last_activity: 2026-11-14
 last_activity_desc: "Restructured milestone v1.0: old Phase 4 replaced by Phases 4-8 (data layer, entity lifecycle, certificates, flows/2026.12/observability, marketplace release)"
-state_head: 1b56afcb67a7722caae4c4e669c6f99d2fc7338e
+state_head: 668b62001815f62abed97ebd678dd3876d780a4d
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 17
-  completed_plans: 11
+  completed_plans: 12
 milestone_name: milestone
 ---
 
@@ -31,9 +31,9 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 4 (Data layer (correct + lean)) — READY TO EXECUTE
-Plan: —
-Status: Ready to execute
-Last activity: 2026-11-14 - Milestone v1.0 restructured into Phases 4–8 (marketplace research + code audit)
+Plan: 2 of 6
+Status: Executing Phase 4 (04-01 complete)
+Last activity: 2026-11-14 - 04-01 complete: real redacted Traefik v2.11/v3.7 fixtures + capture harness
 
 Progress: [████░░░░░░] 38% (3 of 8 phases)
 
@@ -71,6 +71,11 @@ Progress: [████░░░░░░] 38% (3 of 8 phases)
 | Phase 3 P01 | 25min | 3 tasks | 7 files |
 | Phase 3 P02 | 14min | 2 tasks | 2 files |
 | Phase 3 P03 | 25min | 4 tasks | 5 files |
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 04 P01 | 8min | 2 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -107,6 +112,9 @@ Recent decisions affecting current work:
 - [Phase 03]: conftest.py pre-imports `custom_components.traefik.tls` at module level — pytest-homeassistant-custom-component ships a namespace package at testing_config/custom_components/ that would otherwise shadow the production module for in-fixture imports; module-level pre-import binds it to sys.modules before the namespace hijack takes effect.
 - [Phase 03]: Mock-server handshake tests use `asyncio.to_thread` to drive the sync `fetch_cert_info` from async tests — passing through without the thread wrapper blocks the asyncio TLS server's accept path (event-loop starvation), causing the handshake to hang.
 - [Phase 03]: HA's `CachedProperties` metaclass moves class-level `_attr_*` attributes to private `__attr_*` names and wraps them in `property`. Tests that pin entity default-state attributes (e.g. `_attr_entity_registry_enabled_default`) read `cls.__dict__.get("__attr_<name>")` to get the underlying boolean value.
+- [Phase 04]: 04-01: Traefik v2.11.63 and v3.7.19 send X-Next-Page: 1 on the last page; client follows the header only while int(value) > current page (D-07 rule)
+- [Phase 04]: 04-01: Observed status strings are only enabled/warning/disabled (no literal error); disabled + non-empty error[] is the D-02 error case; services stay enabled with a DOWN server
+- [Phase 04]: 04-01: --ping on the traefik entrypoint provides the @internal router (ping@internal) because insecure API mode stays off
 
 ### Pending Todos
 
@@ -148,8 +156,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-06T08:35:00.000Z
-Stopped at: Completed Phase 3 plan 03-03 (TEST-04 test surface — 83 new tests; suite 40 → 123)
-45/49 v1 requirements complete; 4/6 Phase 3 requirements now mapped (TLS-01..05 ✅ + TEST-04 ✅); 4 remaining pending (DIAG-04 + DIST-04/05 + DOCS-02/03/04 + TEST-02/03 in fact already ✅ — only DIAG-04 + DIST-04/05 + DOCS-02/03/04 are net-pending).
-Resume file: .planning/ROADMAP.md (Phase 4 section)
-Next: /gsd-plan-phase 4 (Data layer)
+Last session: 2026-11-14T00:21:32.909Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
+Next: /gsd-execute-phase 4 (plan 04-02)
