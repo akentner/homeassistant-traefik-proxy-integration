@@ -43,6 +43,10 @@ findings:
     severity: info
     disposition: open
     title: "Disabled replacements keep the old object id, while the repair text says router sensors get new entity IDs"
+  - id: IN-07
+    severity: info
+    disposition: open
+    title: "The DEVICE->USER migration step does not check that the legacy device is actually disabled"
 ---
 
 # Phase 05: Code Review Disposition
@@ -59,3 +63,4 @@ findings:
 | CR-02 | critical | fixed | 05-REVIEW-FIX.md (4e1aee1..80e1902) |
 | IN-05 | info | fixed | 05-REVIEW-FIX.md (c71cf6c..5ea22e5) |
 | IN-06 | info | open | - |
+| IN-07 | info | open | - |
