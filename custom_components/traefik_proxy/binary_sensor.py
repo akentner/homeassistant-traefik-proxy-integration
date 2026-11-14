@@ -15,7 +15,7 @@ except ImportError:  # HA releases before 2026.10 define it in the package
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import slugify
 
-from .entity import TraefikProxyEntity
+from .entity import TraefikProxyCertEntity, TraefikProxyEntity
 from .models import Router, Status
 from .sensor import _cert_cache_availability
 from .tls import CertError, CertInfo, is_error
@@ -354,7 +354,7 @@ class TraefikProxyAnyMiddlewareFailingBinarySensor(TraefikProxyEntity, BinarySen
         return self.coordinator.last_update_success
 
 
-class TraefikProxyCertExpiryBinarySensor(TraefikProxyEntity, BinarySensorEntity):
+class TraefikProxyCertExpiryBinarySensor(TraefikProxyCertEntity, BinarySensorEntity):
     """One ``PROBLEM`` binary sensor per TLS-probed hostname (TLS-02).
 
     State is ``True`` when ``days_until_expiry <= threshold_days``
@@ -412,7 +412,7 @@ class TraefikProxyCertExpiryBinarySensor(TraefikProxyEntity, BinarySensorEntity)
         # Distinct ``description_key`` from the timestamp sensor
         # (``<host>_expiring`` vs ``<host>``) so the binary_sensor's
         # name in the States panel is uniquely identifiable.
-        super().__init__(entry, category="http_routers_tls", description_key=f"{host}_expiring")
+        super().__init__(entry, coordinator, category="http_routers_tls", description_key=f"{host}_expiring")
         self._host = host
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.entry_id}_tls_expiring_{host}"

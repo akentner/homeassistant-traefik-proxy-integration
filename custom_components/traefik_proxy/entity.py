@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
+from .cert_coordinator import CertCoordinator
 from .const import DEFAULT_NAME, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
@@ -38,8 +39,12 @@ def _category_to_model(category: str) -> str:
     return _CATEGORY_TO_MODEL.get(category, category)
 
 
-class TraefikProxyEntity(CoordinatorEntity[TraefikProxyCoordinator]):
+class _TraefikProxyBaseEntity[CoordinatorT: DataUpdateCoordinator[Any]](CoordinatorEntity[CoordinatorT]):
     """Common base for all Traefik entities (binary_sensor, sensor, button).
+
+    Generic over the coordinator the entity listens to: most entities follow
+    the main coordinator (``TraefikProxyEntity``), the TLS certificate
+    entities follow the cert coordinator (``TraefikProxyCertEntity``).
 
     Each entity registers under a per-category HA device — the integration
     identifier is ``(DOMAIN, f"{entry.entry_id}_{category}")``. The legacy
@@ -54,12 +59,13 @@ class TraefikProxyEntity(CoordinatorEntity[TraefikProxyCoordinator]):
 
     def __init__(
         self,
+        coordinator: CoordinatorT,
         entry: TraefikProxyConfigEntry,
         category: str,
         *,
         description_key: str | None = None,
     ) -> None:
-        super().__init__(entry.runtime_data.coordinator)
+        super().__init__(coordinator)
         self._entry = entry
         self._category = category
         # Back-compat alias: the Phase 1 binary_sensor code reads
@@ -92,6 +98,39 @@ class TraefikProxyEntity(CoordinatorEntity[TraefikProxyCoordinator]):
             return None
 
     def _sw_version(self) -> str | None:
+        # Always the main snapshot, also for entities bound to the cert coordinator.
         # Cert-entity unit tests build entities on mocked entries without a snapshot.
-        data = self.coordinator.data
+        data = self._entry.runtime_data.coordinator.data
         return data.version.version if isinstance(data, TraefikSnapshot) else None
+
+
+class TraefikProxyEntity(_TraefikProxyBaseEntity[TraefikProxyCoordinator]):
+    """Entity that listens to the main Traefik coordinator."""
+
+    def __init__(
+        self,
+        entry: TraefikProxyConfigEntry,
+        category: str,
+        *,
+        description_key: str | None = None,
+    ) -> None:
+        super().__init__(entry.runtime_data.coordinator, entry, category, description_key=description_key)
+
+
+class TraefikProxyCertEntity(_TraefikProxyBaseEntity[CertCoordinator]):
+    """Entity that listens to the cert coordinator (TLS certificate state).
+
+    Cert cycles and threshold changes notify only the cert coordinator's
+    listeners, so the certificate entities subscribe there and not to the
+    main coordinator (which skips unchanged snapshots).
+    """
+
+    def __init__(
+        self,
+        entry: TraefikProxyConfigEntry,
+        coordinator: CertCoordinator,
+        category: str,
+        *,
+        description_key: str,
+    ) -> None:
+        super().__init__(coordinator, entry, category, description_key=description_key)
