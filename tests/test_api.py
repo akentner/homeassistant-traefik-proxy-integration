@@ -465,7 +465,7 @@ async def test_rawdata_unexpected_shape_raises_payload_error(hass, aioclient_moc
 
 
 async def test_list_endpoint_404_in_paginated_mode_raises_not_found(hass, aioclient_mock) -> None:
-    """Once paginated, a 404 on a list endpoint is a NotFound error, not another fallback."""
+    """During the fallback, a 404 on a list endpoint is a NotFound error, not another fallback."""
     aioclient_mock.get(f"{MOCK_URL}{RAWDATA_PATH}", status=404)
     aioclient_mock.get(f"{MOCK_URL}/api/http/routers", status=404)
 

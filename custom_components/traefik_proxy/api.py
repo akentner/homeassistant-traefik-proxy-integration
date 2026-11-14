@@ -172,9 +172,9 @@ class TraefikProxyApiClient:
         self._verify_ssl = verify_ssl
         self._request_timeout = request_timeout
         self._page_size = DEFAULT_PAGE_SIZE if page_size is None else page_size
-        # Set when Traefik answers 404 on /api/rawdata (the client then reads
-        # the paginated list endpoints); cleared again by a successful
-        # rawdata probe, see request_rawdata_probe().
+        # Set when Traefik answers 404 on /api/rawdata and the paginated list
+        # endpoints answered instead; cleared again by a successful rawdata
+        # probe, see request_rawdata_probe().
         self._paginated = False
         self._rawdata_probe_due = False
 
@@ -295,8 +295,9 @@ class TraefikProxyApiClient:
         """Fetch HTTP routers, services and middlewares as parsed models.
 
         Reads the unpaginated ``/api/rawdata`` in one request first. When
-        Traefik answers 404 there, the client switches to the paginated list
-        endpoints in the same call. While paginated, a probe armed through
+        Traefik answers 404 there, the same call reads the paginated list
+        endpoints, and the client switches to them only when that read
+        succeeds. While paginated, a probe armed through
         :meth:`request_rawdata_probe` retries rawdata once and switches back
         on success. Auth errors always propagate; every other rawdata error
         outside a probe propagates unchanged.
@@ -312,13 +313,16 @@ class TraefikProxyApiClient:
             try:
                 payload, _ = await self._request(_RAWDATA_PATH)
             except TraefikProxyNotFoundError:
+                _LOGGER.debug("path=%s not found, trying the paginated list endpoints", _RAWDATA_PATH)
+                # Switch only once the pages answered: when they fail too
+                # (e.g. Traefik restarting), the next call tries rawdata again.
+                state = await self._get_state_paginated()
                 self._paginated = True
-                _LOGGER.debug("path=%s not found, switching to the paginated list endpoints", _RAWDATA_PATH)
-            else:
-                try:
-                    return parse_rawdata(payload)
-                except (ValueError, TypeError, KeyError) as err:
-                    raise TraefikProxyPayloadError(_RAWDATA_PATH, "unexpected payload shape") from err
+                return state
+            try:
+                return parse_rawdata(payload)
+            except (ValueError, TypeError, KeyError) as err:
+                raise TraefikProxyPayloadError(_RAWDATA_PATH, "unexpected payload shape") from err
         return await self._get_state_paginated()
 
     async def _get_state_paginated(self) -> TraefikState:
