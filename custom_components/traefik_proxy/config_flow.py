@@ -132,33 +132,45 @@ class ApiDisabled(Exception):
 
 
 class InvalidUrl(Exception):
-    """The provided URL is malformed (no scheme, bad scheme, missing host)."""
+    """The provided URL is malformed or carries credentials (userinfo)."""
 
 
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
-def _check_url_shape(url: str) -> None:
+def _check_url_shape(url: str, *, allow_userinfo: bool = False) -> None:
     """Pre-flight URL shape check before handing it to aiohttp.
 
     Catches the common class of malformed-input bugs that the
     ``TextSelector(type=URL)`` field cannot block (e.g. ``http;//`` from
     autocomplete / paste mistakes). Raises :class:`InvalidUrl` if the URL
     is missing a scheme, has a non-HTTP scheme, or has no host.
+
+    Also raises :class:`InvalidUrl` for credentials embedded in the URL
+    (``user:pass@host``) unless ``allow_userinfo`` is set: credentials
+    belong in the token field, which the client sends as a per-request
+    Authorization header. Basic auth gets its own selector later.
     """
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
         raise InvalidUrl(url)
+    if not allow_userinfo and (parsed.username or parsed.password):
+        raise InvalidUrl(url)
 
 
-async def _validate_input(hass: Any, data: dict[str, Any]) -> None:
+async def _validate_input(hass: Any, data: dict[str, Any], *, allow_userinfo: bool = False) -> None:
     """Probe /api/version and map client errors to user-friendly exceptions.
 
     Shared by the user / yaml / reauth / reconfigure flows so that the
     401/403 -> InvalidAuth, 404 -> ApiDisabled, invalid URL -> InvalidUrl,
     and everything-else -> CannotConnect mapping is defined exactly once.
+
+    A newly entered URL must not carry credentials (see
+    :func:`_check_url_shape`); only steps that validate a URL the user does
+    not enter anew opt out via ``allow_userinfo``. Should aiohttp refuse to
+    build the request for such a URL, the client error maps to InvalidUrl.
     """
-    _check_url_shape(data[CONF_URL])
+    _check_url_shape(data[CONF_URL], allow_userinfo=allow_userinfo)
     try:
         auth = auth_from_entry_data(data)
     except ValueError:
@@ -301,7 +313,9 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             validated = STEP_YAML_DATA_SCHEMA(user_input)
             try:
-                await _validate_input(self.hass, validated)
+                # Existing YAML imports with credentials in the URL keep
+                # working until basic auth gets its own selector.
+                await _validate_input(self.hass, validated, allow_userinfo=True)
             except InvalidUrl:
                 errors["base"] = "invalid_url"
             except InvalidAuth:
@@ -354,7 +368,8 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_VERIFY_SSL: effective_verify_ssl(entry),
             }
             try:
-                await _validate_input(self.hass, probe_data)
+                # Probes the stored URL, which this form cannot edit.
+                await _validate_input(self.hass, probe_data, allow_userinfo=True)
             except InvalidUrl:
                 errors["base"] = "invalid_url"
             except InvalidAuth:
