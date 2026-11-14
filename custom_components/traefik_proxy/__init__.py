@@ -53,7 +53,7 @@ async def _async_handle_reload_routers(call: ServiceCall) -> dict[str, Any]:
     CONTEXT.md D-12 / PITFALLS #15: Traefik returns 200/202 from
     ``/api/http/routers/refresh`` BEFORE providers finish reloading, so we
     capture the pre-POST router-name set, POST the refresh, then poll
-    ``coordinator.data['http_routers']`` with exponential backoff
+    the router names of the coordinator snapshot with exponential backoff
     (``200ms -> 5s``, max 10 attempts, <= 5s budget) and exit early when the
     name set changes from the snapshot.
 
@@ -82,12 +82,8 @@ async def _async_handle_reload_routers(call: ServiceCall) -> dict[str, Any]:
     coordinator = runtime.coordinator
 
     def _current_router_names() -> set[str]:
-        """Snapshot of router names from the latest coordinator cycle."""
-        data = coordinator.data if isinstance(coordinator.data, dict) else {}
-        routers = data.get("http_routers") if isinstance(data, dict) else None
-        if not isinstance(routers, list):
-            return set()
-        return {r["name"] for r in routers if isinstance(r, dict) and "name" in r}
+        """Router names from the latest coordinator snapshot."""
+        return set(coordinator.data.routers)
 
     before = _current_router_names()
 

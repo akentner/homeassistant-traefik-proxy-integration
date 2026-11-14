@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.traefik_proxy.api import TraefikProxyApiError
 from custom_components.traefik_proxy.button import TraefikProxyReloadButton
 from custom_components.traefik_proxy.const import DOMAIN
+from tests.conftest import make_snapshot
 
 MOCK_URL = "https://traefik.example.com:8080"
 
@@ -49,7 +50,7 @@ def _stub_all_endpoints(
     middlewares: list[dict[str, Any]] | None = None,
     entrypoints: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Mock all six endpoints fetch_all() now requests."""
+    """Mock version, entrypoints and the three list endpoints (one page each, no X-Next-Page)."""
     aioclient_mock.get(
         f"{MOCK_URL}/api/version",
         json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
@@ -104,7 +105,10 @@ async def test_reload_service_verified_true_when_routers_change(hass, aioclient_
     ]
 
     # First GET serves initial; subsequent GETs serve updated.
-    aioclient_mock.get(f"{MOCK_URL}/api/version", json={"Version": "3.1.4"})
+    aioclient_mock.get(
+        f"{MOCK_URL}/api/version",
+        json={"Version": "3.1.4", "Codename": "rancher", "startDate": "2026-07-01T00:00:00Z"},
+    )
     aioclient_mock.get(f"{MOCK_URL}/api/entrypoints", json=[])
     aioclient_mock.get(f"{MOCK_URL}/api/http/services", json=[])
     aioclient_mock.get(f"{MOCK_URL}/api/http/middlewares", json=[])
@@ -294,9 +298,7 @@ async def test_reload_service_allows_admin_user(hass, aioclient_mock, hass_admin
     coordinator, spy = await _setup_with_service(hass, aioclient_mock)
 
     async def _refresh_with_new_router() -> None:
-        data = dict(coordinator.data)
-        data["http_routers"] = [*data.get("http_routers", []), {"name": "new@docker"}]
-        coordinator.data = data
+        coordinator.data = make_snapshot(routers=[{"name": "new@docker"}])
 
     coordinator.async_request_refresh = AsyncMock(  # type: ignore[attr-defined]
         side_effect=_refresh_with_new_router

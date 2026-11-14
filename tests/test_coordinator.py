@@ -47,7 +47,7 @@ def _make_entry(**kwargs) -> MockConfigEntry:
 
 
 def _stub_all_endpoints(aioclient_mock, *, routers: list | None = None) -> None:
-    """Mock all six endpoints fetch_all() now requests (Phase 2 / CONTEXT.md D-04)."""
+    """Mock version, entrypoints and the three list endpoints (one page each, no X-Next-Page)."""
     aioclient_mock.get(
         f"{MOCK_URL}/api/version",
         json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},

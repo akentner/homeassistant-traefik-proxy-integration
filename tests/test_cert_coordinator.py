@@ -37,6 +37,7 @@ from custom_components.traefik_proxy.const import (
     TLS_SEMAPHORE,
 )
 from custom_components.traefik_proxy.tls import CertError, CertInfo, is_error
+from tests.conftest import make_snapshot
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,10 +63,10 @@ def _make_entry(
         options["tls_warn_days"] = tls_warn_days
     entry.options = options
     entry.runtime_data = MagicMock()
-    # ``coordinator.data`` is the cache the main coordinator populates;
+    # ``coordinator.data`` is the snapshot the main coordinator publishes;
     # tests override this per scenario.
     entry.runtime_data.coordinator = MagicMock()
-    entry.runtime_data.coordinator.data = {}
+    entry.runtime_data.coordinator.data = make_snapshot()
     return entry
 
 
@@ -75,7 +76,7 @@ def _make_main_coord(
 ) -> Any:
     """Build a mock main coordinator wired to the entry's runtime_data.
 
-    The cert coordinator accesses ``self.config_entry.runtime_data.coordinator.data["http_routers"]``
+    The cert coordinator reads ``self.config_entry.runtime_data.coordinator.data.routers``
     (BLOCKER #1 fix path). Tests populate ``runtime_data.coordinator.data`` directly
     rather than going through ``aioclient_mock`` — these are pure
     unit tests, not integration tests.
@@ -259,8 +260,8 @@ async def test_async_update_data_fans_out_via_gather() -> None:
     resulting data dict must have one row per host.
     """
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {
                 "name": "r1",
                 "tls": {
@@ -278,7 +279,7 @@ async def test_async_update_data_fans_out_via_gather() -> None:
                 "rule": "Host(`h2.example.com`)",
             },
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
 
     async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertInfo:
@@ -303,8 +304,8 @@ async def test_async_update_data_fans_out_via_gather() -> None:
 async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
     """Mixed success / error rows both surface in the cache (D-06)."""
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {
                 "name": "r1",
                 "tls": {"domains": [{"main": "ok-a.example.com"}]},
@@ -326,7 +327,7 @@ async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
                 "rule": "Host(`timeout.example.com`)",
             },
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
 
     async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertInfo | CertError:
@@ -351,19 +352,19 @@ async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
 
 
 async def test_async_update_data_returns_empty_when_no_routers() -> None:
-    """Defensive: empty ``http_routers`` returns an empty cache dict."""
+    """Defensive: a snapshot with an empty router list returns an empty cache dict."""
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {"http_routers": []}
+    entry.runtime_data.coordinator.data = make_snapshot(routers=[])
     c = CertCoordinator(MagicMock(), entry)
 
     data = await c._async_update_data()
     assert data == {}
 
 
-async def test_async_update_data_handles_missing_runtime_data() -> None:
-    """Main coordinator hasn't populated yet → empty cache, never raises."""
+async def test_async_update_data_handles_empty_snapshot() -> None:
+    """A snapshot without any router → empty cache, never raises."""
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {}  # no http_routers key
+    entry.runtime_data.coordinator.data = make_snapshot()
     c = CertCoordinator(MagicMock(), entry)
 
     data = await c._async_update_data()
@@ -382,14 +383,14 @@ def test_collect_hosts_extracts_union_of_domains_and_sans() -> None:
     - r1 — TLS with main + sans → must be in hosts
     - r2 — TLS with main → must be in hosts
     - r3 — no TLS → dropped
-    - api@internal — TLS but filtered via filter_internal_items
+    - api@internal — TLS, but internal routers are not part of the snapshot
 
     Dedup collapses ``Host(`h1.example.com`)`` (rule) with
     ``domains[].main="h1.example.com"`` to a single host.
     """
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {
                 "name": "r1",
                 "tls": {
@@ -415,21 +416,21 @@ def test_collect_hosts_extracts_union_of_domains_and_sans() -> None:
                 "rule": "Host(`internal.example.com`)",
             },
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
     assert c.config_entry is entry  # BLOCKER #1 fix pin
 
     hosts = c._collect_hosts_from_main_coordinator()
     assert hosts == {"h1.example.com", "h1-alt.example.com", "h2.example.com"}
-    assert "internal.example.com" not in hosts  # dropped by filter_internal_items
+    assert "internal.example.com" not in hosts  # internal router not in the snapshot
     assert "r3" not in hosts and "api@internal" not in hosts
 
 
 def test_collect_hosts_lowercases_for_dedup() -> None:
     """Mixed casing in rule + domains → lowercased + deduped."""
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {
                 "name": "r1",
                 "tls": {"domains": [{"main": "EXAMPLE.com"}]},
@@ -441,7 +442,7 @@ def test_collect_hosts_lowercases_for_dedup() -> None:
                 "rule": "Host(`example.com`)",
             },
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
     hosts = c._collect_hosts_from_main_coordinator()
     assert hosts == {"example.com"}
@@ -450,12 +451,13 @@ def test_collect_hosts_lowercases_for_dedup() -> None:
 def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
     """Routers with empty TLS, TLS without domains, malformed shapes — all skipped.
 
-    CONTEXT.md D-02 / out-of-scope: Traefik wildcard / default-cert
-    setups leave the cert coordinator with no useful probe target.
+    The parser absorbs the malformed shapes (non-object tls, wrong keys),
+    so they reach the cert coordinator as routers without a probe target.
+    Traefik wildcard / default-cert setups leave no useful probe target either.
     """
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {"name": "r1", "tls": {}, "rule": ""},  # TLS set but empty
             {"name": "r2", "tls": {"domains": []}, "rule": ""},  # empty domains list
             {"name": "r3", "tls": {"not_domains": "x"}, "rule": ""},  # wrong key
@@ -472,7 +474,7 @@ def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
                 "rule": "Host(`good.example.com`)",
             },  # valid — should appear
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
     hosts = c._collect_hosts_from_main_coordinator()
     assert hosts == {"good.example.com"}
@@ -481,8 +483,8 @@ def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
 def test_collect_hosts_handles_sans_as_string_or_list() -> None:
     """Sans can be a string OR a list (Traefik v3 spec)."""
     entry = _make_entry()
-    entry.runtime_data.coordinator.data = {
-        "http_routers": [
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
             {
                 "name": "r1",
                 "tls": {"domains": [{"main": "h.example.com", "sans": "alt.example.com"}]},
@@ -506,7 +508,7 @@ def test_collect_hosts_handles_sans_as_string_or_list() -> None:
                 "rule": "",
             },  # bad sans type → main still picked up
         ],
-    }
+    )
     c = CertCoordinator(MagicMock(), entry)
     hosts = c._collect_hosts_from_main_coordinator()
     assert {
