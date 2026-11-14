@@ -13,20 +13,25 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.traefik_proxy.const import DOMAIN, ITEM_STATE_OPTIONS
 from custom_components.traefik_proxy.entity_manager import ROUTERS, KindSpec, TraefikEntityManager
 from tests.conftest import (
     FIXTURE_VERSIONS,
+    MOCK_URL,
     entity_id_for,
+    make_traefik_entry,
     rawdata_copy,
     restub_traefik,
     setup_traefik_entry,
+    stub_traefik,
 )
 
 ROUTER = "file-ok@file"
@@ -311,3 +316,228 @@ def test_kind_spec_unique_id_round_trip() -> None:
     assert ROUTERS.key_of("entry2", unique_id) is None
     assert ROUTERS.key_of("entry1", "entry1_http_service_file-ok@file") is None
     assert ROUTERS.key_of("entry1", "entry1_http_router_") is None
+
+
+# ---------------------------------------------------------------------------
+# Grace period: missing for 24 h on the wall clock, then removed
+# ---------------------------------------------------------------------------
+
+# The spec values, independent of the constants they are checked against.
+GRACE = timedelta(hours=24)
+CHECK_INTERVAL = timedelta(minutes=5)
+GHOST = "ghost@file"
+
+
+def _store_key(entry_id: str) -> str:
+    return f"{DOMAIN}.missing.{entry_id}"
+
+
+def _router_keys(hass: HomeAssistant, entry: Any) -> list[str]:
+    """Return the router keys of the entry's sensor registry entries."""
+    return [
+        key
+        for reg_entry in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if reg_entry.domain == ROUTERS.domain
+        and (key := ROUTERS.key_of(entry.entry_id, reg_entry.unique_id)) is not None
+    ]
+
+
+async def _run_deadline_check(hass: HomeAssistant) -> None:
+    """Fire every timer due within one check interval; the wall clock stays where it is."""
+    async_fire_time_changed(hass, dt_util.utcnow() + CHECK_INTERVAL)
+    await hass.async_block_till_done()
+
+
+async def _setup_with_ghost(hass: HomeAssistant, aioclient_mock: Any, entry: Any) -> str:
+    """Register an orphan router sensor for ``entry`` (key absent from Traefik), then set the entry up."""
+    stub_traefik(aioclient_mock)
+    entry.add_to_hass(hass)
+    unique_id = ROUTERS.unique_id(entry.entry_id, GHOST)
+    reg_entry = er.async_get(hass).async_get_or_create(ROUTERS.domain, DOMAIN, unique_id, config_entry=entry)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return reg_entry.entity_id
+
+
+@pytest.mark.xfail(strict=True, reason="RED: grace-period removal not implemented yet")
+async def test_vanished_router_removed_after_grace_period(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
+    """A vanished router keeps its registry entry until 24 h have passed; the next check removes it."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    registry = er.async_get(hass)
+    entity_id = _router_entity_id(hass, entry)
+    area = ar.async_get(hass).async_create("Rack")
+    registry.async_update_entity(entity_id, name="My router", area_id=area.id)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    assert hass.states.get(entity_id).state == "missing"  # type: ignore[union-attr]
+
+    freezer.tick(GRACE - timedelta(seconds=1))
+    await _run_deadline_check(hass)
+    reg_entry = registry.async_get(entity_id)
+    assert reg_entry is not None
+    assert (reg_entry.name, reg_entry.area_id) == ("My router", area.id)
+    assert hass.states.get(entity_id).state == "missing"  # type: ignore[union-attr]
+
+    freezer.tick(timedelta(seconds=2))
+    await _run_deadline_check(hass)
+    assert registry.async_get(entity_id) is None
+    assert hass.states.get(entity_id) is None
+    assert ROUTER not in _router_keys(hass, entry)
+    assert entry.runtime_data.entity_manager.missing_since(ROUTERS, ROUTER) is None
+
+
+async def test_reappearing_router_inside_grace_keeps_entity(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
+    """A router back inside the grace period keeps its entity; the original deadline removes nothing."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    entity_id = _router_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    removed = rawdata["routers"].pop(ROUTER)
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+
+    freezer.tick(timedelta(hours=1))
+    rawdata["routers"][ROUTER] = removed
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    freezer.tick(GRACE)
+    await _run_deadline_check(hass)
+
+    assert _router_entity_id(hass, entry) == entity_id
+    assert _router_keys(hass, entry).count(ROUTER) == 1
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "enabled"
+    assert "missing_since" not in state.attributes
+
+
+@pytest.mark.xfail(strict=True, reason="RED: missing_since is not persisted yet")
+async def test_grace_period_survives_entry_reload(hass, aioclient_mock, mock_tls_probe, freezer, hass_storage) -> None:  # type: ignore[no-untyped-def]
+    """missing_since is persisted per entry: after a reload the router is missing since the original time."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    entity_id = _router_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    vanished_at = dt_util.utcnow()
+    assert hass_storage[_store_key(entry.entry_id)]["data"] == {"router": {ROUTER: vanished_at.isoformat()}}
+
+    freezer.tick(GRACE / 2)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    assert _router_entity_id(hass, entry) == entity_id
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "missing"
+    assert state.attributes["missing_since"] == vanished_at.isoformat()
+
+    freezer.tick(GRACE / 2 - timedelta(seconds=1))
+    await _run_deadline_check(hass)
+    assert er.async_get(hass).async_get(entity_id) is not None
+
+    freezer.tick(timedelta(seconds=2))
+    await _run_deadline_check(hass)
+    assert er.async_get(hass).async_get(entity_id) is None
+    assert hass.states.get(entity_id) is None
+
+
+@pytest.mark.xfail(strict=True, reason="RED: orphan registry entries are not adopted yet")
+async def test_orphan_registry_entry_adopted_and_removed_after_grace(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, freezer, hass_storage
+) -> None:
+    """A registry entry whose router is absent at setup becomes a missing entity and is removed 24 h later."""
+    entry = make_traefik_entry(entry_id="orphan-entry")
+    entity_id = await _setup_with_ghost(hass, aioclient_mock, entry)
+    setup_at = dt_util.utcnow()
+
+    state = hass.states.get(entity_id)
+    assert state is not None
+    assert state.state == "missing"
+    assert state.attributes["missing_since"] == setup_at.isoformat()
+    assert hass_storage[_store_key("orphan-entry")]["data"] == {"router": {GHOST: setup_at.isoformat()}}
+    assert sorted(_router_keys(hass, entry)) == sorted([*entry.runtime_data.coordinator.data.routers, GHOST])
+
+    freezer.tick(GRACE - timedelta(seconds=1))
+    await _run_deadline_check(hass)
+    assert er.async_get(hass).async_get(entity_id) is not None
+
+    freezer.tick(timedelta(seconds=2))
+    await _run_deadline_check(hass)
+    assert er.async_get(hass).async_get(entity_id) is None
+    assert hass.states.get(entity_id) is None
+    assert hass_storage[_store_key("orphan-entry")]["data"] == {}
+
+
+@pytest.mark.xfail(strict=True, reason="RED: stored deadlines are not applied at setup yet")
+async def test_expired_stored_orphan_removed_at_setup(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
+    """An orphan whose stored missing_since is older than 24 h is removed during setup and never gets a state."""
+    key = _store_key("expired-entry")
+    stored_since = dt_util.utcnow() - GRACE - timedelta(hours=1)
+    hass_storage[key] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": key,
+        "data": {"router": {GHOST: stored_since.isoformat(), "gone-long-ago@file": stored_since.isoformat()}},
+    }
+    entry = make_traefik_entry(entry_id="expired-entry")
+    entity_id = await _setup_with_ghost(hass, aioclient_mock, entry)
+
+    assert er.async_get(hass).async_get(entity_id) is None
+    assert hass.states.get(entity_id) is None
+    assert GHOST not in _router_keys(hass, entry)
+    assert sorted(_router_keys(hass, entry)) == sorted(entry.runtime_data.coordinator.data.routers)
+    assert hass_storage[key]["data"] == {}
+
+
+async def test_empty_snapshot_marks_missing_and_deletes_nothing(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
+    """A successful snapshot without routers marks every router sensor missing and removes no registry entry."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    keys = sorted(_router_keys(hass, entry))
+    assert keys == sorted(entry.runtime_data.coordinator.data.routers)
+    rawdata = rawdata_copy()
+    rawdata["routers"] = {}
+
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    freezer.tick(GRACE - timedelta(seconds=1))
+    await _run_deadline_check(hass)
+
+    assert sorted(_router_keys(hass, entry)) == keys
+    for key in keys:
+        state = hass.states.get(_router_entity_id(hass, entry, key))
+        assert state is not None and state.state == "missing", key
+
+
+async def test_failed_cycle_never_marks_missing(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
+    """A failed cycle makes router sensors unavailable without marking any key missing."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    keys = _router_keys(hass, entry)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=500)
+    stub_traefik(aioclient_mock)
+
+    await entry.runtime_data.coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert not entry.runtime_data.coordinator.last_update_success
+    manager = entry.runtime_data.entity_manager
+    for key in keys:
+        state = hass.states.get(_router_entity_id(hass, entry, key))
+        assert state is not None and state.state == "unavailable", key
+        assert manager.missing_since(ROUTERS, key) is None, key
+    assert _store_key(entry.entry_id) not in hass_storage
+
+
+@pytest.mark.xfail(strict=True, reason="RED: missing-since Store and async_remove_entry not implemented yet")
+async def test_remove_entry_deletes_missing_store(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
+    """Removing the config entry deletes its missing-since Store."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    key = _store_key(entry.entry_id)
+    assert ROUTER in hass_storage[key]["data"]["router"]
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+    assert key not in hass_storage
