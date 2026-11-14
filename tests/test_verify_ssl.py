@@ -31,8 +31,8 @@ from custom_components.traefik_proxy.const import (
     DOMAIN,
 )
 from custom_components.traefik_proxy.coordinator import effective_verify_ssl
+from tests.conftest import MOCK_URL, stub_traefik
 
-MOCK_URL = "https://traefik.example.com:8080"
 NEW_URL = "https://traefik-new.example.com:8080"
 PROBE_CLIENT = "custom_components.traefik_proxy.config_flow.TraefikProxyApiClient"
 
@@ -46,21 +46,6 @@ def _make_entry(*, verify_ssl: bool = True, options: dict[str, Any] | None = Non
         options=options or {},
         unique_id="traefik.example.com",
     )
-
-
-def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[no-untyped-def]
-    """Mock the setup requests (version, entrypoints) and the list endpoints of one cycle.
-
-    The config-flow probe is the ``/api/version`` request.
-    """
-    aioclient_mock.get(
-        f"{base_url}/api/version",
-        json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
-    )
-    aioclient_mock.get(f"{base_url}/api/entrypoints", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/routers", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/services", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/middlewares", json=[])
 
 
 async def _setup_entry(hass, entry: MockConfigEntry) -> None:  # type: ignore[no-untyped-def]
@@ -88,7 +73,7 @@ def test_effective_verify_ssl_precedence(data: dict[str, Any], options: dict[str
 
 async def test_user_flow_verify_ssl_false_reaches_runtime_client(hass, aioclient_mock) -> None:
     """(a) A user who disables verify_ssl at setup gets a runtime client with False."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert result["type"] is FlowResultType.FORM
@@ -109,8 +94,8 @@ async def test_user_flow_verify_ssl_false_reaches_runtime_client(hass, aioclient
 
 async def test_options_false_then_reconfigure_true(hass, aioclient_mock) -> None:
     """(b) Reconfigure with True after options False syncs data, options and client."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
-    _stub_all_endpoints(aioclient_mock, NEW_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
     entry = _make_entry(verify_ssl=True, options={CONF_VERIFY_SSL: False})
     await _setup_entry(hass, entry)
     assert entry.runtime_data.client._verify_ssl is False
@@ -134,7 +119,7 @@ async def test_options_false_then_reconfigure_true(hass, aioclient_mock) -> None
 
 async def test_options_form_defaults_to_effective_value(hass, aioclient_mock) -> None:
     """(c) A data-only verify_ssl=False entry shows False in the options form."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry(verify_ssl=False)
     await _setup_entry(hass, entry)
 
@@ -145,7 +130,7 @@ async def test_options_form_defaults_to_effective_value(hass, aioclient_mock) ->
 
 async def test_options_change_reaches_running_client(hass, aioclient_mock) -> None:
     """(d) An options verify_ssl change rebuilds the one client without a reload."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry(verify_ssl=True)
     await _setup_entry(hass, entry)
     runtime = entry.runtime_data
@@ -172,7 +157,7 @@ async def test_options_change_reaches_running_client(hass, aioclient_mock) -> No
 
 async def test_reauth_probe_uses_effective_value(hass, aioclient_mock) -> None:
     """(e) The reauth probe uses options verify_ssl over data."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry(verify_ssl=True, options={CONF_VERIFY_SSL: False})
     await _setup_entry(hass, entry)
 

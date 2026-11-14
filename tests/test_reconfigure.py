@@ -26,8 +26,8 @@ from custom_components.traefik_proxy.const import (
     CONF_VERIFY_SSL,
     DOMAIN,
 )
+from tests.conftest import MOCK_URL, stub_traefik
 
-MOCK_URL = "https://traefik.example.com:8080"
 NEW_URL = "https://traefik-new.example.com:8080"
 OTHER_URL = "https://other.example.com:8080"
 SECRET = "test-secret"
@@ -42,21 +42,6 @@ def _make_entry(*, options: dict[str, Any] | None = None) -> MockConfigEntry:
         options=options or {},
         unique_id="traefik.example.com",
     )
-
-
-def _stub_all_endpoints(aioclient_mock, base_url: str) -> None:  # type: ignore[no-untyped-def]
-    """Mock the setup requests (version, entrypoints) and the list endpoints of one cycle.
-
-    The config-flow probe is the ``/api/version`` request.
-    """
-    aioclient_mock.get(
-        f"{base_url}/api/version",
-        json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
-    )
-    aioclient_mock.get(f"{base_url}/api/entrypoints", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/routers", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/services", json=[])
-    aioclient_mock.get(f"{base_url}/api/http/middlewares", json=[])
 
 
 def _probe_auth(aioclient_mock) -> str | None:  # type: ignore[no-untyped-def]
@@ -91,7 +76,7 @@ async def test_reconfigure_form_does_not_contain_token(hass) -> None:
 @pytest.mark.parametrize("submitted", [{CONF_API_KEY: ""}, {}], ids=["empty", "omitted"])
 async def test_same_host_empty_token_keeps_stored_token(hass, aioclient_mock, submitted: dict[str, Any]) -> None:
     """Same host + empty/omitted token: success, stored token kept and used for the probe."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry()
     entry.add_to_hass(hass)
 
@@ -110,7 +95,7 @@ async def test_same_host_empty_token_keeps_stored_token(hass, aioclient_mock, su
 
 async def test_same_host_new_token_replaces_stored_token(hass, aioclient_mock) -> None:
     """Same host + non-empty token: the new token is probed and stored."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry()
     entry.add_to_hass(hass)
 
@@ -129,7 +114,7 @@ async def test_same_host_new_token_replaces_stored_token(hass, aioclient_mock) -
 
 async def test_same_host_verify_ssl_flip(hass, aioclient_mock) -> None:
     """Same-host reconfigure from options verify_ssl False to True updates the runtime client."""
-    _stub_all_endpoints(aioclient_mock, MOCK_URL)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry(options={CONF_VERIFY_SSL: False})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -178,7 +163,7 @@ async def test_reconfigure_to_other_entry_host_aborts(hass, aioclient_mock) -> N
 
 async def test_reconfigure_to_unused_host_succeeds(hass, aioclient_mock) -> None:
     """A host change to a host no entry owns still succeeds."""
-    _stub_all_endpoints(aioclient_mock, NEW_URL)
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
     entry = _make_entry()
     entry.add_to_hass(hass)
 

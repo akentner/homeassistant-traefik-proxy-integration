@@ -27,9 +27,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.traefik_proxy.api import TraefikProxyApiError
 from custom_components.traefik_proxy.button import TraefikProxyReloadButton
 from custom_components.traefik_proxy.const import DOMAIN
-from tests.conftest import make_snapshot
-
-MOCK_URL = "https://traefik.example.com:8080"
+from tests.conftest import MOCK_URL, make_snapshot, stub_traefik
 
 
 def _make_entry() -> MockConfigEntry:
@@ -42,44 +40,13 @@ def _make_entry() -> MockConfigEntry:
     )
 
 
-def _stub_all_endpoints(
-    aioclient_mock,
-    *,
-    routers: list[dict[str, Any]] | None = None,
-    services: list[dict[str, Any]] | None = None,
-    middlewares: list[dict[str, Any]] | None = None,
-    entrypoints: list[dict[str, Any]] | None = None,
-) -> None:
-    """Mock version, entrypoints and the three list endpoints (one page each, no X-Next-Page)."""
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/version",
-        json={"Version": "3.1.4", "Codename": "rancher", "StartDate": "2026-07-01"},
-    )
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/entrypoints",
-        json=entrypoints
-        if entrypoints is not None
-        else [
-            {"name": "websecure", "address": ":443", "transport": "tcp", "tls": {}},
-            {"name": "web", "address": ":80", "transport": "tcp"},
-        ],
-    )
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/http/routers",
-        json=routers if routers is not None else [],
-    )
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/http/services",
-        json=services if services is not None else [],
-    )
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/http/middlewares",
-        json=middlewares if middlewares is not None else [],
-    )
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/overview",
-        json={"http": {"routers": 0, "services": 0, "middlewares": 0}},
-    )
+def _rawdata(*routers: str) -> dict[str, Any]:
+    """A /api/rawdata payload (map form, key = name) holding enabled routers ``routers``."""
+    return {
+        "routers": {
+            name: {"status": "enabled", "rule": f"Host(`{name.split('@')[0]}.example.com`)"} for name in routers
+        }
+    }
 
 
 async def test_async_setup_registers_reload_service(hass) -> None:
@@ -94,39 +61,24 @@ async def test_reload_service_verified_true_when_routers_change(hass, aioclient_
     """Reload handler: router set changes -> verified=True with name_diff."""
     from custom_components.traefik_proxy import _async_handle_reload_routers
 
-    # Initial cycle: routers A and B.
-    initial_routers = [
-        {"name": "router-a", "rule": "Host(`a.example.com`)", "status": "enabled"},
-        {"name": "router-b", "rule": "Host(`b.example.com`)", "status": "enabled"},
-    ]
-    updated_routers = [
-        {"name": "router-a", "rule": "Host(`a.example.com`)", "status": "enabled"},
-        {"name": "router-c", "rule": "Host(`c.example.com`)", "status": "enabled"},
-    ]
+    # Setup serves routers A and B; every later cycle serves A and C.
+    initial = _rawdata("router-a", "router-b")
+    updated = _rawdata("router-a", "router-c")
+    rawdata_calls = {"count": 0}
 
-    # First GET serves initial; subsequent GETs serve updated.
-    aioclient_mock.get(
-        f"{MOCK_URL}/api/version",
-        json={"Version": "3.1.4", "Codename": "rancher", "startDate": "2026-07-01T00:00:00Z"},
-    )
-    aioclient_mock.get(f"{MOCK_URL}/api/entrypoints", json=[])
-    aioclient_mock.get(f"{MOCK_URL}/api/http/services", json=[])
-    aioclient_mock.get(f"{MOCK_URL}/api/http/middlewares", json=[])
-    aioclient_mock.get(f"{MOCK_URL}/api/overview", json={"http": {}})
-    # Track call count to swap routers payload after first call.
-    routers_calls = {"count": 0}
-
-    async def _routers_response(method, url, data):  # type: ignore[no-untyped-def]
+    async def _rawdata_response(method, url, data):  # type: ignore[no-untyped-def]
         """side_effect callback returning an AiohttpClientMockResponse."""
         from pytest_homeassistant_custom_component.test_util.aiohttp import (
             AiohttpClientMockResponse,
         )
 
-        routers_calls["count"] += 1
-        payload = updated_routers if routers_calls["count"] > 1 else initial_routers
+        rawdata_calls["count"] += 1
+        payload = updated if rawdata_calls["count"] > 1 else initial
         return AiohttpClientMockResponse(method, url, json=payload)
 
-    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", side_effect=_routers_response)
+    # Registered first, so it wins over the rawdata mock of stub_traefik.
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", side_effect=_rawdata_response)
+    stub_traefik(aioclient_mock, rawdata={})
     # Refresh POST returns 202.
     aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
 
@@ -157,10 +109,7 @@ async def test_reload_service_verified_false_when_no_change_within_budget(hass, 
     """If router set never changes, verified=False after max attempts."""
     from custom_components.traefik_proxy import _async_handle_reload_routers
 
-    routers = [
-        {"name": "stable-router", "rule": "Host(`s.example.com`)", "status": "enabled"},
-    ]
-    _stub_all_endpoints(aioclient_mock, routers=routers)
+    stub_traefik(aioclient_mock, rawdata=_rawdata("stable-router"))
     aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
 
     entry = _make_entry()
@@ -192,7 +141,7 @@ async def test_reload_service_propagates_api_errors(hass, aioclient_mock) -> Non
     """Non-2xx POST raises TraefikProxyApiError -> HA surfaces as service failure."""
     from custom_components.traefik_proxy import _async_handle_reload_routers
 
-    _stub_all_endpoints(aioclient_mock)
+    stub_traefik(aioclient_mock, rawdata={})
     # POST returns 500 -> reload_routers raises TraefikProxyApiError.
     aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=500)
 
@@ -221,7 +170,7 @@ async def test_reload_button_async_press_calls_service(hass, aioclient_mock) -> 
     the ServiceRegistry captures the handler reference at registration time;
     instead we observe the handler's downstream effect (the client call).
     """
-    _stub_all_endpoints(aioclient_mock)
+    stub_traefik(aioclient_mock, rawdata={})
     aioclient_mock.post(f"{MOCK_URL}/api/http/routers/refresh", status=202)
 
     entry = _make_entry()
@@ -263,7 +212,7 @@ async def _setup_with_service(hass, aioclient_mock):  # type: ignore[no-untyped-
     """Register the service, load an entry and return its coordinator + reload spy."""
     from custom_components.traefik_proxy import async_setup
 
-    _stub_all_endpoints(aioclient_mock)
+    stub_traefik(aioclient_mock, rawdata={})
     entry = _make_entry()
     entry.add_to_hass(hass)
     await async_setup(hass, {})
