@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import ssl
 import subprocess
@@ -10,6 +11,7 @@ import sys
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -28,6 +30,31 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from custom_components.traefik_proxy import tls as _tls_module  # pre-import for in-fixture patching
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Real Traefik captures (tests/traefik/capture.py), one directory per generation.
+FIXTURE_VERSIONS = ("v2.11", "v3.7")
+
+
+def load_fixture(version: str, name: str) -> Any:
+    """Return the parsed JSON of a captured fixture file."""
+    return json.loads((FIXTURES_DIR / version / name).read_text(encoding="utf-8"))
+
+
+def load_paginated(version: str, kind: str) -> tuple[list[Any], list[str | None]]:
+    """Concatenate the captured list pages of ``kind`` in page order.
+
+    Returns the items of all pages and the recorded ``X-Next-Page`` header
+    value of each page (``None`` when the header was absent).
+    """
+    index = load_fixture(version, "pages/index.json")
+    pages = sorted(index[kind], key=lambda page: page["page"])
+    items: list[Any] = []
+    next_pages: list[str | None] = []
+    for page in pages:
+        items.extend(load_fixture(version, f"pages/{page['file']}"))
+        next_pages.append(page.get("x_next_page"))
+    return items, next_pages
+
 
 pytest_plugins = ["pytest_homeassistant_custom_component"]
 
