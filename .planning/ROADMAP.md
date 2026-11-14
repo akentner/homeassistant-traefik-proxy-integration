@@ -345,11 +345,33 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
-**Plans**: TBD
+**Plans**: 7 plans (7 sequential waves)
 
 Plans:
+**Wave 1**
+- [ ] 05-01-PLAN.md — Tracer: router ENUM sensor through the entity manager on the Routers sub-device (add / missing / re-bind, write-on-change); main + sub-devices with registry link, device and router-state translations (ENT-01, ENT-02, ENT-03, ENT-04)
 
-- [ ] TBD (run /gsd-plan-phase 5 to break down)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 05-02-PLAN.md — Router binary_sensor removed and router tests moved to the ENUM sensor; persisted 24 h wall-clock grace period with deadline timer and orphan adoption (ENT-01, ENT-02, ENT-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 05-03-PLAN.md — Services and entrypoints as manager kinds; problem aggregates as one enabled-by-default class; diagnostic counts/version/start time/healthy ratio; PARALLEL_UPDATES for sensor/binary_sensor (ENT-01, ENT-02, ENT-04, ENT-05, ENT-06, ENT-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 05-04-PLAN.md — Per-item option: no router/service entities and no Routers/Services sub-devices when off, immediate purge on reload (ENT-10)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 05-05-PLAN.md — Certificate entities on TraefikCertEntity through the manager (WR-05): no re-adding known hosts, grace period, write-on-change, translated {host} names (ENT-01, ENT-02, ENT-03, ENT-08)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 05-06-PLAN.md — Reload feature removed (button, service, services.yaml, client refresh method); "Refresh now" button for its own entry (ENT-07, ENT-08)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 05-07-PLAN.md — de.json + icons.json; 0.3.0 migration with persistent repair notice; legacy device cleanup, live sw_version, old bases removed, zero-write invariant (ENT-02, ENT-03, ENT-08, ENT-09)
+
+**Cross-cutting constraints:** <!-- gsd:generated -->
+- pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task of this plan; no HA 2026.11-only API is used (D-20)
+- pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task (D-20)
 
 ### Phase 6: Certificates
 
@@ -496,7 +518,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
-| 5. Entity model + lifecycle | 0/TBD | Not started | - |
+| 5. Entity model + lifecycle | 0/7 | Planned | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
