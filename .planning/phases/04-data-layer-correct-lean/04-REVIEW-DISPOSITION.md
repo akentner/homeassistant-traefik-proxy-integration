@@ -112,8 +112,8 @@ recorded: 2026-11-14T03:05:35.009Z
 
 | Finding | Severity | Disposition | Source |
 |---------|----------|-------------|--------|
-| IN-08 | info | open | - |
-| IN-09 | info | open | - |
+| IN-08 | info | deferred | Phase 7 (M31): ROADMAP carry-over 440ab67 |
+| IN-09 | info | deferred | Phase 7 (M31): ROADMAP carry-over 440ab67 |
 | IN-10 | info | open | - |
 | IN-11 | info | open | - |
 | IN-12 | info | open | - |
