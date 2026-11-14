@@ -99,6 +99,11 @@ human_verification:
   - test: "Decide on the 04-09 schedule wording superseded by M29: either accept the override below, or reword the D-07 amendment in 04-CONTEXT.md (and the two 04-09 truths) to 'retries /api/rawdata once per VERSION_RECHECK_INTERVAL on a clock of its own (usually in the same cycle as the hourly version re-check)'"
     expected: "The plan contract and the code say the same thing; then re-run verification for status passed"
     why_human: "The code deliberately decouples the probe from the version re-check (M29 fix for WR-09). 04-09 truths 1 and 3, the D-07 amendment and W24 still state the coupling, and no decision formally amended them. Accepting a deviation from a plan must-have is a human governance decision, not something the verifier may grant"
+overrides:
+  - must_have: "04-09 truths 1 and 3, literal schedule clause: the probe runs in the coordinator cycle that performs the hourly version re-check, and no rawdata probe happens before the re-check interval has elapsed after the last successful version check"
+    reason: "Superseded by M29 (WR-09 fix 293ba84): the probe keeps its own hourly clock so post-failure re-checks cannot starve it. Budget (<= 1 probe/h, >= 1 h apart), revocability, no timer and the healthy-case 1 h boundary are unchanged and tested. Contract docs amended per M32 (D-07 in 04-CONTEXT.md, 04-09 truths 1 and 3, W24)"
+    accepted_by: "manager (M29/M32)"
+    accepted_at: "2026-11-14T03:30:00Z"
 ---
 
 # Phase 4: Data layer (correct + lean) Verification Report

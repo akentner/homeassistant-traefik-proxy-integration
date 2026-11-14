@@ -92,6 +92,13 @@ types stay exactly as they are in this phase.
   keeps the pages, an auth failure propagates. At most one extra rawdata
   request per hour. This replaces the rule that the client keeps the
   paginated choice for good.
+  **Amended (M29/M32, 2026-11-14, WR-09 fix 293ba84):** the rawdata retry runs
+  once per `VERSION_RECHECK_INTERVAL` on a clock of its own, usually in the
+  same cycle as the hourly version re-check; a version re-check after a failed
+  cycle neither arms nor postpones it, so recurring failures cannot starve it.
+  Budget unchanged: at most one extra rawdata request per hour, probes at
+  least one interval apart, no timer. (WR-10 fix 1c35145: the switch to the
+  pages is stored only after the page reads succeed.)
 - **D-08:** `Auth` is a frozen dataclass with `mode: AuthMode`
   (`StrEnum`: `none`, `basic`, `bearer`) and optional `username`, `password`,
   `token`. The `Authorization` header is built per request (`Basic` via
