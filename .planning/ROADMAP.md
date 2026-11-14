@@ -345,11 +345,11 @@ replaced by a "Refresh now" button and existing installs migrated cleanly.
      remain). Cert entities subclass a `TraefikCertEntity` subscribed to
      the cert coordinator and are no longer re-added every cycle (no
      "does not generate unique IDs" errors). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 7 plans (7 sequential waves)
+**Plans**: 1/7 plans executed (7 sequential waves)
 
 Plans:
 **Wave 1**
-- [ ] 05-01-PLAN.md — Tracer: router ENUM sensor through the entity manager on the Routers sub-device (add / missing / re-bind, write-on-change); main + sub-devices with registry link, device and router-state translations (ENT-01, ENT-02, ENT-03, ENT-04)
+- [x] 05-01-PLAN.md — Tracer: router ENUM sensor through the entity manager on the Routers sub-device (add / missing / re-bind, write-on-change); main + sub-devices with registry link, device and router-state translations (ENT-01, ENT-02, ENT-03, ENT-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 05-02-PLAN.md — Router binary_sensor removed and router tests moved to the ENUM sensor; persisted 24 h wall-clock grace period with deadline timer and orphan adoption (ENT-01, ENT-02, ENT-04)
@@ -518,7 +518,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 2. Core Entities + Options + Reauth + Reload | 4/4 | Complete   | 2026-07-05 |
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
-| 5. Entity model + lifecycle | 0/7 | Planned | - |
+| 5. Entity model + lifecycle | 1/7 | In Progress | - |
 | 6. Certificates | 0/TBD | Not started | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |

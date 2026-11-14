@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 5
+current_phase: 05
 current_phase_name: Entity model + lifecycle
 status: executing
-stopped_at: Phase 04 complete, ready to plan Phase 05
-last_updated: "2026-11-14T04:46:10.781Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-11-14T05:03:27.036Z"
 last_activity: 2026-11-14
-last_activity_desc: Phase 04 complete, transitioned to Phase 05
-state_head: 17a0c48bd50051dbf9a1d91436fd4a880a552328
+last_activity_desc: Phase 05 execution started
+state_head: 03ad0573e7f51a9cce0c240c1e8014ec88e27be3
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 27
-  completed_plans: 20
+  completed_plans: 21
 milestone_name: milestone
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 04 — Data layer (correct + lean)
+**Current focus:** Phase 05 — Entity model + lifecycle
 
 ## Current Position
 
-Phase: 5 (Entity model + lifecycle) — READY TO EXECUTE
-Plan: Not started
+Phase: 05 (Entity model + lifecycle) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-11-14 — Phase 04 complete, transitioned to Phase 05
+Last activity: 2026-11-14 — Phase 05 execution started
 
 Progress: [█████░░░░░] 50% (3 of 8 phases)
 
@@ -85,6 +85,7 @@ Progress: [█████░░░░░] 50% (3 of 8 phases)
 | Phase 04 P07 | 6 min | 2 tasks | 6 files |
 | Phase 04 P08 | 7min | 2 tasks | 6 files |
 | Phase 04 P09 | 6min | 2 tasks | 5 files |
+| Phase 05 P01 | 12min | 2 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -145,6 +146,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-09: Paginated fallback revocable (M27, amends D-07): hourly version re-check retries /api/rawdata once while paginated; at most one extra rawdata request per hour
 - [Phase 04]: 04-09: Rawdata probe armed only when the re-check interval elapsed, never by a post-failure re-check inside it
 - [Phase 04]: 04-09: Probe auth errors propagate; other probe failures keep the pages and serve the same cycle
+- [Phase 05]: 05-01: RED commit of a tdd task carries xfail(strict=True) markers so every commit stays green (D-20/W42); GREEN removes them
+- [Phase 05]: 05-01: TraefikEntityManager on runtime_data; kind listener registered before entities; new keys added once in sorted order; vanished keys stamped missing; registry link via async_update_device(via_device_id)
 
 ### Pending Todos
 
@@ -186,7 +189,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T02:29:16.609Z
-Stopped at: Phase 04 complete, ready to plan Phase 05
+Last session: 2026-11-14T05:03:26.952Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
 Next: /gsd-execute-phase 4 (plan 04-02)
