@@ -330,7 +330,8 @@ async def test_request_budget_matrix(
     Rawdata mode: setup, steady, hourly, post-failure and restart. Then the
     paginated fallback after a rawdata 404 and its hourly rawdata re-probe:
     no probe before the re-check interval, and a probe that succeeds
-    switches the client back to one rawdata request per cycle.
+    switches the client back to one rawdata request per cycle. Recurring
+    failures cannot starve the probe: it keeps its own hourly clock.
     """
     assert timedelta(hours=1) == VERSION_RECHECK_INTERVAL
     index = load_fixture("v3.7", "pages/index.json")
@@ -431,6 +432,57 @@ async def test_request_budget_matrix(
     assert coordinator.last_update_success is True
 
     # (13) Back in rawdata mode: one request per cycle.
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+
+    # (14) Another rawdata 404 switches to the pages again.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", *pages]
+
+    # (15) A page fails every 50 minutes for almost five hours, so every
+    # recovery re-checks the version inside the interval. The probe keeps its
+    # own hourly clock: it still runs once per hour, the first one an hour
+    # after the switch, and never in a failing or recovering cycle.
+    def stub_pages(*, failing: bool = False) -> None:
+        aioclient_mock.clear_requests()
+        if failing:
+            aioclient_mock.get(
+                f"{MOCK_URL}/api/http/routers", params={"per_page": index["per_page"], "page": 1}, status=500
+            )
+        aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+        stub_traefik_paginated(aioclient_mock)
+
+    probe_minutes: list[int] = []
+    for minute in range(10, 300, 10):
+        freezer.tick(timedelta(minutes=10))
+        if minute % 50 == 0:
+            stub_pages(failing=True)
+            assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/http/routers"], minute
+            assert coordinator.last_update_success is False
+            stub_pages()
+            assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", *pages], minute
+            assert coordinator.last_update_success is True
+            continue
+        paths = await _refresh_paths(hass, aioclient_mock, coordinator)
+        if minute % 60 == 0:
+            probe_minutes.append(minute)
+            assert paths == ["/api/rawdata", *pages], minute
+        else:
+            assert paths == pages, minute
+    assert probe_minutes == [60, 120, 180, 240]
+
+    # (16) Rawdata is back: the next hourly probe switches back, although the
+    # last version check (after the failure at minute 250) is only 50 minutes old.
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", json=load_fixture("v3.7", "rawdata.json"))
+    aioclient_mock.get(f"{MOCK_URL}/api/version", json=restarted)
+    stub_traefik_paginated(aioclient_mock)
+    freezer.tick(timedelta(minutes=10))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+    assert coordinator.last_update_success is True
+
+    # (17) Back in rawdata mode: one request per cycle.
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
 
 
