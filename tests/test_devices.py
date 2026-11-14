@@ -256,7 +256,6 @@ async def test_sub_devices_linked_without_deprecation(
         assert "Detected that custom integration 'traefik_proxy'" not in message, message
 
 
-@pytest.mark.xfail(strict=True, reason="RED: per-item off removes sub-devices without a reference check")
 @pytest.mark.parametrize("disabled_by", [None, er.RegistryEntryDisabler.USER], ids=["enabled", "user-disabled"])
 async def test_per_item_off_keeps_referenced_sub_device(
     hass: HomeAssistant, aioclient_mock: Any, disabled_by: er.RegistryEntryDisabler | None

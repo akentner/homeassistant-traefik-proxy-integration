@@ -80,6 +80,23 @@ def dashboard_url(url: str) -> str | None:
 
 
 @callback
+def _async_remove_device_if_unreferenced(
+    device_registry: dr.DeviceRegistry, entity_registry: er.EntityRegistry, device: dr.DeviceEntry
+) -> bool:
+    """Remove ``device`` unless a registry entry still references it; return whether it was removed.
+
+    Removing a device removes this entry's entities on it and unlinks every
+    other entity, so a device any registry entry references (disabled entries
+    and other integrations' entries included) is kept.
+    """
+    if er.async_entries_for_device(entity_registry, device.id, include_disabled_entities=True):
+        _LOGGER.debug("Keeping Traefik device %s: entities still reference it", device.id)
+        return False
+    device_registry.async_remove_device(device.id)
+    return True
+
+
+@callback
 def async_setup_devices(
     hass: HomeAssistant, entry: TraefikProxyConfigEntry, *, per_item: bool = True
 ) -> dr.DeviceEntry:
@@ -89,7 +106,8 @@ def async_setup_devices(
     Sub-devices are linked to the main device through the registry, the one
     linking API available on every supported Home Assistant version. With
     ``per_item`` off the Routers and Services sub-devices are not registered,
-    and existing ones of this entry are removed.
+    and existing ones of this entry are removed unless a registry entry still
+    references them.
     """
     device_registry = dr.async_get(hass)
     placeholders = {"host": entry_host(entry)}
@@ -105,10 +123,11 @@ def async_setup_devices(
     )
     per_item_devices = (TraefikDevice.ROUTERS, TraefikDevice.SERVICES)
     if not per_item:
+        entity_registry = er.async_get(hass)
         unwanted = {device_identifier(entry.entry_id, device) for device in per_item_devices}
         for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
             if device_entry.identifiers & unwanted:
-                device_registry.async_remove_device(device_entry.id)
+                _async_remove_device_if_unreferenced(device_registry, entity_registry, device_entry)
     wanted = (*per_item_devices, TraefikDevice.CERTIFICATES) if per_item else (TraefikDevice.CERTIFICATES,)
     for device in wanted:
         sub = device_registry.async_get_or_create(
@@ -125,7 +144,7 @@ def async_setup_devices(
 
 
 # Identifier suffixes of the 0.3.0 per-category devices, replaced by the
-# main device and its sub-devices (D-15).
+# main device and its sub-devices.
 LEGACY_DEVICE_SUFFIXES: Final = (
     "http_routers",
     "http_routers_tls",
@@ -141,11 +160,10 @@ def async_remove_legacy_devices(hass: HomeAssistant, entry: TraefikProxyConfigEn
     """Remove this entry's 0.3.0 per-category devices that no entity uses any more.
 
     Runs after the platforms are set up, so every entity they add has been
-    re-pointed to its new device. Removing a device also removes the entities
-    of this entry attached to it, so a legacy device is removed only while no
-    registry entry (disabled ones included) references it; otherwise it is
-    kept. Only devices of this entry are considered, and only those carrying
-    exactly one legacy identifier and none of the current device identifiers.
+    re-pointed to its new device. A legacy device is removed only while no
+    registry entry references it; otherwise it is kept. Only devices of this
+    entry are considered, and only those carrying exactly one legacy
+    identifier and none of the current device identifiers.
     """
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -154,10 +172,7 @@ def async_remove_legacy_devices(hass: HomeAssistant, entry: TraefikProxyConfigEn
     for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
         if len(device.identifiers & legacy) != 1 or device.identifiers & current:
             continue
-        if er.async_entries_for_device(entity_registry, device.id, include_disabled_entities=True):
-            _LOGGER.debug("Keeping legacy Traefik device %s: entities still reference it", device.id)
-            continue
-        device_registry.async_remove_device(device.id)
+        _async_remove_device_if_unreferenced(device_registry, entity_registry, device)
 
 
 @callback
