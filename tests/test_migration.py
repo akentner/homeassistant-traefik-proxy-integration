@@ -258,7 +258,6 @@ async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
     assert issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "3"}
 
 
-@pytest.mark.xfail(strict=True, reason="RED: the migration re-enables user-disabled routers")
 async def test_user_disabled_router_stays_disabled(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """A user-disabled 0.3.0 router binary sensor comes back as a user-disabled router sensor without state."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)

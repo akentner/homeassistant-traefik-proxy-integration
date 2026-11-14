@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 from typing import Final
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
@@ -39,6 +39,12 @@ _LOGGER = logging.getLogger(__name__)
 ISSUE_ENTITIES_MIGRATED: Final = "entities_migrated"
 # unique_id suffix of the 0.3.0 reload button, removed by the 1.2 migration.
 _LEGACY_RELOAD_BUTTON_SUFFIX: Final = "diagnostics_reload"
+# Maps the disabled_by of a removed 0.3.0 router binary sensor to the one its
+# router sensor replacement is created with. Enabled router binary sensors get
+# no entry here: the platform creates their replacement as usual.
+_ROUTER_REPLACEMENT_DISABLED_BY: Final[dict[er.RegistryEntryDisabler, er.RegistryEntryDisabler]] = {
+    er.RegistryEntryDisabler.USER: er.RegistryEntryDisabler.USER,
+}
 
 
 def _issue_id(entry_id: str) -> str:
@@ -51,8 +57,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     1.1 -> 1.2: remove this entry's router binary sensors (replaced by router
     sensors with new entity IDs) and the reload button, and enable the three
     problem aggregates where only the old disabled-by-default disabled them.
-    User-disabled entities stay disabled; no surviving entity is renamed or
-    re-IDed. A persistent repair issue explains the change when anything was
+    A disabled router binary sensor is replaced by a disabled router sensor
+    with the same unique_id and the old object id. User-disabled entities
+    stay disabled; no surviving entity is renamed or re-IDed. A persistent repair issue explains the change when anything was
     removed. An entry from a newer major version fails (downgrade).
     """
     if entry.version > 1:
@@ -73,10 +80,20 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
             for suffix in (UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM, UID_MIDDLEWARES_PROBLEM)
         }
         removed = 0
+        # (unique_id, disabled_by, object_id) of each disabled router to re-create
+        replacements: list[tuple[str, er.RegistryEntryDisabler, str]] = []
         for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-            if (reg_entry.domain == "binary_sensor" and reg_entry.unique_id.startswith(router_prefix)) or (
-                reg_entry.domain == "button" and reg_entry.unique_id == reload_unique_id
-            ):
+            if reg_entry.domain == "binary_sensor" and reg_entry.unique_id.startswith(router_prefix):
+                mapped = (
+                    _ROUTER_REPLACEMENT_DISABLED_BY.get(reg_entry.disabled_by)
+                    if reg_entry.disabled_by is not None
+                    else None
+                )
+                if mapped is not None:
+                    replacements.append((reg_entry.unique_id, mapped, split_entity_id(reg_entry.entity_id)[1]))
+                registry.async_remove(reg_entry.entity_id)
+                removed += 1
+            elif reg_entry.domain == "button" and reg_entry.unique_id == reload_unique_id:
                 registry.async_remove(reg_entry.entity_id)
                 removed += 1
             elif (
@@ -85,6 +102,17 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 and reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
             ):
                 registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
+        # Only the disabled state and the object id carry over; the platform
+        # attaches the replacement to its device when it adds the router.
+        for unique_id, disabled_by, object_id in replacements:
+            registry.async_get_or_create(
+                ROUTERS.domain,
+                DOMAIN,
+                unique_id,
+                config_entry=entry,
+                disabled_by=disabled_by,
+                suggested_object_id=object_id,
+            )
         hass.config_entries.async_update_entry(entry, minor_version=2)
         if removed:
             ir.async_create_issue(
@@ -97,7 +125,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 translation_key=ISSUE_ENTITIES_MIGRATED,
                 translation_placeholders={"entry_title": entry.title, "removed_count": str(removed)},
             )
-        _LOGGER.debug("Migrated Traefik entry %s to 1.2: %d entities removed", entry.entry_id, removed)
+        _LOGGER.debug(
+            "Migrated Traefik entry %s to 1.2: %d entities removed, %d disabled routers kept disabled",
+            entry.entry_id,
+            removed,
+            len(replacements),
+        )
 
     return True
 
