@@ -2,24 +2,27 @@
 
 from __future__ import annotations
 
+import logging
 from abc import abstractmethod
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Final
 from urllib.parse import urlsplit
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 
 from .cert_coordinator import CertCoordinator
-from .const import CONF_URL, DEFAULT_NAME, DOMAIN
+from .const import CONF_URL, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
 from .entity_manager import KindSpec
-from .models import TraefikSnapshot
 from .tls import CertError, CertInfo
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class TraefikDevice(StrEnum):
@@ -119,6 +122,65 @@ def async_setup_devices(
         if sub.via_device_id != main.id:
             device_registry.async_update_device(sub.id, via_device_id=main.id)
     return main
+
+
+# Identifier suffixes of the 0.3.0 per-category devices, replaced by the
+# main device and its sub-devices (D-15).
+LEGACY_DEVICE_SUFFIXES: Final = (
+    "http_routers",
+    "http_routers_tls",
+    "http_services",
+    "http_entrypoints",
+    "overview",
+    "diagnostics",
+)
+
+
+@callback
+def async_remove_legacy_devices(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
+    """Remove this entry's 0.3.0 per-category devices that no entity uses any more.
+
+    Runs after the platforms are set up, so every entity they add has been
+    re-pointed to its new device. Removing a device also removes the entities
+    of this entry attached to it, so a legacy device is removed only while no
+    registry entry (disabled ones included) references it; otherwise it is
+    kept. Only devices of this entry are considered, and only those carrying
+    exactly one legacy identifier and none of the current device identifiers.
+    """
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    legacy = {(DOMAIN, f"{entry.entry_id}_{suffix}") for suffix in LEGACY_DEVICE_SUFFIXES}
+    current = {device_identifier(entry.entry_id, device) for device in TraefikDevice}
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        if len(device.identifiers & legacy) != 1 or device.identifiers & current:
+            continue
+        if er.async_entries_for_device(entity_registry, device.id, include_disabled_entities=True):
+            _LOGGER.debug("Keeping legacy Traefik device %s: entities still reference it", device.id)
+            continue
+        device_registry.async_remove_device(device.id)
+
+
+@callback
+def async_track_sw_version(hass: HomeAssistant, entry: TraefikProxyConfigEntry, main_device_id: str) -> CALLBACK_TYPE:
+    """Keep the main device's ``sw_version`` equal to the Traefik version.
+
+    One device registry update per version change; snapshot changes that keep
+    the version update nothing. Returns the unsubscribe callable.
+    """
+    coordinator = entry.runtime_data.coordinator
+    device_registry = dr.async_get(hass)
+    last_version = coordinator.data.version.version
+
+    @callback
+    def _async_check_version() -> None:
+        nonlocal last_version
+        version = coordinator.data.version.version
+        if version == last_version:
+            return
+        last_version = version
+        device_registry.async_update_device(main_device_id, sw_version=version)
+
+    return coordinator.async_add_listener(_async_check_version)
 
 
 _UNWRITTEN: Final = object()
@@ -242,122 +304,3 @@ class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
 
     def _state_token(self) -> object:
         return (self._row(),)
-
-
-# Per-category model labels for the multi-device model (CONTEXT.md D-01).
-# Each Traefik category becomes its own HA device; the Traefik integration is
-# the manufacturer and the category is the model.
-_CATEGORY_TO_MODEL: Final[dict[str, str]] = {
-    "http_routers": "HTTP Routers",
-    "http_routers_tls": "HTTP Routers TLS",  # Phase 3 — TLS probe results live on their own device
-    "http_services": "HTTP Services",
-    "http_entrypoints": "HTTP Entrypoints",
-    "overview": "Overview",
-    "diagnostics": "Diagnostics",
-}
-
-
-def _category_to_model(category: str) -> str:
-    """Return the human-readable model label for a category.
-
-    Falls back to the raw category string so a typo in a new platform's
-    category still produces a usable device model rather than crashing.
-    """
-    return _CATEGORY_TO_MODEL.get(category, category)
-
-
-class _TraefikProxyBaseEntity[CoordinatorT: DataUpdateCoordinator[Any]](CoordinatorEntity[CoordinatorT]):
-    """Common base for all Traefik entities (binary_sensor, sensor, button).
-
-    Generic over the coordinator the entity listens to: most entities follow
-    the main coordinator (``TraefikProxyEntity``), the TLS certificate
-    entities follow the cert coordinator (``TraefikProxyCertEntity``).
-
-    Each entity registers under a per-category HA device — the integration
-    identifier is ``(DOMAIN, f"{entry.entry_id}_{category}")``. The legacy
-    Phase 1 single-device identifier ``(DOMAIN, entry.entry_id)`` is gone;
-    existing HA installations will see a new device row in the registry on
-    first restart after this migration (device-registry IDs are opaque so
-    this is unavoidable when the shape of the identifier changes). See
-    SUMMARY 02-01 for the regression-risk note.
-    """
-
-    _attr_has_entity_name = True
-
-    def __init__(
-        self,
-        coordinator: CoordinatorT,
-        entry: TraefikProxyConfigEntry,
-        category: str,
-        *,
-        description_key: str | None = None,
-    ) -> None:
-        super().__init__(coordinator)
-        self._entry = entry
-        self._category = category
-        # Back-compat alias: the Phase 1 binary_sensor code reads
-        # ``self._router_name`` for the router label. New platforms can ignore
-        # the attribute — it's a thin alias for ``description_key`` (or "" when
-        # the entity is single-instance, e.g. aggregates on the Overview device).
-        self._router_name = description_key or ""
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        url_host = self._url_host()
-        model = _category_to_model(self._category)
-        name = f"{url_host} Traefik Proxy \u2014 {model}" if url_host else f"{DEFAULT_NAME} \u2014 {model}"
-        return DeviceInfo(
-            identifiers={(DOMAIN, f"{self._entry.entry_id}_{self._category}")},
-            manufacturer="Traefik",
-            model=model,
-            name=name,
-            sw_version=self._sw_version(),
-            entry_type=DeviceEntryType.SERVICE,
-        )
-
-    def _url_host(self) -> str | None:
-        from urllib.parse import urlparse
-
-        url = self._entry.data.get("url", "")
-        try:
-            return str(urlparse(url).hostname)
-        except Exception:
-            return None
-
-    def _sw_version(self) -> str | None:
-        # Always the main snapshot, also for entities bound to the cert coordinator.
-        # Cert-entity unit tests build entities on mocked entries without a snapshot.
-        data = self._entry.runtime_data.coordinator.data
-        return data.version.version if isinstance(data, TraefikSnapshot) else None
-
-
-class TraefikProxyEntity(_TraefikProxyBaseEntity[TraefikProxyCoordinator]):
-    """Entity that listens to the main Traefik coordinator."""
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        category: str,
-        *,
-        description_key: str | None = None,
-    ) -> None:
-        super().__init__(entry.runtime_data.coordinator, entry, category, description_key=description_key)
-
-
-class TraefikProxyCertEntity(_TraefikProxyBaseEntity[CertCoordinator]):
-    """Entity that listens to the cert coordinator (TLS certificate state).
-
-    Cert cycles and threshold changes notify only the cert coordinator's
-    listeners, so the certificate entities subscribe there and not to the
-    main coordinator (which skips unchanged snapshots).
-    """
-
-    def __init__(
-        self,
-        entry: TraefikProxyConfigEntry,
-        coordinator: CertCoordinator,
-        category: str,
-        *,
-        description_key: str,
-    ) -> None:
-        super().__init__(coordinator, entry, category, description_key=description_key)

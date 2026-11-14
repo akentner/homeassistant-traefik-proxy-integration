@@ -24,7 +24,7 @@ from .const import (
 )
 from .coordinator import TraefikProxyCoordinator, build_api_client
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
-from .entity import async_setup_devices
+from .entity import async_remove_legacy_devices, async_setup_devices, async_track_sw_version
 from .entity_manager import (
     ROUTERS,
     SERVICES,
@@ -165,6 +165,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     5. Register the main device and the Certificates sub-device, plus the
        Routers / Services sub-devices when per-item entities are on.
     6. Forward platforms (sensor, binary_sensor, button).
+    7. Remove the entry's 0.3.0 per-category devices that no entity
+       references any more, and keep the main device's ``sw_version``
+       following the Traefik version.
     """
     client = build_api_client(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
@@ -203,9 +206,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         entity_manager.async_purge(SERVICES)
 
     # Every device exists, named and linked, before the first entity attaches.
-    async_setup_devices(hass, entry, per_item=per_item)
+    main = async_setup_devices(hass, entry, per_item=per_item)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Safe order (D-15): the platforms have re-pointed every entity they add
+    # to the new devices, so only legacy devices nothing references are removed.
+    async_remove_legacy_devices(hass, entry)
+    entry.async_on_unload(async_track_sw_version(hass, entry, main.id))
 
     # Bind the Options-update listener. HA fires it whenever entry.options
     # (Options Flow submit) OR entry.data (reconfigure flow / reauth flow)

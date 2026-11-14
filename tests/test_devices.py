@@ -32,8 +32,6 @@ CERT_HOST = "secure.example.com"
 # A unique_id no platform of the integration adds; its entity is never re-pointed.
 ORPHAN_SUFFIX = "legacy_orphan"
 
-_RED = pytest.mark.xfail(strict=True, reason="05-07 Task 3 RED: no legacy device cleanup or sw_version tracking yet")
-
 
 def _devices(hass: HomeAssistant, entry_id: str) -> dict[tuple[str, str], dr.DeviceEntry]:
     """Return {identifier: device} for every device of a config entry."""
@@ -87,7 +85,6 @@ def _attach(
     )
 
 
-@_RED
 async def test_legacy_devices_removed_after_entities_moved(hass: HomeAssistant, aioclient_mock: Any) -> None:
     """Empty legacy devices are removed; surviving entities keep entity_id and customisations on new devices."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, minor_version=2)
@@ -200,7 +197,6 @@ async def test_devices_of_other_entry_untouched(hass: HomeAssistant, aioclient_m
     assert other_devices[_legacy_identifier(OTHER_ENTRY_ID, "http_services")].id == own_legacy.id
 
 
-@_RED
 async def test_main_device_sw_version_follows_traefik(hass: HomeAssistant, aioclient_mock: Any, freezer: Any) -> None:
     """One device update with sw_version per Traefik version change; none for other snapshot changes."""
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(entry_id=ENTRY_ID, minor_version=2))
