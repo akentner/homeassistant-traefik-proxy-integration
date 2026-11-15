@@ -184,8 +184,8 @@ class TraefikCertExpiringBinarySensor(TraefikCertEntity, BinarySensorEntity):
     probed certificate does not cover it), else
     ``expiring`` (days <= threshold). Off with reason None. Unknown only
     while the host has no certificate and fewer than two failed probes.
-    The threshold is read live from the cert coordinator, so an options
-    change re-evaluates without a new probe. Enabled by default:
+    The threshold is the cert coordinator's, read from the options at
+    setup; an options change reloads the entry. Enabled by default:
     certificate expiry is a security alarm.
     """
 

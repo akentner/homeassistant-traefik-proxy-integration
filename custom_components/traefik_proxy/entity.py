@@ -292,7 +292,7 @@ def cert_hosts(coordinator: CertCoordinator) -> set[str]:
 class TraefikCertCoordinatorEntity(_TraefikEntityBase[CertCoordinator]):
     """Entity that listens to the cert coordinator; on the main device by default.
 
-    Cert cycles, threshold changes and day-boundary fires notify only the
+    Cert cycles and day-boundary fires notify only the
     cert coordinator's listeners. Available while the last cert cycle
     succeeded; unavailable before the first cycle finished (no data yet),
     so a pending first cycle never reads as "no problem".

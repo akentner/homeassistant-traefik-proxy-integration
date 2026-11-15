@@ -49,6 +49,7 @@ from homeassistant.util import ssl as ha_ssl
 from .api import TraefikProxyApiError, TraefikProxyNotFoundError
 from .const import (
     CERT_RETRY_INTERVAL,
+    CONF_TLS_WARN_DAYS,
     CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
@@ -218,12 +219,12 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     (:meth:`_async_probe_states`). ``data`` maps each host to its
     :class:`HostCertState`.
 
-    Threshold changes (``tls_warn_days`` in the options) go through
-    :meth:`async_set_threshold`, which notifies the listeners so the
-    expiring sensors re-evaluate without a new probe. After every
-    successful cycle one day-boundary timer is scheduled at the earliest
-    :meth:`HostCertState.next_day_change` of the hosts; it notifies the
-    listeners the same way and schedules the next one. Shutdown (entry
+    The warning threshold (``tls_warn_days`` in the options) is read once
+    at construction; a changed option reaches a new coordinator through the
+    reload of the entry. After every successful cycle one day-boundary
+    timer is scheduled at the earliest :meth:`HostCertState.next_day_change`
+    of the hosts; it notifies the listeners so the expiring sensors
+    re-evaluate without a new probe, and schedules the next one. Shutdown (entry
     unload) cancels it. After a failed cycle the next one runs after
     ``CERT_RETRY_INTERVAL``; a successful cycle restores the normal
     interval.
@@ -258,7 +259,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         self.threshold_days = (
             threshold_days
             if threshold_days is not None
-            else int(entry.options.get("tls_warn_days", DEFAULT_TLS_WARN_DAYS))
+            else int(entry.options.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS))
         )
         self._sem = asyncio.Semaphore(sem)
         self._timeout = timeout
@@ -500,11 +501,6 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             self._unsub_day_boundary = None
         await super().async_shutdown()
 
-    async def async_set_threshold(self, threshold_days: int) -> None:
-        """Update the warning threshold live and notify the listeners (no new probe)."""
-        self.threshold_days = int(threshold_days)
-        self.async_update_listeners()
-
     def _collect_hosts(self) -> tuple[str, ...]:
         """Return the sorted, normalized hostnames to probe in this cycle.
 
@@ -540,10 +536,6 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
                 len(ordered) - MAX_CERT_HOSTS,
             )
         return tuple(ordered[:MAX_CERT_HOSTS])
-
-    def get_threshold(self) -> int:
-        """Return the current warning threshold (read accessor)."""
-        return self.threshold_days
 
 
 __all__ = [
