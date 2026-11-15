@@ -107,7 +107,9 @@ async def _get_integration_manifest(self: HacsIntegrationRepository, ref: str | 
     return data
 
 
-_orig_download = HacsBase.async_download_file
+# Set by _apply() after the existence check, so a missing method reaches the
+# guard instead of failing here with an AttributeError.
+_orig_download: Any = None
 
 
 async def _download(self: HacsBase, url: str, **kwargs: Any) -> bytes | None:
@@ -131,9 +133,11 @@ PATCHES = {
 
 
 def _apply() -> None:
+    global _orig_download
     for cls, name in TARGETS:
         if not hasattr(cls, name):
             _fail(f"{cls.__name__}.{name} is missing in this image; refusing to run as a no-op")
+    _orig_download = HacsBase.async_download_file
     for cls, name in TARGETS:
         setattr(cls, name, PATCHES[name])
     # The integration repository class must resolve every repository-level
