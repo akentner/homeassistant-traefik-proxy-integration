@@ -413,6 +413,96 @@ async def test_trust_store_verifies_chain_through_real_probe(
 
 
 # ---------------------------------------------------------------------------
+# Probe history
+# ---------------------------------------------------------------------------
+
+
+async def _cycle(c: CertCoordinator, probe: AsyncMock) -> dict[str, HostCertState]:
+    """Run one cycle and publish its data as the real refresh does."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_update_data()
+    c.data = data
+    return data
+
+
+async def test_probe_history_keeps_last_known_certificate_and_counts_failures(freezer: Any) -> None:
+    """Success, two failures (probe_failed), success: the certificate survives failures, a success resets them."""
+    freezer.move_to(NOW)
+    host = "a.example.com"
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts(host))
+    cert_a = _probed(host, 30, verified=True, san_mismatch=True)
+
+    first = (await _cycle(c, AsyncMock(return_value=cert_a)))[host]
+    assert first.failures == 0
+    assert first.certificate == cert_a.certificate
+
+    freezer.tick(timedelta(hours=6))
+    second = (await _cycle(c, AsyncMock(return_value=ProbeFailure(ProbeError.TIMEOUT, "t"))))[host]
+    assert second.certificate == cert_a.certificate
+    assert second.verified is True
+    assert second.san_mismatch is True
+    assert second.fetched_at == NOW
+    assert second.error == "timeout"
+    assert second.failures == 1
+    assert second.problem(14, dt_util.utcnow()) is None
+
+    freezer.tick(timedelta(hours=6))
+    third = (await _cycle(c, AsyncMock(return_value=ProbeFailure(ProbeError.SSL, "s"))))[host]
+    assert third.certificate == cert_a.certificate
+    assert third.error == "ssl"
+    assert third.failures == 2
+    assert third.problem(14, dt_util.utcnow()) is CertProblem.PROBE_FAILED
+
+    freezer.tick(timedelta(hours=6))
+    cert_b = ProbedCertificate(certificate=_certificate(host, 90), verified=False, san_mismatch=False)
+    fourth = (await _cycle(c, AsyncMock(return_value=cert_b)))[host]
+    assert fourth.certificate == cert_b.certificate
+    assert fourth.verified is False
+    assert fourth.san_mismatch is False
+    assert fourth.error is None
+    assert fourth.failures == 0
+    assert fourth.fetched_at == NOW + timedelta(hours=18)
+
+
+async def test_failed_probe_after_api_state_keeps_last_known_certificate(freezer: Any) -> None:
+    """A failing probe after an API state keeps its certificate, starts counting at 1 and reports source probe."""
+    freezer.move_to(NOW)
+    host = "a.example.com"
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts(host))
+    previous = make_cert_state(host, days=30, now=NOW, source=CertSource.API, port=None)
+    c.data = {host: previous}
+
+    state = (await _cycle(c, AsyncMock(return_value=ProbeFailure(ProbeError.REFUSED, "r"))))[host]
+    assert state.certificate == previous.certificate
+    assert state.fetched_at == previous.fetched_at
+    assert state.failures == 1
+    assert state.error == "refused"
+    assert state.source is CertSource.PROBE
+    assert state.port == 443
+
+
+async def test_host_dropped_from_host_set_and_new_host_without_history() -> None:
+    """A host that leaves the host set is gone in the same cycle; a new host starts fresh."""
+    entry = _entry_with_tls_hosts("a.example.com", "b.example.com")
+    c = CertCoordinator(MagicMock(), entry)
+    failing = AsyncMock(return_value=ProbeFailure(ProbeError.TIMEOUT, "t"))
+    await _cycle(c, failing)
+    assert set(c.data) == {"a.example.com", "b.example.com"}
+
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
+            {"name": "r0", "tls": {}, "rule": "Host(`a.example.com`)"},
+            {"name": "r2", "tls": {}, "rule": "Host(`c.example.com`)"},
+        ],
+    )
+    data = await _cycle(c, failing)
+    assert list(data) == ["a.example.com", "c.example.com"]
+    assert data["a.example.com"].failures == 2
+    assert data["c.example.com"].failures == 1
+
+
+# ---------------------------------------------------------------------------
 # Threshold — live re-eval per D-08
 # ---------------------------------------------------------------------------
 

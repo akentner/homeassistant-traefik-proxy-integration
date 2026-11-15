@@ -46,7 +46,7 @@ from custom_components.traefik_proxy.const import (
 )
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY, ROUTERS
 from custom_components.traefik_proxy.models import TraefikCertificate
-from custom_components.traefik_proxy.tls import ProbedCertificate
+from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
 from tests.conftest import (
     MOCK_URL,
     entity_id_for,
@@ -522,3 +522,38 @@ async def test_update_entity_action_refreshes_cert_coordinator(
             "homeassistant", "update_entity", {"entity_id": _expiry(hass, entry)}, blocking=True
         )
     refresh.assert_awaited_once()
+
+
+async def test_probe_failed_after_two_failed_refreshes(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
+) -> None:
+    """One failed probe keeps the alarm off; the second turns it on with reason probe_failed."""
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    expiry = _expiry(hass, entry)
+    expiring = _expiring(hass, entry)
+    not_after = _state(hass, expiry).state
+    assert dt_util.parse_datetime(not_after) == REFERENCE + timedelta(days=30)
+    assert _state(hass, expiring).state == "off"
+
+    cert_probe_ok.side_effect = None
+    cert_probe_ok.return_value = ProbeFailure(ProbeError.TIMEOUT, "TimeoutError: ")
+    await cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    state = _state(hass, expiring)
+    assert state.state == "off"
+    assert state.attributes["reason"] is None
+    assert state.attributes["last_error"] == "timeout"
+    assert _state(hass, expiry).state == not_after
+
+    cert_probe_ok.return_value = ProbeFailure(ProbeError.SSL, "SSLError: ")
+    await cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    state = _state(hass, expiring)
+    assert state.state == "on"
+    assert state.attributes["reason"] == "probe_failed"
+    assert state.attributes["last_error"] == "ssl"
+    timestamp = _state(hass, expiry)
+    assert timestamp.state == not_after
+    assert timestamp.attributes["last_error"] == "ssl"
+    assert timestamp.attributes["days_until_expiry"] == 30
