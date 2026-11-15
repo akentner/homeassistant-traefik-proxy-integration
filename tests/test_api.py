@@ -26,7 +26,7 @@ import aiohttp
 import pytest
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError

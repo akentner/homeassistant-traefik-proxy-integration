@@ -36,7 +36,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.traefik_proxy.cert_coordinator import HostCertState
 from custom_components.traefik_proxy.const import (
@@ -428,7 +428,7 @@ async def test_cert_entities_on_certificates_sub_device(
 ) -> None:
     """Cert entities sit on the Certificates sub-device, linked to the main device with the Traefik version."""
     entry = await _setup(hass, aioclient_mock)
-    # Lookup by config entry works on HA 2026.3 and on releases that deprecate async_get_device.
+    # Look devices up by config entry and index them by identifier.
     devices = {
         identifier: device
         for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)

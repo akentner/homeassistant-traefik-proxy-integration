@@ -11,12 +11,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity, BinarySensorEntityDescription
-
-try:
-    from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
-except ImportError:  # HA releases before 2026.10 define it in the package
-    from homeassistant.components.binary_sensor import BinarySensorDeviceClass  # type: ignore[attr-defined]
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+    BinarySensorEntityDescription,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util

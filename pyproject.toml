@@ -13,7 +13,7 @@ dev = [
     "pytest>=9.0.0",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.0.0",
-    "pytest-homeassistant-custom-component>=0.13.345",
+    "pytest-homeassistant>=2026.11.0",
     "ruff>=0.15.15",
 ]
 
@@ -21,7 +21,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-addopts = "--cov=custom_components.traefik --cov-report term-missing"
+addopts = "-p no:respx --cov=custom_components.traefik --cov-report term-missing"
 
 [tool.mypy]
 python_version = "3.14"

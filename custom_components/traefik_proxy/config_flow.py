@@ -29,10 +29,7 @@ import logging
 from typing import Any
 from urllib.parse import urlparse
 
-try:
-    import probatio as vol
-except ImportError:  # HA releases before 2026.9 ship voluptuous only
-    import voluptuous as vol  # type: ignore[no-redef]
+import probatio as vol
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,

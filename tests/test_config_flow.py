@@ -27,7 +27,7 @@ import aiohttp
 import pytest
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy.api import (
     Auth,
@@ -122,19 +122,15 @@ def test_user_schema_omitted_api_key_defaults_to_empty() -> None:
 
 def test_user_schema_serializes_for_config_flow_endpoint() -> None:
     """The schema serializer HA's frontend JSON-over-WS config flow endpoint
-    calls before shipping the form to the browser: ``probatio.to_field_list``
-    on HA 2026.10+, ``voluptuous_serialize.convert`` on HA 2026.3.
+    calls before shipping the form to the browser: ``probatio.to_field_list``.
 
     v0.1.3 regression: ``vol.All(cv.string, cv.url)`` serialized as
     ``<function url at 0x…>`` and raised ``ValueError`` in the reconfigure
     flow. The fix is to use a ``TextSelector(type=URL)`` for UI schemas so
     the serializer can introspect a known type instead of a function ref.
     """
-    try:
-        from probatio import to_field_list as serialize_schema
-    except ImportError:
-        from voluptuous_serialize import convert as serialize_schema
     from homeassistant.helpers import config_validation as cv
+    from probatio import to_field_list as serialize_schema
 
     from custom_components.traefik_proxy.config_flow import STEP_USER_DATA_SCHEMA
 

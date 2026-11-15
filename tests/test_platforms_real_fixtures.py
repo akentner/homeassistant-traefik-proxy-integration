@@ -14,7 +14,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN, ITEM_STATE_OPTIONS
 from custom_components.traefik_proxy.entity_manager import ENTRYPOINTS, ROUTERS, SERVICES

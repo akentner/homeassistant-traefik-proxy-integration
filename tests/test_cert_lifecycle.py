@@ -35,7 +35,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import DEFAULT_TLS_CERT_COOLDOWN, DOMAIN, UID_CERTIFICATES_PROBLEM

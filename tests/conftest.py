@@ -22,7 +22,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant.common import MockConfigEntry
 
 # Ensure custom_components is importable from the project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -314,16 +314,6 @@ def make_cert_state(
         failures=failures,
         fetched_at=None if certificate is None else now,
     )
-
-
-pytest_plugins = ["pytest_homeassistant_custom_component"]
-
-
-@pytest.fixture(autouse=True)
-def enable_custom_integrations(hass):  # type: ignore[no-untyped-def]
-    """Force-reload the custom_components cache so our integration gets registered."""
-    hass.data.pop("custom_components", None)
-    return hass
 
 
 @pytest.fixture

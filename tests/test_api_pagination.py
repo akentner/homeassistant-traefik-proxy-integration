@@ -14,8 +14,8 @@ from typing import Any
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
+from pytest_homeassistant.common import MockConfigEntry
+from pytest_homeassistant.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import (
