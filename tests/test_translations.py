@@ -7,6 +7,7 @@ fails here.
 
 from __future__ import annotations
 
+import ast
 import json
 import string
 from pathlib import Path
@@ -37,7 +38,10 @@ DE = PACKAGE / "translations" / "de.json"
 ICONS = PACKAGE / "icons.json"
 
 # Sections this phase owns; config/options stay English until Phase 7.
-PHASE_SECTIONS = ("device", "entity", "issues")
+PHASE_SECTIONS = ("exceptions", "device", "entity", "issues")
+# Modules whose Home Assistant exceptions must all be translated (D-25).
+EXCEPTION_MODULES = ("coordinator.py", "cert_coordinator.py", "__init__.py")
+HA_EXCEPTIONS = frozenset({"UpdateFailed", "ConfigEntryAuthFailed", "ConfigEntryNotReady", "ConfigEntryError"})
 # Translation keys whose entities show an ENUM state.
 STATE_KEYS = {("sensor", "router"), ("sensor", "service")}
 # Translation keys with on/off state icons.
@@ -109,12 +113,49 @@ def test_english_texts_have_one_source() -> None:
 
 
 def test_de_matches_en_keys_and_placeholders() -> None:
-    """de.json parses as UTF-8 JSON and mirrors en.json's device/entity/issues keys and placeholders."""
+    """de.json parses as UTF-8 JSON and mirrors en.json's exceptions/device/entity/issues keys and placeholders."""
     en = _phase_strings(EN)
     de = _phase_strings(DE)
     assert set(de) == set(en)
     for key, text in en.items():
         assert _placeholders(de[key]) == _placeholders(text), key
+
+
+def _exception_name(node: ast.expr) -> str | None:
+    """Return the HA exception class name ``node`` refers to, if any."""
+    name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
+    return name if name in HA_EXCEPTIONS else None
+
+
+def _raised_exception_keys() -> set[str]:
+    """Return the translation keys of every HA exception built in EXCEPTION_MODULES.
+
+    Fails on a positional message, a missing translation_domain, a
+    non-literal translation_key and on raising a bare exception class.
+    """
+    keys: set[str] = set()
+    for module in EXCEPTION_MODULES:
+        tree = ast.parse((PACKAGE / module).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Raise) and node.exc is not None:
+                assert _exception_name(node.exc) is None, f"{module}:{node.lineno} raises a bare exception class"
+            if not isinstance(node, ast.Call) or (name := _exception_name(node.func)) is None:
+                continue
+            where = f"{module}:{node.lineno} {name}"
+            assert not node.args, f"{where} has a positional message"
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            assert "translation_domain" in keywords, f"{where} has no translation_domain"
+            key = keywords.get("translation_key")
+            assert isinstance(key, ast.Constant) and isinstance(key.value, str), f"{where} has no literal key"
+            keys.add(key.value)
+    return keys
+
+
+def test_every_exception_key_is_raised_and_translated() -> None:
+    """The exception keys raised in code equal the keys of en.json "exceptions" (D-25)."""
+    raised = _raised_exception_keys()
+    assert raised
+    assert raised == set(_load(EN)["exceptions"])
 
 
 def test_no_empty_strings() -> None:

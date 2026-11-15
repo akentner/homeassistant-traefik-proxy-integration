@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy import api
@@ -102,8 +103,8 @@ async def test_network_failure_triggers_setup_retry(hass, aioclient_mock) -> Non
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
-async def test_request_construction_error_retries_setup_without_traceback(hass, aioclient_mock, caplog) -> None:
-    """aiohttp refusing to build the request => invalid-URL error => SETUP_RETRY, no traceback logged."""
+async def test_request_construction_error_stops_setup_without_traceback(hass, aioclient_mock, caplog) -> None:
+    """aiohttp refusing to build the request => ConfigEntryError 'invalid_url' => SETUP_ERROR, no traceback (D-15)."""
     aioclient_mock.get(
         f"{MOCK_URL}/api/version",
         exc=ValueError("Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"),
@@ -115,11 +116,29 @@ async def test_request_construction_error_retries_setup_without_traceback(hass, 
     await hass.async_block_till_done()
 
     assert result is False
-    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "invalid_url"
     assert "Unexpected error fetching" not in caplog.text
-    # HA itself logs ConfigEntryNotReady as a DEBUG "Full exception" record
-    # with exc_info; nothing above DEBUG may carry a traceback.
+    # Nothing above DEBUG may carry a traceback.
     assert [record for record in caplog.records if record.exc_info and record.levelno > logging.DEBUG] == []
+
+
+async def test_invalid_credentials_start_reauth_without_request(hass, aioclient_mock, caplog) -> None:
+    """A stored token Auth rejects => ConfigEntryAuthFailed 'invalid_credentials' => reauth, no request (D-15)."""
+    entry = _make_entry(data={CONF_URL: MOCK_URL, CONF_API_KEY: "bad\ntoken", CONF_VERIFY_SSL: True})
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert result is False
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "invalid_credentials"
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+    assert flows[0]["context"]["source"] == "reauth"
+    assert flows[0]["context"]["entry_id"] == entry.entry_id
+    assert aioclient_mock.mock_calls == []
+    assert "bad" not in caplog.text
 
 
 async def test_5xx_triggers_setup_retry(hass, aioclient_mock) -> None:
@@ -208,6 +227,23 @@ async def test_single_client_owner(hass, aioclient_mock) -> None:
 
     runtime = entry.runtime_data
     assert runtime.coordinator.client is runtime.client
+
+
+async def test_missing_version_raises_translated_update_failed(hass, aioclient_mock, mock_tls_probe) -> None:
+    """A cycle that ends without a stored version fails with 'version_unavailable'."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    coordinator._version = None
+
+    with (
+        patch.object(coordinator, "_async_refresh_version", AsyncMock()),
+        pytest.raises(UpdateFailed) as excinfo,
+    ):
+        await coordinator._async_update_data()
+
+    assert excinfo.value.translation_key == "version_unavailable"
+    assert excinfo.value.translation_domain == DOMAIN
 
 
 def _requested_paths(aioclient_mock) -> list[str]:

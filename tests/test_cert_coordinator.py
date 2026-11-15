@@ -397,9 +397,10 @@ async def test_entry_url_without_host_fails_the_cycle() -> None:
     probe = AsyncMock(return_value=_probed("a.example.com"))
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(PROBE_TARGET, probe)
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(UpdateFailed) as excinfo:
             await c._async_update_data()
     probe.assert_not_awaited()
+    assert excinfo.value.translation_key == "no_probe_host"
 
 
 async def test_trust_store_reaches_the_probe() -> None:
@@ -585,7 +586,8 @@ async def test_certificates_error_fails_the_cycle_without_probe(error: TraefikPr
         with pytest.raises(UpdateFailed) as excinfo:
             await c._async_update_data()
     probe.assert_not_awaited()
-    assert "/api/certificates" in str(excinfo.value)
+    assert excinfo.value.translation_key == "certificates_failed"
+    assert excinfo.value.translation_placeholders == {"path": "/api/certificates", "detail": error.detail}
 
 
 # ---------------------------------------------------------------------------
