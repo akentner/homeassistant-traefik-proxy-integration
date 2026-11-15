@@ -28,7 +28,7 @@ from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClien
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
-from custom_components.traefik_proxy.models import parse_entrypoints, parse_rawdata, parse_version
+from custom_components.traefik_proxy.models import parse_certificates, parse_entrypoints, parse_rawdata, parse_version
 from tests.conftest import MOCK_URL, load_fixture, stub_traefik_paginated
 
 API_PATH = Path(__file__).parent.parent / "custom_components" / "traefik_proxy" / "api.py"
@@ -634,6 +634,26 @@ async def test_one_probe_per_arming_under_overlapping_calls(hass, aioclient_mock
 
 
 # --- Module hygiene ----------------------------------------------------------
+
+
+# --- /api/certificates (Traefik >= 3.7) -----------------------------------------------
+
+CERTIFICATES_PATH = "/api/certificates"
+
+
+async def test_certificates_capture_flows_through_the_client(hass, aioclient_mock) -> None:
+    """The v3.7 capture is read through the paginated path and parsed into certificates."""
+    payload = load_fixture("v3.7", "certificates.json")
+    aioclient_mock.get(f"{MOCK_URL}{CERTIFICATES_PATH}", json=payload)
+
+    certificates = await _client(hass, page_size=7).async_get_certificates()
+
+    assert certificates == parse_certificates(payload)
+    assert certificates[0].common_name == "secure.example.com"
+    assert len(aioclient_mock.mock_calls) == 1
+    url = aioclient_mock.mock_calls[0][1]
+    assert url.path == CERTIFICATES_PATH
+    assert dict(url.query) == {"per_page": "7", "page": "1"}
 
 
 def test_api_module_contains_no_assert_statements() -> None:

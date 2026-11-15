@@ -19,10 +19,12 @@ from custom_components.traefik_proxy.models import (
     Status,
     StatusCounts,
     TlsDomain,
+    TraefikCertificate,
     TraefikSnapshot,
     TraefikState,
     TraefikVersion,
     is_internal,
+    parse_certificates,
     parse_entrypoints,
     parse_middlewares,
     parse_rawdata,
@@ -722,3 +724,59 @@ def test_snapshot_of_empty_state() -> None:
     assert (snapshot.router_counts, snapshot.service_counts, snapshot.middleware_counts) == (zero, zero, zero)
     assert (snapshot.router_problems, snapshot.service_problems, snapshot.middleware_problems) == ((), (), ())
     assert snapshot.routers == {} and snapshot.services == {} and snapshot.middlewares == {}
+
+
+# --- parse_certificates (/api/certificates, Traefik >= 3.7) -----------------------------
+
+
+def _certificate_item(**overrides: Any) -> dict[str, Any]:
+    """A minimal valid /api/certificates item; ``None`` values remove the key."""
+    item: dict[str, Any] = {
+        "commonName": "a.example.com",
+        "sans": ["a.example.com"],
+        "issuerCN": "Example CA",
+        "notAfter": "2030-01-02T03:04:05Z",
+        "notBefore": "2029-10-04T03:04:05Z",
+        "serialNumber": "42",
+        "status": "enabled",
+    }
+    item.update(overrides)
+    return {key: value for key, value in item.items() if value is not None}
+
+
+def test_captured_certificates_parse() -> None:
+    payload = load_fixture("v3.7", "certificates.json")
+
+    parsed = parse_certificates(payload)
+
+    assert parsed == (
+        TraefikCertificate(
+            common_name="secure.example.com",
+            sans=("secure.example.com", "www.secure.example.com"),
+            not_after=datetime.fromisoformat(payload[0]["notAfter"]),
+            not_before=datetime.fromisoformat(payload[0]["notBefore"]),
+            issuer_cn="secure.example.com",
+            status="enabled",
+            serial_number="455146371953818928500261042643525613849885038955",
+        ),
+    )
+    assert parsed[0].not_after.tzinfo is UTC
+    assert parsed[0].not_before.tzinfo is UTC
+
+
+def test_certificate_z_suffix_timestamp_is_utc() -> None:
+    (certificate,) = parse_certificates([_certificate_item(notAfter="2030-01-02T03:04:05Z")])
+
+    assert certificate.not_after == datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
+    assert certificate.not_after.tzinfo is UTC
+
+
+def test_certificate_offset_timestamp_is_converted_to_utc() -> None:
+    (certificate,) = parse_certificates(
+        [_certificate_item(notAfter="2030-01-02T05:04:05+02:00", notBefore="2029-10-04T05:04:05+02:00")]
+    )
+
+    assert certificate.not_after == datetime(2030, 1, 2, 3, 4, 5, tzinfo=UTC)
+    assert certificate.not_after.tzinfo is UTC
+    assert certificate.not_before == datetime(2029, 10, 4, 3, 4, 5, tzinfo=UTC)
+    assert certificate.not_before.tzinfo is UTC
