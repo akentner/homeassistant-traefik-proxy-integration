@@ -1,6 +1,7 @@
 """Host names from Traefik router rules, normalized for TLS probing.
 
-Pure module: stdlib only, no Home Assistant imports. Router rules come from
+Pure module: no Home Assistant imports; besides the stdlib only ``idna``
+(bundled with Home Assistant through ``yarl``). Router rules come from
 the Traefik API and are treated as untrusted text: only literal ``Host()``
 arguments are returned, never regex, SNI, header, template or wildcard
 patterns, and every name goes through :func:`normalize_host`.
@@ -20,6 +21,8 @@ from __future__ import annotations
 
 import ipaddress
 import re
+
+import idna
 
 # ``Host(`` not preceded by a word character. ``HostRegexp(``, ``HostSNI(``,
 # ``HostSNIRegexp(`` and ``HostHeader(`` never match: their next character
@@ -41,7 +44,9 @@ def normalize_host(name: str) -> str | None:
 
     Strips whitespace, lowercases and removes one trailing dot. IP literals
     (IPv6 also in ``[...]`` form) are returned in compressed form. Non-ASCII
-    names are converted to IDNA A-labels. Empty names, wildcards and any
+    names are converted to A-labels with IDNA 2008 / UTS-46 non-transitional
+    processing, as browsers and ACME clients do (``straße.de`` becomes
+    ``xn--strae-oqa.de``, not ``strasse.de``). Empty names, wildcards and any
     name with a character outside ``[a-z0-9._-]`` (templates, regex syntax,
     slashes, spaces, ``host:port``) or an empty label are skipped.
     """
@@ -62,8 +67,8 @@ def normalize_host(name: str) -> str | None:
         return None
     if not host.isascii():
         try:
-            host = host.encode("idna").decode("ascii")
-        except UnicodeError:
+            host = idna.encode(host, uts46=True, transitional=False).decode("ascii")
+        except UnicodeError:  # idna.IDNAError is a UnicodeError
             return None
     if not _HOST_CHARS.fullmatch(host) or "" in host.split("."):
         return None

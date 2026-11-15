@@ -85,6 +85,10 @@ def test_extract_hosts_skips_non_literal_names(rule: str) -> None:
         ("Example.COM.", "example.com"),
         ("  a.example.com ", "a.example.com"),
         ("Bücher.example", "xn--bcher-kva.example"),
+        # IDNA 2008 / UTS-46 non-transitional, as browsers and ACME clients: deviation characters are encoded.
+        ("straße.de", "xn--strae-oqa.de"),
+        ("Straße.de", "xn--strae-oqa.de"),
+        ("ς.example", "xn--3xa.example"),
         ("192.168.1.10", "192.168.1.10"),
         ("::1", "::1"),
         ("[::1]", "::1"),
@@ -111,6 +115,8 @@ def test_normalize_host_accepts(name: str, expected: str) -> None:
         "^.+$",
         "[not-an-ip]",
         "a..bÿ\u0000.example",
+        "\u200d.example",
+        "\U0001f600.example",
     ],
 )
 def test_normalize_host_rejects(name: str) -> None:
