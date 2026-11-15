@@ -11,8 +11,10 @@ that leaves the cert data registered (unavailable) for the grace period and
 the entities write their state only when it changed. A failed probe never
 makes a cert entity unavailable.
 
-Setups use the v2.11 capture (certificates come from the probe) with the
-clock frozen at ``REFERENCE``.
+Most setups use the v2.11 capture (certificates come from the probe) with
+the clock frozen at ``REFERENCE``. The API-source tests use the v3.7
+capture: the fixed capture dates only through ``frozen_v37_certificates``,
+otherwise the clock-rebased default stub.
 """
 
 from __future__ import annotations
@@ -48,8 +50,10 @@ from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_E
 from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
 from tests.conftest import (
+    CERT_FIXTURE_NOW,
     MOCK_URL,
     entity_id_for,
+    frozen_v37_certificates,
     load_fixture,
     make_cert_state,
     rawdata_copy,
@@ -557,3 +561,152 @@ async def test_probe_failed_after_two_failed_refreshes(
     assert timestamp.state == not_after
     assert timestamp.attributes["last_error"] == "ssl"
     assert timestamp.attributes["days_until_expiry"] == 30
+
+
+# ---------------------------------------------------------------------------
+# API source (Traefik >= 3.7)
+# ---------------------------------------------------------------------------
+
+API_NOT_AFTER = datetime(2027, 2, 12, 0, 17, 40, tzinfo=UTC)
+
+
+async def _setup_v37(hass: HomeAssistant, aioclient_mock: Any, **stub_kwargs: Any) -> MockConfigEntry:
+    """Set up one entry served by the v3.7 capture (``stub_kwargs`` go to ``stub_traefik``)."""
+    stub_traefik(aioclient_mock, version="v3.7", **stub_kwargs)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Traefik",
+        data={CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+        unique_id="traefik.example.com",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+def _certificates_requests(aioclient_mock: Any) -> int:
+    """Return how often /api/certificates was requested."""
+    return sum(1 for call in aioclient_mock.mock_calls if call[1].path == "/api/certificates")
+
+
+async def test_v37_api_setup_publishes_api_state_without_probing(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, freezer: Any
+) -> None:
+    """Traefik 3.7: both hosts show the API certificate; no probe in setup and two further cycles."""
+    entry = await _setup_v37(hass, aioclient_mock, certificates=frozen_v37_certificates(freezer))
+    for host in (HOST, OTHER_HOST):
+        expiry = _state(hass, _expiry(hass, entry, host))
+        assert dt_util.parse_datetime(expiry.state) == API_NOT_AFTER
+        assert expiry.attributes["source"] == "api"
+        assert expiry.attributes["verified"] is None
+        assert expiry.attributes["port"] is None
+        assert expiry.attributes["days_until_expiry"] == 88
+        expiring = _state(hass, _expiring(hass, entry, host))
+        assert expiring.state == "off"
+        assert expiring.attributes["reason"] is None
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    for _ in range(2):
+        await cert_coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert cert_coordinator.last_update_success
+    assert mock_tls_probe.call_count == 0
+
+
+async def test_v37_api_uncovered_host_is_not_found_right_away(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, freezer: Any
+) -> None:
+    """A TLS host without an API certificate: expiring on (not_found), timestamp unknown but available, no probe."""
+    rawdata = rawdata_copy("v3.7")
+    extra = copy.deepcopy(rawdata["routers"]["secure@file"])
+    extra["rule"] = "Host(`extra.example.com`)"
+    extra["tls"] = {}
+    rawdata["routers"]["extra@file"] = extra
+    entry = await _setup_v37(hass, aioclient_mock, rawdata=rawdata, certificates=frozen_v37_certificates(freezer))
+
+    expiring = _state(hass, _expiring(hass, entry, "extra.example.com"))
+    assert expiring.state == "on"
+    assert expiring.attributes["reason"] == "not_found"
+    assert expiring.attributes["source"] == "api"
+    expiry = _state(hass, _expiry(hass, entry, "extra.example.com"))
+    assert expiry.state == "unknown"
+    assert expiry.attributes["last_error"] == "not_found"
+    assert _state(hass, _expiring(hass, entry)).state == "off"
+    assert mock_tls_probe.call_count == 0
+
+
+async def test_v37_api_status_field_never_changes_the_state(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, freezer: Any
+) -> None:
+    """An API certificate with status 'expired' but 400 days left keeps the alarm off."""
+    (certificate,) = copy.deepcopy(frozen_v37_certificates(freezer))
+    certificate["status"] = "expired"
+    certificate["notAfter"] = (CERT_FIXTURE_NOW + timedelta(days=400)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = await _setup_v37(hass, aioclient_mock, certificates=[certificate])
+
+    for host in (HOST, OTHER_HOST):
+        expiring = _state(hass, _expiring(hass, entry, host))
+        assert expiring.state == "off"
+        assert expiring.attributes["reason"] is None
+        assert expiring.attributes["days_until_expiry"] == 400
+
+
+@pytest.mark.parametrize(
+    "instant",
+    [datetime(2027, 1, 30, 12, 0, tzinfo=UTC), datetime(2027, 2, 13, 12, 0, tzinfo=UTC)],
+    ids=["after_threshold_crossing", "after_expiry"],
+)
+async def test_default_v37_setup_is_clock_independent(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, freezer: Any, instant: datetime
+) -> None:
+    """The default v3.7 stub re-bases the capture on the clock: no state depends on the real date."""
+    freezer.move_to(instant)
+    entry = await _setup_v37(hass, aioclient_mock)
+    for host in (HOST, OTHER_HOST):
+        expiry = _state(hass, _expiry(hass, entry, host))
+        assert expiry.attributes["source"] == "api"
+        assert expiry.attributes["days_until_expiry"] >= 3649
+        expiring = _state(hass, _expiring(hass, entry, host))
+        assert expiring.state == "off"
+        assert expiring.attributes["reason"] is None
+    assert mock_tls_probe.call_count == 0
+
+
+@pytest.mark.parametrize("status", [500, 401], ids=["non_404", "unauthorized"])
+async def test_v37_certificates_error_fails_the_cert_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, status: int
+) -> None:
+    """A non-404 answer of /api/certificates fails a later cert cycle: entities unavailable, no probe, no reauth."""
+    entry = await _setup_v37(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    assert cert_coordinator.last_update_success
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/certificates", status=status)
+    stub_traefik(aioclient_mock, version="v3.7")
+    await cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert not cert_coordinator.last_update_success
+    for entity_id in _all_cert_ids(hass, entry):
+        assert _state(hass, entity_id).state == "unavailable", entity_id
+    assert mock_tls_probe.call_count == 0
+    assert not [flow for flow in hass.config_entries.flow.async_progress() if flow["context"]["source"] == "reauth"]
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_v211_certificates_404_probes_and_re_requests_each_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, freezer: Any
+) -> None:
+    """Traefik 2.11: /api/certificates answers 404, both hosts are probed; the next cycle asks the API again."""
+    freezer.move_to(REFERENCE)
+    entry = await _setup(hass, aioclient_mock)
+    assert mock_tls_probe.call_count == 2
+    assert _certificates_requests(aioclient_mock) == 1
+    assert _state(hass, _expiry(hass, entry)).attributes["source"] == "probe"
+
+    await entry.runtime_data.cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert _certificates_requests(aioclient_mock) == 2
+    assert mock_tls_probe.call_count == 4

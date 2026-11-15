@@ -31,6 +31,13 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
 from custom_components.traefik_proxy import tls
+from custom_components.traefik_proxy.api import (
+    TraefikProxyApiError,
+    TraefikProxyAuthError,
+    TraefikProxyConnectionError,
+    TraefikProxyNotFoundError,
+    TraefikProxyPayloadError,
+)
 from custom_components.traefik_proxy.cert_coordinator import (
     CERT_FAILURES_FOR_PROBLEM,
     NOT_FOUND,
@@ -48,12 +55,13 @@ from custom_components.traefik_proxy.const import (
     TLS_SEMAPHORE,
 )
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
-from custom_components.traefik_proxy.models import TraefikCertificate
+from custom_components.traefik_proxy.models import TraefikCertificate, parse_certificates
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
 from tests.certgen import make_ca, make_leaf, write_pem
 from tests.conftest import (
     TlsServerStarter,
     entity_id_for,
+    frozen_v37_certificates,
     make_cert_state,
     make_snapshot,
     rawdata_copy,
@@ -95,6 +103,10 @@ def _make_entry(
     # tests override this per scenario.
     entry.runtime_data.coordinator = MagicMock()
     entry.runtime_data.coordinator.data = make_snapshot()
+    # Probe mode by default: Traefik < 3.7 answers 404 on /api/certificates.
+    entry.runtime_data.client.async_get_certificates = AsyncMock(
+        side_effect=TraefikProxyNotFoundError("/api/certificates", "HTTP 404", status=404)
+    )
     return entry
 
 
@@ -410,6 +422,111 @@ async def test_trust_store_verifies_chain_through_real_probe(
     assert state.san_mismatch is False
     assert state.certificate is not None
     assert state.certificate.not_after == leaf.not_valid_after_utc
+
+
+# ---------------------------------------------------------------------------
+# API source (Traefik >= 3.7)
+# ---------------------------------------------------------------------------
+
+API_HOSTS = ("secure.example.com", "www.secure.example.com")
+
+
+def _api_entry(*hosts: str, certificates: Any) -> MagicMock:
+    """Entry with one TLS router per host whose client serves ``certificates`` (a value or an exception)."""
+    entry = _entry_with_tls_hosts(*hosts)
+    if isinstance(certificates, BaseException):
+        entry.runtime_data.client.async_get_certificates = AsyncMock(side_effect=certificates)
+    else:
+        entry.runtime_data.client.async_get_certificates = AsyncMock(return_value=certificates)
+    return entry
+
+
+async def test_api_certificates_become_api_states(freezer: Any) -> None:
+    """Traefik >= 3.7: every host maps to its API certificate; no probe runs."""
+    certificates = parse_certificates(frozen_v37_certificates(freezer))
+    now = dt_util.utcnow()
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=certificates))
+    probe = AsyncMock(return_value=_probed("unused"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_update_data()
+
+    probe.assert_not_awaited()
+    assert data == {
+        host: HostCertState(
+            host=host,
+            source=CertSource.API,
+            certificate=certificates[0],
+            verified=None,
+            san_mismatch=False,
+            port=None,
+            error=None,
+            failures=0,
+            fetched_at=now,
+        )
+        for host in API_HOSTS
+    }
+
+
+async def test_api_uncovered_host_is_not_found_and_not_probed(freezer: Any) -> None:
+    """A host no API certificate covers is not_found right away and never probed."""
+    certificates = parse_certificates(frozen_v37_certificates(freezer))
+    c = CertCoordinator(MagicMock(), _api_entry("extra.example.com", *API_HOSTS, certificates=certificates))
+    probe = AsyncMock(return_value=_probed("extra.example.com"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_update_data()
+
+    probe.assert_not_awaited()
+    assert data["extra.example.com"] == HostCertState(
+        host="extra.example.com",
+        source=CertSource.API,
+        certificate=None,
+        verified=None,
+        san_mismatch=None,
+        port=None,
+        error=NOT_FOUND,
+        failures=0,
+        fetched_at=None,
+    )
+    assert data["secure.example.com"].certificate == certificates[0]
+
+
+async def test_certificates_404_falls_back_to_probe(freezer: Any) -> None:
+    """Traefik < 3.7 answers 404: every host is probed and published as a probe state."""
+    freezer.move_to(NOW)
+    error = TraefikProxyNotFoundError("/api/certificates", "HTTP 404", status=404)
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=error))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_update_data()
+
+    assert probe.await_count == 2
+    assert {state.source for state in data.values()} == {CertSource.PROBE}
+    assert list(data) == list(API_HOSTS)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TraefikProxyApiError("/api/certificates", "HTTP 500", status=500),
+        TraefikProxyConnectionError("/api/certificates", "ClientConnectorError"),
+        TraefikProxyPayloadError("/api/certificates", "unexpected payload shape"),
+        TraefikProxyAuthError("/api/certificates", "HTTP 401", status=401),
+    ],
+    ids=["status_500", "connection", "payload", "auth_401"],
+)
+async def test_certificates_error_fails_the_cycle_without_probe(error: TraefikProxyApiError) -> None:
+    """Any non-404 API error fails the cert cycle (no reauth, no probe fallback)."""
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=error))
+    probe = AsyncMock(return_value=_probed("secure.example.com"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        with pytest.raises(UpdateFailed) as excinfo:
+            await c._async_update_data()
+    probe.assert_not_awaited()
+    assert "/api/certificates" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------

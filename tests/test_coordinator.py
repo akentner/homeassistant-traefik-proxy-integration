@@ -225,7 +225,7 @@ async def test_rawdata_snapshot_reaches_entities(hass, aioclient_mock, mock_tls_
     )
     assert enabled is not None and enabled.state == "enabled"
     assert broken is not None and broken.state == "error"
-    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata"]
+    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata", "/api/certificates"]
 
     aioclient_mock.mock_calls.clear()
     await coordinator.async_refresh()
@@ -247,7 +247,13 @@ async def test_rawdata_404_switches_to_pages_once(
     entry = await _setup_entry(hass)
     coordinator = entry.runtime_data.coordinator
 
-    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata", *pages]
+    assert _requested_paths(aioclient_mock) == [
+        "/api/version",
+        "/api/entrypoints",
+        "/api/rawdata",
+        *pages,
+        "/api/certificates",
+    ]
     expected = snapshot_from_fixture("v3.7")
     assert coordinator.data.routers == expected.routers
     assert coordinator.data.services == expected.services
@@ -351,7 +357,7 @@ async def test_request_budget_matrix(
     # (1) Setup reads version, entrypoints and the state.
     entry = await _setup_entry(hass)
     coordinator = entry.runtime_data.coordinator
-    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata"]
+    assert _requested_paths(aioclient_mock) == ["/api/version", "/api/entrypoints", "/api/rawdata", "/api/certificates"]
 
     # (2) A steady cycle is one request.
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
