@@ -30,6 +30,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import probatio as vol
 import pytest
+from homeassistant.config_entries import ConfigEntryDisabler
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -775,6 +776,54 @@ async def test_user_step_other_port_on_same_host_is_a_new_entry(hass: Any, aiocl
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == "traefik.example.com:8443"
+
+
+def _legacy_entry(**kwargs: Any) -> Any:
+    """A 1.2 entry that was never migrated: it still carries the bare-host unique_id (disabled during the upgrade)."""
+    return make_traefik_entry(minor_version=2, disabled_by=ConfigEntryDisabler.USER, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "new_url",
+    [
+        pytest.param(MOCK_URL, id="same-url"),
+        pytest.param("https://TRAEFIK.example.com:8080/", id="host-case-trailing-slash"),
+    ],
+)
+async def test_user_step_legacy_unique_id_owner_aborts_without_request(
+    hass: Any, aioclient_mock: Any, new_url: str
+) -> None:
+    """An entry still on the legacy bare-host unique_id owns its host:port; adding it again aborts (WR-02)."""
+    _legacy_entry().add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: new_url, AUTH_TYPE: "none"})
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    "legacy_url",
+    [
+        pytest.param("https://traefik.example.com:8443", id="other-port"),
+        pytest.param("https://traefik.example.com:99999", id="unusable-port"),
+    ],
+)
+async def test_user_step_legacy_entry_on_other_port_is_no_owner(
+    hass: Any, aioclient_mock: Any, legacy_url: str
+) -> None:
+    """A legacy bare-host entry owns only the host:port of its own URL, not every port of the host."""
+    _legacy_entry(data={CONF_URL: legacy_url, CONF_VERIFY_SSL: True}).add_to_hass(hass)
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: MOCK_URL, AUTH_TYPE: "none"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "traefik.example.com:8080"
 
 
 # ----------------------- redirects (IN-01) -----------------------

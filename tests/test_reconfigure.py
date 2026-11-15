@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant.common import MockConfigEntry
@@ -157,6 +157,31 @@ async def test_reconfigure_to_other_entry_host_aborts(hass, aioclient_mock) -> N
     assert result["reason"] == "already_configured"
     assert dict(entry.data) == before
     assert not [call for call in aioclient_mock.mock_calls if str(call[1]).startswith(OTHER_URL)]
+
+
+async def test_reconfigure_to_legacy_unique_id_owner_aborts(hass, aioclient_mock) -> None:
+    """A target owned by an entry still on the legacy bare-host unique_id aborts without probing (WR-02)."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    make_traefik_entry(
+        title="Other Traefik",
+        minor_version=2,
+        disabled_by=ConfigEntryDisabler.USER,
+        data={CONF_URL: OTHER_URL, CONF_VERIFY_SSL: True},
+        unique_id="other.example.com",
+    ).add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: OTHER_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "x", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
 
 
 async def test_reconfigure_to_unused_host_succeeds(hass, aioclient_mock) -> None:

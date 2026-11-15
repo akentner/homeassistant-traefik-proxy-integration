@@ -321,6 +321,25 @@ def _same_target(old_url: str, new_url: str) -> bool:
         return False
 
 
+def _owns_target(entry: ConfigEntry, unique_id: str) -> bool:
+    """Return whether ``entry`` owns the Traefik at ``unique_id`` (host:port).
+
+    An entry that never reached 1.3 (disabled during the upgrade, or failed
+    before its migration) still carries the legacy unique_id, the bare host;
+    it owns the host:port of its stored URL, the unique_id its migration
+    moves it to. A stored URL without a usable host and port owns nothing.
+    """
+    if entry.unique_id == unique_id:
+        return True
+    url = entry.data.get(CONF_URL)
+    if not isinstance(url, str) or entry.unique_id != url_host(url):
+        return False
+    try:
+        return url_unique_id(url) == unique_id
+    except ValueError:
+        return False
+
+
 def _entry_data(url: str, verify_ssl: bool, auth_type: str, credentials: Mapping[str, str]) -> dict[str, Any]:
     """Build complete entry data: URL, TLS verification, auth type and its credentials."""
     return {CONF_URL: url, CONF_VERIFY_SSL: verify_ssl, CONF_AUTH_TYPE: auth_type, **credentials}
@@ -430,10 +449,14 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             # credentials, duplicate, credential fields, probe.
             errors = _url_errors(url)
             if not errors:
-                # One entry per Traefik (host:port); a configured one is not
+                # One entry per Traefik (host:port), also against entries still
+                # on the legacy bare-host unique_id; a configured one is not
                 # contacted again.
-                await self.async_set_unique_id(url_unique_id(url))
+                unique_id = url_unique_id(url)
+                await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
+                if any(_owns_target(other, unique_id) for other in self._async_current_entries(include_ignore=False)):
+                    return self.async_abort(reason="already_configured")
                 credentials, errors = _collect_credentials(user_input, auth_type)
             if not errors:
                 data = _entry_data(url, user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL), auth_type, credentials)
@@ -506,10 +529,10 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             errors = _url_errors(url)
             if not errors:
                 # Checked before the probe so a Traefik owned by another
-                # entry is never contacted.
+                # entry (also one on the legacy unique_id) is never contacted.
                 unique_id = url_unique_id(url)
                 for other in self._async_current_entries(include_ignore=False):
-                    if other.entry_id != entry.entry_id and other.unique_id == unique_id:
+                    if other.entry_id != entry.entry_id and _owns_target(other, unique_id):
                         return self.async_abort(reason="already_configured")
                 auth_type = user_input.get(CONF_AUTH_TYPE, stored_auth)
                 # Stored credentials go only to the target they were entered
