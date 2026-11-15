@@ -150,6 +150,34 @@ async def test_diagnostics_redact_header_value_in_router_rule(
     assert HEADER_SECRET in state.attributes["rule"]
 
 
+async def test_diagnostics_redact_router_errors_that_repeat_the_rule(
+    hass: HomeAssistant, hass_client: Any, aioclient_mock: Any
+) -> None:
+    """An error with the raw rule gets the redacted rule, one with another matcher call is redacted whole."""
+    rawdata = rawdata_copy()
+    rawdata["routers"][SECRET_ROUTER]["rule"] = SECRET_RULE
+    rawdata["routers"][SECRET_ROUTER]["error"] = [
+        f"error while parsing rule {SECRET_RULE}: bad",
+        "matcher Header(`A`, `x-fragment-secret`) is invalid",
+        "service not found",
+    ]
+    entry = await setup_traefik_entry(hass, aioclient_mock, _bearer_entry(), rawdata=rawdata)
+
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diag["snapshot"]["routers"][SECRET_ROUTER]["errors"] == [
+        f"error while parsing rule Host(`secure.example.com`) && Header(`X-Api-Key`, `{REDACTED}`): bad",
+        REDACTED,
+        "service not found",
+    ]
+    dump = json.dumps(diag)
+    assert HEADER_SECRET not in dump
+    assert "x-fragment-secret" not in dump
+    state = hass.states.get(entity_id_for(hass, ROUTERS.domain, ROUTERS.unique_id(entry.entry_id, SECRET_ROUTER)))
+    assert state is not None
+    assert state.attributes["errors"] == rawdata["routers"][SECRET_ROUTER]["error"]
+
+
 async def test_diagnostics_report_paginated_client(
     hass: HomeAssistant,
     hass_client: Any,

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import random
+import re
+import string
+
 import pytest
 from homeassistant.components.diagnostics import REDACTED
 
@@ -152,3 +156,106 @@ def test_redact_rule_keeps_an_empty_rule() -> None:
 def test_redact_marker_matches_home_assistant() -> None:
     """The marker equals the one Home Assistant diagnostics use."""
     assert rules._REDACTED == REDACTED
+
+
+R = REDACTED
+
+
+@pytest.mark.parametrize(
+    ("rule", "expected"),
+    [
+        ("Header(`X-Token`, `s3cret`)", f"Header(`X-Token`, `{R}`)"),
+        ("headers(`Authorization`, `Bearer x`)", f"headers(`Authorization`, `{R}`)"),
+        ("HEADERSREGEXP(`X-Key`, `^k.*$`)", f"HEADERSREGEXP(`X-Key`, `{R}`)"),
+        ("HeaderRegexp(`X-Key`, `^k`)", f"HeaderRegexp(`X-Key`, `{R}`)"),
+        # v2 query: every key=value pair keeps its key
+        ("Query(`token=abc`, `x=1`)", f"Query(`token={R}`, `x={R}`)"),
+        # v3 query: key, value
+        ("Query(`key`, `val=ue`)", f"Query(`key`, `{R}`)"),
+        ("Query(`mobile`)", "Query(`mobile`)"),
+        ("QueryRegexp(`key`, `^v`)", f"QueryRegexp(`key`, `{R}`)"),
+        # double-quoted Go string with an escaped quote, quote character kept
+        ('Header("K", "v\\"q")', f'Header("K", "{R}")'),
+        (
+            "Host(`a.example.com`) || PathPrefix(`/api`) && !Method(`POST`)",
+            "Host(`a.example.com`) || PathPrefix(`/api`) && !Method(`POST`)",
+        ),
+        (
+            "ClientIP(`10.0.0.0/8`) && HostRegexp(`^.+\\.example\\.com$`)",
+            "ClientIP(`10.0.0.0/8`) && HostRegexp(`^.+\\.example\\.com$`)",
+        ),
+        ("(Header(`X`, `y`) && HostHeader(`a`))", f"(Header(`X`, `{R}`) && HostHeader(`a`))"),
+        # whitespace between the tokens is kept
+        ("Host (`a`)  &&  Header( `X` ,`y` )", f"Host (`a`)  &&  Header( `X` ,`{R}` )"),
+        # fail closed: the whole rule is redacted
+        ("Heder(`X`, `y`)", R),
+        ("Header(`X`, `y)", R),
+        ("Header(`X`, `y`,)", R),
+        ("Host(`a`) `stray`", R),
+        ("Header()", R),
+        ("Header('X', 'y')", R),
+        ("Host(`a`) && Header(`X`, `y`", R),
+        ("Host(`a`) , Header(`X`, `y`)", R),
+    ],
+)
+def test_redact_rule_table(rule: str, expected: str) -> None:
+    """Header and query values become the marker; anything the grammar does not allow is redacted whole."""
+    assert rules.redact_rule(rule) == expected
+
+
+def test_redact_rule_keeps_a_whitespace_only_rule() -> None:
+    """A whitespace-only rule is returned unchanged."""
+    assert rules.redact_rule("  ") == "  "
+
+
+# Secrets are digit runs; everything else in the generated rules is digit-free,
+# so a run of four digits in the output can only come from a secret.
+_SECRET_DIGITS = re.compile(r"\d{4}")
+
+
+def _random_rule(rng: random.Random) -> str:
+    """Return a random rule of safe, header and query matchers, possibly mutated by random characters."""
+
+    def secret() -> str:
+        return "".join(rng.choice(string.digits) for _ in range(8))
+
+    def name(base: str) -> str:
+        return rng.choice([base, base.lower(), base.upper(), base.title()])
+
+    def quoted(text: str) -> str:
+        return rng.choice([f"`{text}`", f'"{text}"'])
+
+    matchers = [
+        lambda: f"{name('Host')}({quoted('a.example.com')})",
+        lambda: f"{name('PathPrefix')}({quoted('/api')})",
+        lambda: (
+            f"{name(rng.choice(['Header', 'Headers', 'HeaderRegexp', 'HeadersRegexp']))}"
+            f"({quoted('X-Key')}, {quoted(secret())})"
+        ),
+        lambda: f"{name(rng.choice(['Query', 'QueryRegexp']))}({quoted('token')}, {quoted(secret())})",
+        lambda: f"{name('Query')}({quoted('token=' + secret())}, {quoted('x=' + secret())})",
+    ]
+    parts = []
+    for _ in range(rng.randint(1, 4)):
+        call = rng.choice(matchers)()
+        if rng.random() < 0.2:
+            call = f"!({call})"
+        parts.append(call)
+    rule = rng.choice([" && ", " || "]).join(parts)
+    for _ in range(rng.randint(0, 2)):
+        position = rng.randint(0, len(rule))
+        if rng.random() < 0.5 and position < len(rule):
+            rule = rule[:position] + rule[position + 1 :]
+        else:
+            rule = rule[:position] + rng.choice(string.printable) + rule[position:]
+    return rule
+
+
+def test_redact_rule_random_rules_never_leak() -> None:
+    """200 random, partly mutated rules never raise and never keep a header or query value."""
+    rng = random.Random(4040)
+    for _ in range(200):
+        rule = _random_rule(rng)
+        redacted = rules.redact_rule(rule)
+        assert isinstance(redacted, str)
+        assert _SECRET_DIGITS.search(redacted) is None, (rule, redacted)
