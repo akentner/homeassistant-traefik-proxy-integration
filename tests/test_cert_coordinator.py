@@ -63,7 +63,7 @@ from custom_components.traefik_proxy.const import (
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
 from custom_components.traefik_proxy.models import TraefikCertificate, parse_certificates
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
-from tests.certgen import make_ca, make_intermediate, make_leaf, write_pem
+from tests.certgen import make_ca, make_intermediate, make_leaf, make_self_signed, write_pem
 from tests.conftest import (
     TlsServerStarter,
     entity_id_for,
@@ -152,6 +152,7 @@ def _state(
     not_after: datetime | None = None,
     error: str | None = None,
     failures: int = 0,
+    san_mismatch: bool | None = None,
 ) -> HostCertState:
     """Build a ``HostCertState`` with an exact ``not_after`` or ``days`` from ``NOW``."""
     certificate = None
@@ -164,7 +165,7 @@ def _state(
         source=CertSource.PROBE,
         certificate=certificate,
         verified=None,
-        san_mismatch=None,
+        san_mismatch=san_mismatch,
         port=443,
         error=error,
         failures=failures,
@@ -210,6 +211,13 @@ def test_cert_failures_for_problem_is_2() -> None:
         (_state(error="timeout", failures=2), CertProblem.PROBE_FAILED),
         (_state(error=NOT_FOUND), CertProblem.NOT_FOUND),
         (_state(days=5, error=NOT_FOUND), CertProblem.NOT_FOUND),
+        # Probe mode: a certificate that does not cover the host (Traefik's default certificate).
+        (_state(days=365, san_mismatch=True), CertProblem.NOT_FOUND),
+        (_state(days=5, san_mismatch=True), CertProblem.NOT_FOUND),
+        (_state(days=-1, san_mismatch=True), CertProblem.EXPIRED),
+        (_state(days=365, san_mismatch=True, error="timeout", failures=2), CertProblem.PROBE_FAILED),
+        (_state(days=365, san_mismatch=True, error="timeout", failures=1), CertProblem.NOT_FOUND),
+        (_state(days=365, san_mismatch=False), None),
         (_state(days=14), CertProblem.EXPIRING),
         (_state(days=14, error="timeout", failures=1), CertProblem.EXPIRING),
         (_state(days=15), None),
@@ -231,6 +239,7 @@ def test_problem_precedence(state: HostCertState, expected: CertProblem | None) 
         (_state(days=14), True),
         (_state(error="timeout", failures=2), True),
         (_state(error=NOT_FOUND), True),
+        (_state(days=365, san_mismatch=True), True),
     ],
 )
 def test_is_problem(state: HostCertState, expected: bool | None) -> None:
@@ -436,6 +445,42 @@ async def test_trust_store_verifies_chain_through_real_probe(
     assert state.san_mismatch is False
     assert state.certificate is not None
     assert state.certificate.not_after == leaf.not_valid_after_utc
+
+
+async def test_probe_of_default_certificate_is_not_found_problem(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """Probe mode: Traefik answers an unknown SNI host with its default certificate.
+
+    The default certificate is valid for about a year, but it does not cover
+    the host, so the host is a ``not_found`` problem, as in API mode.
+    """
+    now = dt_util.utcnow()
+    default_cert, key = make_self_signed(
+        ["0a1b2c3d.traefik.default"], not_before=now - timedelta(days=1), not_after=now + timedelta(days=365)
+    )
+    server = await tls_server(
+        {"0a1b2c3d.traefik.default": write_pem(tmp_path, "default", [default_cert], key)},
+        default="0a1b2c3d.traefik.default",
+    )
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", url="https://127.0.0.1:8080"))
+    real_probe = tls.async_probe_certificate
+
+    async def _to_local_server(connect_host: str, _port: int, sni: str, **kwargs: Any) -> tls.ProbeResult:
+        return await real_probe(connect_host, server.port, sni, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, _to_local_server)
+        data = await c._async_update_data()
+
+    state = data["a.example.com"]
+    assert state.source is CertSource.PROBE
+    assert state.certificate is not None
+    assert state.san_mismatch is True
+    # About a year left: no expiry problem would hide the missing coverage.
+    assert state.days_left(dt_util.utcnow()) > DEFAULT_TLS_WARN_DAYS
+    assert state.problem(DEFAULT_TLS_WARN_DAYS, dt_util.utcnow()) is CertProblem.NOT_FOUND
+    assert state.is_problem(DEFAULT_TLS_WARN_DAYS, dt_util.utcnow()) is True
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +955,8 @@ async def test_probe_history_keeps_last_known_certificate_and_counts_failures(fr
     assert second.fetched_at == NOW
     assert second.error == "timeout"
     assert second.failures == 1
-    assert second.problem(14, dt_util.utcnow()) is None
+    # One failure is no probe_failed yet; the carried SAN mismatch keeps the host a not_found problem.
+    assert second.problem(14, dt_util.utcnow()) is CertProblem.NOT_FOUND
 
     freezer.tick(timedelta(hours=6))
     third = (await _cycle(c, AsyncMock(return_value=ProbeFailure(ProbeError.SSL, "s"))))[host]

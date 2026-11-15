@@ -181,7 +181,8 @@ class TraefikCertExpiringBinarySensor(TraefikCertEntity, BinarySensorEntity):
 
     On with a ``reason`` by precedence: ``expired`` (days < 0), else
     ``probe_failed`` (two or more consecutive failed probes), else
-    ``not_found`` (the Traefik API has no certificate for the host), else
+    ``not_found`` (the Traefik API has no certificate for the host, or the
+    probed certificate does not cover it), else
     ``expiring`` (days <= threshold). Off with reason None. Unknown only
     while the host has no certificate and fewer than two failed probes.
     The threshold is read live from the cert coordinator, so an options

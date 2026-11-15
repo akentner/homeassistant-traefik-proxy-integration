@@ -14,7 +14,9 @@ Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
   port of the host's routers, with the router host as SNI name, at most
   ``TLS_SEMAPHORE`` handshakes at a time. Router hostnames are never
   resolved through DNS. The presented chain is verified against Home
-  Assistant's own trust anchors (read from memory, never from disk).
+  Assistant's own trust anchors (read from memory, never from disk). A
+  presented certificate that does not cover the host (Traefik's default
+  certificate for a host it has none for) is reported as ``not_found`` too.
 - Any other API error fails the cycle.
 
 The result is one :class:`HostCertState` per host of the current host set.
@@ -175,13 +177,20 @@ class HostCertState:
         return self.certificate.not_after - days * DAY + DAY_CHANGE_DELAY
 
     def problem(self, threshold_days: int, now: datetime) -> CertProblem | None:
-        """Return the host's problem by precedence, or None when it has none."""
+        """Return the host's problem by precedence, or None when it has none.
+
+        ``not_found`` covers both sources: the Traefik API lists no
+        certificate for the host, or a probe read a certificate that does
+        not cover the host (``san_mismatch``). Traefik serves its default
+        certificate to a host it has none for, and that certificate must not
+        make the host look healthy.
+        """
         days = self.days_left(now)
         if days is not None and days < 0:
             return CertProblem.EXPIRED
         if self.failures >= CERT_FAILURES_FOR_PROBLEM:
             return CertProblem.PROBE_FAILED
-        if self.error == NOT_FOUND:
+        if self.error == NOT_FOUND or self.san_mismatch:
             return CertProblem.NOT_FOUND
         if days is not None and days <= threshold_days:
             return CertProblem.EXPIRING
