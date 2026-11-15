@@ -123,7 +123,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       minimum and `"requirements": []` (HA Core bundles everything).
 - [x] **DIST-03**: `manifest.json` deliberately omits `quality_scale`
       (hassfest blocks it for custom integrations).
-- [ ] **DIST-04**: GitHub Actions include `hassfest`, HACS Action, and
+- [x] **DIST-04**: GitHub Actions include `hassfest`, HACS Action, and
       pytest workflows; a release workflow fails when the tag does not equal
       the manifest `version` (Phase 8).
 - [~] ~~**DIST-05**~~ _(dropped — hassfest ignores quality scale for custom integrations; IQS rules are a checklist only (M10))_: The integration targets **Bronze** quality scale for
@@ -320,11 +320,11 @@ Requirements for initial release. Each maps to a roadmap phase.
       prerequisites incl. protecting the Traefik API, install/removal, options,
       entity table matching the code, automations, troubleshooting, data update
       cadence, known limitations) with no private hostnames. (H-01, H-02)
-- [ ] **REL-04**: Dev tooling is consistent: pre-commit on Python 3.14 and
+- [x] **REL-04**: Dev tooling is consistent: pre-commit on Python 3.14 and
       `traefik_proxy` paths, pyproject project name + coverage target +
       `fail_under`, Makefile aligned with CI, no test `SyntaxWarning`, no real
       multi-second sleeps in tests. (H-03, H-04, H-09, H-10, H-12)
-- [ ] **REL-05**: CI runs on push, PR, nightly schedule and manual dispatch,
+- [x] **REL-05**: CI runs on push, PR, nightly schedule and manual dispatch,
       includes the test job against HA 2026.11.x added in Phase 7, and pins all actions by tag or
       SHA. (H-05, M9, M24)
 - [ ] **REL-06**: Shipped code contains no planning references (CONTEXT.md,
@@ -435,7 +435,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIST-01 | Phase 1 | Complete |
 | DIST-02 | Phase 1 | Complete |
 | DIST-03 | Phase 1 | Complete |
-| DIST-04 | Phase 8 | Pending |
+| DIST-04 | Phase 8 | Complete |
 | DIST-05 | — | Superseded |
 | DOCS-01 | Phase 1 | Complete |
 | DOCS-02 | Phase 8 | Pending |
@@ -478,8 +478,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REL-01 | Phase 8 | Pending |
 | REL-02 | Phase 8 | Pending |
 | REL-03 | Phase 8 | Pending |
-| REL-04 | Phase 8 | Pending |
-| REL-05 | Phase 8 | Pending |
+| REL-04 | Phase 8 | Complete |
+| REL-05 | Phase 8 | Complete |
 | REL-06 | Phase 8 | Pending |
 | REL-07 | Phase 8 | Pending |
 | REL-08 | Phase 8 | Pending |
