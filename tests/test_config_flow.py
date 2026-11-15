@@ -698,3 +698,59 @@ async def test_reauth_requires_every_credential(
     assert result["errors"] == errors
     assert dict(entry.data) == before
     assert aioclient_mock.call_count == 0
+
+
+# ----------------------- unique_id host:port and title -----------------------
+
+
+async def test_user_step_unique_id_is_host_port_and_title_is_host(hass: Any, aioclient_mock: Any) -> None:
+    """A new entry is identified by host:port and named after its host."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+
+    result = await _submit_user(hass, {AUTH_TYPE: "none"})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "traefik.example.com:8080"
+    assert result["title"] == "traefik.example.com"
+
+
+@pytest.mark.parametrize(
+    ("existing_url", "existing_unique_id", "new_url"),
+    [
+        pytest.param(
+            MOCK_URL, "traefik.example.com:8080", "https://TRAEFIK.example.com:8080/", id="host-case-trailing-slash"
+        ),
+        pytest.param(
+            "https://traefik.example.com",
+            "traefik.example.com:443",
+            "https://traefik.example.com:443",
+            id="default-port",
+        ),
+    ],
+)
+async def test_user_step_same_host_port_aborts_without_request(
+    hass: Any, aioclient_mock: Any, existing_url: str, existing_unique_id: str, new_url: str
+) -> None:
+    """The same Traefik (same host:port) cannot be added twice; it is not contacted."""
+    make_traefik_entry(data={CONF_URL: existing_url, AUTH_TYPE: "none"}, unique_id=existing_unique_id).add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: new_url, AUTH_TYPE: "none"})
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert aioclient_mock.call_count == 0
+
+
+async def test_user_step_other_port_on_same_host_is_a_new_entry(hass: Any, aioclient_mock: Any) -> None:
+    """A second Traefik on the same host but another port is a separate entry."""
+    make_traefik_entry().add_to_hass(hass)
+    other_url = "https://traefik.example.com:8443"
+    stub_traefik(aioclient_mock, base_url=other_url, rawdata={})
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: other_url, AUTH_TYPE: "none"})
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == "traefik.example.com:8443"

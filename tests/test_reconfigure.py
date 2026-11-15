@@ -142,7 +142,7 @@ async def test_reconfigure_to_other_entry_host_aborts(hass, aioclient_mock) -> N
     other = make_traefik_entry(
         title="Other Traefik",
         data={CONF_URL: OTHER_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "other"},
-        unique_id="other.example.com",
+        unique_id="other.example.com:8080",
     )
     other.add_to_hass(hass)
     before = dict(entry.data)
@@ -263,3 +263,41 @@ async def test_basic_to_bearer_keeps_no_username_or_password(hass, aioclient_moc
     assert result["reason"] == "reconfigure_successful"
     assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "t2"}
     assert _probe_auth(aioclient_mock) == "Bearer t2"
+
+
+# ----------------------- unique_id and title follow the URL -----------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "new_title"),
+    [
+        pytest.param("traefik.example.com", "traefik-new.example.com", id="old-host"),
+        pytest.param("Traefik Proxy", "traefik-new.example.com", id="default-name"),
+        pytest.param("My Proxy", "My Proxy", id="user-renamed"),
+    ],
+)
+async def test_reconfigure_moves_unique_id_and_host_title(hass, aioclient_mock, title: str, new_title: str) -> None:
+    """A new URL moves the unique_id to the new host:port; only a host or default title follows it."""
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
+    entry = make_traefik_entry(title=title)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: NEW_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "traefik-new.example.com:8080"
+    assert entry.title == new_title
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "http://traefik.example.com:99999"])
+async def test_reconfigure_unusable_url_is_invalid_url(hass, aioclient_mock, caplog, url: str) -> None:
+    """A URL without a usable host or port is invalid_url on the form, never 'unknown' or a traceback."""
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: url, AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+    assert "Traceback" not in caplog.text

@@ -834,3 +834,48 @@ async def test_unparsable_url_is_kept_as_stored(hass: HomeAssistant) -> None:
         AUTH_TYPE: "bearer",
         CONF_TOKEN: "k",
     }
+
+
+# ----------------------- 1.2 -> 1.3: unique_id and title -----------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "new_title"),
+    [
+        pytest.param("Traefik Proxy", "traefik.example.com", id="default-name"),
+        pytest.param("Traefik", "Traefik", id="user-renamed"),
+    ],
+)
+async def test_migration_sets_host_port_unique_id_and_host_title(
+    hass: HomeAssistant, title: str, new_title: str
+) -> None:
+    """A legacy entry gets unique_id host:port; only the default title becomes the host."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, minor_version=2, title=title)
+    entry.add_to_hass(hass)
+    assert entry.unique_id == "traefik.example.com"
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.unique_id == "traefik.example.com:8080"
+    assert entry.title == new_title
+
+
+async def test_migration_keeps_unique_id_owned_by_another_entry(
+    hass: HomeAssistant, aioclient_mock: Any, caplog: Any
+) -> None:
+    """When another entry owns the new unique_id, the legacy entry keeps its own and still loads."""
+    owner = make_traefik_entry(entry_id=OTHER_ENTRY_ID, disabled_by=ConfigEntryDisabler.USER)
+    owner.add_to_hass(hass)
+    entry = make_traefik_entry(entry_id=ENTRY_ID, minor_version=2)
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    assert entry.minor_version == 3
+    assert entry.unique_id == "traefik.example.com"
+    assert owner.unique_id == "traefik.example.com:8080"
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert ENTRY_ID in message
+    assert OTHER_ENTRY_ID in message
+    assert "already in use" not in caplog.text

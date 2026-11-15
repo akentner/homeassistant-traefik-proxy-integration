@@ -246,7 +246,8 @@ def make_traefik_entry(*, options: dict[str, Any] | None = None, **kwargs: Any) 
         "version": 1,
         "minor_version": minor_version,
         "data": dict(LEGACY_ENTRY_DATA if legacy else ENTRY_DATA),
-        "unique_id": "traefik.example.com",
+        # 1.3 identifies an entry by host:port; older entries by the bare host.
+        "unique_id": "traefik.example.com" if legacy else "traefik.example.com:8080",
         "options": options or {},
     }
     params.update(kwargs)

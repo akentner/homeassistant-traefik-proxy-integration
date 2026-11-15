@@ -25,7 +25,11 @@ from custom_components.traefik_proxy.const import (
     CONF_VERIFY_SSL,
     DOMAIN,
 )
-from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL, TraefikProxyCoordinator
+from custom_components.traefik_proxy.coordinator import (
+    VERSION_RECHECK_INTERVAL,
+    TraefikProxyCoordinator,
+    url_unique_id,
+)
 from custom_components.traefik_proxy.data import TraefikRuntimeData
 from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.models import TraefikSnapshot
@@ -697,3 +701,24 @@ async def test_failed_entrypoint_refetch_is_retried(hass, aioclient_mock, freeze
         "/api/rawdata",
     ]
     assert coordinator.data.version.start_date == datetime.fromisoformat(restarted["startDate"])
+
+
+@pytest.mark.parametrize(
+    ("url", "unique_id"),
+    [
+        pytest.param("https://Traefik.Example.com:8443/x", "traefik.example.com:8443", id="host-lowercased"),
+        pytest.param("https://traefik.example.com", "traefik.example.com:443", id="https-default-port"),
+        pytest.param("http://traefik.example.com", "traefik.example.com:80", id="http-default-port"),
+        pytest.param("http://[::1]:8080", "[::1]:8080", id="ipv6"),
+    ],
+)
+def test_url_unique_id(url: str, unique_id: str) -> None:
+    """The entry unique_id is host:port with a lowercased host, IPv6 in brackets and the scheme's default port."""
+    assert url_unique_id(url) == unique_id
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "http://h:99999", "https://", "traefik.example.com"])
+def test_url_unique_id_rejects_unusable_url(url: str) -> None:
+    """A URL without a usable host or port raises ValueError."""
+    with pytest.raises(ValueError):
+        url_unique_id(url)
