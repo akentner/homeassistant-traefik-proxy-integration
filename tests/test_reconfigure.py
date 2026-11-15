@@ -177,8 +177,8 @@ async def test_reconfigure_to_unused_host_succeeds(hass, aioclient_mock) -> None
     assert entry.data[CONF_URL] == NEW_URL
 
 
-async def test_reconfigure_rejects_userinfo_url(hass, aioclient_mock) -> None:
-    """A new URL with embedded credentials is refused with invalid_url; nothing is sent or stored."""
+async def test_reconfigure_url_has_credentials(hass, aioclient_mock) -> None:
+    """A new URL with embedded credentials is refused with url_has_credentials; nothing is sent or stored."""
     entry = _make_entry()
     entry.add_to_hass(hass)
     before = dict(entry.data)
@@ -190,7 +190,7 @@ async def test_reconfigure_rejects_userinfo_url(hass, aioclient_mock) -> None:
     )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_url"}
+    assert result["errors"] == {"base": "url_has_credentials"}
     assert dict(entry.data) == before
     assert aioclient_mock.call_count == 0
 
@@ -288,9 +288,9 @@ async def test_reconfigure_moves_unique_id_and_host_title(hass, aioclient_mock, 
     assert entry.title == new_title
 
 
-@pytest.mark.parametrize("url", ["http://[::1", "http://traefik.example.com:99999"])
+@pytest.mark.parametrize("url", ["http://[::1", "http://traefik.example.com:99999", "", "   "])
 async def test_reconfigure_unusable_url_is_invalid_url(hass, aioclient_mock, caplog, url: str) -> None:
-    """A URL without a usable host or port is invalid_url on the form, never 'unknown' or a traceback."""
+    """An empty URL or one without a usable host or port is invalid_url on the form, never 'unknown' or a traceback."""
     entry = _make_entry()
     before = dict(entry.data)
 

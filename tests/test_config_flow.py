@@ -14,12 +14,16 @@ Covers:
 - Every ``AuthMode`` round-trips through the client to the exact
   Authorization header ``Auth.header()`` promises, also from stored entry data.
 - The user step stores entry data 1.3 and reauth replaces the credentials.
+- The error matrix: every probe failure maps to its own form error in the
+  user, reauth and reconfigure steps; credentials in the URL, empty URLs,
+  unexpected exceptions and the order in which errors are decided.
 
 Hermetic via ``aioclient_mock`` (HA's HTTP mock layer) — no live Traefik needed.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -31,6 +35,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 
+from custom_components.traefik_proxy import config_flow
 from custom_components.traefik_proxy.api import (
     Auth,
     AuthMode,
@@ -156,8 +161,10 @@ def test_user_schema_serializes_for_config_flow_endpoint() -> None:
     ],
 )
 def test_check_url_shape_raises_on_bad_urls(url: str) -> None:
-    with pytest.raises(InvalidUrl):
+    """A malformed URL raises InvalidUrl without arguments, so the URL never reaches exc.args (IN-09)."""
+    with pytest.raises(InvalidUrl) as err:
         _check_url_shape(url)
+    assert err.value.args == ()
 
 
 def test_check_url_shape_accepts_http_and_https() -> None:
@@ -172,10 +179,22 @@ def test_check_url_shape_accepts_http_and_https() -> None:
         "https://u@traefik.example.com",
         "https://:p@traefik.example.com",
         "http://u:@traefik.example.com:8080",
+        "https://@traefik.example.com",
     ],
 )
 def test_check_url_shape_rejects_userinfo(url: str) -> None:
-    """Credentials embedded in the URL are refused by default."""
+    """Credentials embedded in a well-formed URL raise UrlHasCredentials, without the URL as argument."""
+    with pytest.raises(config_flow.UrlHasCredentials) as err:
+        _check_url_shape(url)
+    assert err.value.args == ()
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["ftp://u:p@traefik.example.com", "https://u:p@traefik.example.com:99999", "u:p@traefik.example.com"],
+)
+def test_check_url_shape_reports_shape_before_credentials(url: str) -> None:
+    """A URL that is malformed and carries credentials is invalid_url: the shape is decided first."""
     with pytest.raises(InvalidUrl):
         _check_url_shape(url)
 
@@ -359,7 +378,7 @@ async def test_entry_data_round_trips_to_probe_header(hass: object, aioclient_mo
 
 async def test_validate_input_rejects_userinfo_url_without_request(hass: object, aioclient_mock: Any) -> None:
     """A userinfo URL is refused by the shape check before any request is sent."""
-    with pytest.raises(InvalidUrl):
+    with pytest.raises(config_flow.UrlHasCredentials):
         await _validate_input(hass, {**BEARER_DATA, CONF_URL: USERINFO_URL, CONF_VERIFY_SSL: True})
 
     assert aioclient_mock.call_count == 0
@@ -369,12 +388,13 @@ async def test_validate_input_maps_request_construction_error_to_invalid_url(has
     """aiohttp refusing to build the probe request surfaces as invalid_url, never 'unknown'."""
     aioclient_mock.get(f"{GOOD_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
 
-    with pytest.raises(InvalidUrl):
+    with pytest.raises(InvalidUrl) as err:
         await _validate_input(hass, {**BEARER_DATA, CONF_VERIFY_SSL: True})
+    assert err.value.args == ()
 
 
-async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) -> None:
-    """The user step answers a userinfo URL with invalid_url and sends no request."""
+async def test_user_step_url_has_credentials(hass: Any, aioclient_mock: Any) -> None:
+    """The user step answers a userinfo URL with url_has_credentials and sends no request."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": "user"},
@@ -382,7 +402,7 @@ async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) ->
     )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_url"}
+    assert result["errors"] == {"base": "url_has_credentials"}
     assert aioclient_mock.call_count == 0
 
 
@@ -818,3 +838,159 @@ async def test_validate_input_maps_other_error_status_to_cannot_connect(
 
     with pytest.raises(CannotConnect):
         await _validate_input(hass, {**BEARER_DATA, CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True})
+
+
+# ----------------------- error matrix: every probe failure in every step -----------------------
+
+STEPS = ("user", "reauth", "reconfigure")
+SECRET_TOKEN = "s3cret-matrix-token"
+
+
+async def _run_step(hass: Any, step: str, user_input: dict[str, Any]) -> Any:
+    """Submit ``user_input`` (merged over a valid bearer input) to ``step`` and return the result.
+
+    reauth and reconfigure run against a bearer entry for ``MOCK_URL``; the
+    user step gets the URL in its input. reauth has no URL field.
+    """
+    submitted = {AUTH_TYPE: "bearer", CONF_TOKEN: SECRET_TOKEN, **user_input}
+    if step == "user":
+        return await _submit_user(hass, submitted)
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    if step == "reauth":
+        submitted.pop(CONF_URL, None)
+        return await _reauth(hass, entry, submitted)
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **submitted}
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return result
+
+
+@pytest.mark.parametrize("step", STEPS)
+@pytest.mark.parametrize(
+    ("answer", "error"),
+    [
+        pytest.param({"status": 401}, "invalid_auth", id="401"),
+        pytest.param({"status": 403}, "invalid_auth", id="403"),
+        pytest.param({"status": 404}, "api_disabled", id="404"),
+        pytest.param({"status": 500}, "cannot_connect", id="500"),
+        pytest.param({"exc": aiohttp.ClientError()}, "cannot_connect", id="client-error"),
+        pytest.param({"exc": TimeoutError()}, "cannot_connect", id="timeout"),
+        pytest.param({"status": 302, "headers": {"Location": INTRUDER}}, "redirect", id="302"),
+    ],
+)
+async def test_error_matrix_probe_failure_maps_to_its_key(
+    hass: Any, aioclient_mock: Any, step: str, answer: dict[str, Any], error: str
+) -> None:
+    """Each probe failure shows its own base error in each step; one request, nothing stored."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", **answer)
+
+    result = await _run_step(hass, step, {})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": error}
+    assert aioclient_mock.call_count == 1
+    assert not [call for call in aioclient_mock.mock_calls if "intruder.example.org" in str(call[1])]
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if step == "user":
+        assert entries == []
+    else:
+        assert dict(entries[0].data) == dict(make_traefik_entry().data)
+
+
+@pytest.mark.parametrize("step", STEPS)
+async def test_unknown_error_is_logged_once_without_input(
+    hass: Any, aioclient_mock: Any, caplog: pytest.LogCaptureFixture, step: str
+) -> None:
+    """An unexpected exception during validation is 'unknown', logged once with a traceback and no input."""
+    caplog.set_level(logging.DEBUG)
+    with patch.object(TraefikProxyApiClient, "async_get_version", AsyncMock(side_effect=RuntimeError("boom"))):
+        result = await _run_step(hass, step, {})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "unknown"}
+    records = [
+        record
+        for record in caplog.records
+        if record.name == "custom_components.traefik_proxy.config_flow" and record.levelno >= logging.ERROR
+    ]
+    assert len(records) == 1
+    assert records[0].exc_info is not None
+    assert "traefik.example.com" not in caplog.text
+    assert SECRET_TOKEN not in caplog.text
+
+
+async def test_unknown_error_log_has_no_basic_credentials(
+    hass: Any, aioclient_mock: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """With basic auth neither the username nor the password reaches the 'unknown' log record."""
+    caplog.set_level(logging.DEBUG)
+    with patch.object(TraefikProxyApiClient, "async_get_version", AsyncMock(side_effect=RuntimeError("boom"))):
+        result = await _submit_user(
+            hass, {AUTH_TYPE: "basic", CONF_USERNAME: "matrix-user", CONF_PASSWORD: "matrix-pw"}
+        )
+
+    assert result["errors"] == {"base": "unknown"}
+    assert "matrix-user" not in caplog.text
+    assert "matrix-pw" not in caplog.text
+
+
+@pytest.mark.parametrize("url", ["", "   "])
+async def test_user_step_empty_url_is_invalid_url(hass: Any, aioclient_mock: Any, url: str) -> None:
+    """An empty or blank URL is invalid_url; Traefik is not contacted."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: url, AUTH_TYPE: "none"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("url", "user_input", "existing", "expected"),
+    [
+        pytest.param(
+            "ftp://u:p@traefik.example.com", {AUTH_TYPE: "none"}, False, {"base": "invalid_url"}, id="shape-first"
+        ),
+        pytest.param(
+            "https://u:p@traefik.example.com:8080",
+            {AUTH_TYPE: "basic", CONF_USERNAME: "admin"},
+            False,
+            {"base": "url_has_credentials"},
+            id="url-credentials-before-fields",
+        ),
+        pytest.param(
+            "https://u:p@traefik.example.com:8080",
+            {AUTH_TYPE: "none"},
+            True,
+            {"base": "url_has_credentials"},
+            id="url-credentials-before-duplicate",
+        ),
+        pytest.param(
+            MOCK_URL,
+            {AUTH_TYPE: "basic", CONF_USERNAME: "admin"},
+            True,
+            "already_configured",
+            id="duplicate-before-fields",
+        ),
+    ],
+)
+async def test_user_step_error_order(
+    hass: Any, aioclient_mock: Any, url: str, user_input: dict[str, Any], existing: bool, expected: Any
+) -> None:
+    """Only the first failing stage is reported: URL shape, URL credentials, duplicate, fields, probe."""
+    if existing:
+        make_traefik_entry().add_to_hass(hass)
+
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_URL: url, **user_input})
+
+    if expected == "already_configured":
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == expected
+    else:
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == expected
+    assert aioclient_mock.call_count == 0
