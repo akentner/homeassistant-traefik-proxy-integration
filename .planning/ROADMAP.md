@@ -562,7 +562,7 @@ tag and catalog PR themselves remain the user's action.
      `.planning/`; `feat/marketplace-polish` is pushed and a **Draft PR** to
      `main` is open — no tag, release or `hacs/default` PR is created by the
      assistant (U1, M8). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 5/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
+**Plans**: 6/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
 
 Plans:
 **Wave 1**
@@ -575,7 +575,7 @@ Plans:
 - [x] 08-05-PLAN.md — Tracer: ProxyLogo landscape logo, dark logo, exact brand file set, `docs/BRAND.md` provenance (REL-02; D-03, D-28, D-30)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 08-06-PLAN.md — Tracer: local tooling — hashed min-HA lock + `make test-min-ha`, coverage gate, SyntaxWarning filter, project name, pre-commit on 3.14/traefik_proxy, CI-aligned Makefile (REL-04; D-01, D-09, D-10, D-12, D-14, D-32)
+- [x] 08-06-PLAN.md — Tracer: local tooling — hashed min-HA lock + `make test-min-ha`, coverage gate, SyntaxWarning filter, project name, pre-commit on 3.14/traefik_proxy, CI-aligned Makefile (REL-04; D-01, D-09, D-10, D-12, D-14, D-32)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 08-07-PLAN.md — Tracer: release tag check workflow; validate.yml triggers, SHA pins, timeouts, locked min-HA job, Makefile parity; Dependabot (REL-05, DIST-04, REL-01, REL-04; D-02, D-12, D-13, D-14, D-15, D-31, D-32)
@@ -615,7 +615,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
 | 7. Config flow, HA 2026.11 baseline, observability | 9/9 | Complete    | 2026-11-15 |
-| 8. Marketplace + release readiness | 5/13 | In Progress | - |
+| 8. Marketplace + release readiness | 6/13 | In Progress | - |
 
 **Coverage:**
 

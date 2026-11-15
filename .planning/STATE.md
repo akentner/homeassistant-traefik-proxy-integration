@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-05-PLAN.md
-last_updated: "2026-11-15T20:18:39.401Z"
+stopped_at: Completed 08-06-PLAN.md
+last_updated: "2026-11-15T20:27:57.596Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: 6d06b8e3e04ad06558c25d58fb9c2a19ce7af2d8
+state_head: f47c2d5c07119fd8c72501b6058566167704b5a0
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 49
+  completed_plans: 50
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 6 of 13
+Plan: 7 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -116,6 +116,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P03 | 13min | 3 tasks | 11 files |
 | Phase 08 P04 | 3 min | 1 tasks | 4 files |
 | Phase 08 P05 | 6min | 2 tasks | 8 files |
+| Phase 08 P06 | 8min | 2 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -250,6 +251,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-04: brand geometry guard (tests/test_brand.py, Pillow alpha bbox) pins trimmed, centred, interlaced icons; icon.svg lives in docs/; 08-05 reuses the helpers
 - [Phase 08]: 08-05: Logo = traefik webui ProxyLogo @ v3.7.19 (7dafd6d); dark_logo with the webui's own white wordmark; no dark_icon
 - [Phase 08]: 08-05: Logo trademark/licence assumption A3/A8 stays flagged for the user (D-03 escape hatch: icon only)
+- [Phase 08]: 08-06: fail_under = 99 (measured 99.29 % line coverage on custom_components.traefik_proxy); partial pytest runs need --no-cov
+- [Phase 08]: 08-06: min-HA stack = hashed lock .github/requirements-min-ha.txt (123 pkgs) via make test-min-ha; pre-commit ruff/mypy as uv run local hooks (pre-commit 4.7.0 ephemeral)
 
 ### Pending Todos
 
@@ -294,7 +297,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T20:18:39.200Z
-Stopped at: Completed 08-05-PLAN.md
+Last session: 2026-11-15T20:27:57.360Z
+Stopped at: Completed 08-06-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
