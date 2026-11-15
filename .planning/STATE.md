@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-11-15T13:52:47.411Z"
+stopped_at: Completed 07-05-PLAN.md
+last_updated: "2026-11-15T14:11:40.094Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: 9aabda129f9b8f44dcd762d13cf3f36294cab80b
+state_head: 58dc998c307deb8855910b3e3b2299f314298309
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 39
+  completed_plans: 40
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 07 execution started
 
@@ -105,6 +105,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 07 P02 | 10min | 2 tasks | 10 files |
 | Phase 07 P03 | 7min | 2 tasks | 10 files |
 | Phase 07 P04 | 9min | 2 tasks | 9 files |
+| Phase 07 P05 | 19min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -215,6 +216,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: test threading.Timer instances are joined after cancel() so HA's verify_cleanup never sees a live timer thread
 - [Phase 07]: Phase 07: the client never follows redirects; 3xx raises TraefikProxyRedirectError and the coordinator reports the translated key redirect
 - [Phase 07]: Phase 07: an invalid stored URL raises ConfigEntryError(invalid_url) without its aiohttp cause chained, because HA logs ConfigEntryError tracebacks at ERROR
+- [Phase 07]: Phase 07: entry data 1.3 names its auth type (none/basic/bearer) and carries only that type's credentials; api_key is read only by the migration
+- [Phase 07]: Phase 07: config-entry unique_id is host:port (migrated unless another entry owns it); title = host unless the user renamed it
+- [Phase 07]: Phase 07: URL credentials of 0.3.0 entries move into basic auth; next to a token or when incomplete they are dropped with one WARNING naming the entry only
 
 ### Pending Todos
 
@@ -259,7 +263,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T13:52:47.246Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-11-15T14:11:39.887Z
+Stopped at: Completed 07-05-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

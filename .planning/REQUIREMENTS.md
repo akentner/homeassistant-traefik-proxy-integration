@@ -274,7 +274,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Config flow, HA 2026.11 baseline, observability (FLOW) — Phase 7
 
-- [ ] **FLOW-01**: User, reauth and reconfigure steps offer an auth selector
+- [x] **FLOW-01**: User, reauth and reconfigure steps offer an auth selector
       (none / basic / bearer) with `PASSWORD` selectors and per-field
       `data_description`; a minor-version config-entry migration converts 0.3.0
       data (token → bearer, empty → none); choosing "none" clears credentials.
@@ -283,7 +283,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       `OptionsFlowWithReload` with `NumberSelector`s (units, box mode), the
       per-item-entities toggle and the missing-entity grace period (1–168 h,
       default 24 h; I7). (A-17, S-01, U-12, W36)
-- [ ] **FLOW-03**: Reauth and reconfigure finish through
+- [x] **FLOW-03**: Reauth and reconfigure finish through
       `async_update_reload_and_abort`; the config-entry unique_id is
       `host:port` (migrated) and follows a reconfigure; the title is the host.
       (A-22, S-02)
@@ -467,9 +467,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CERT-03 | Phase 6 | Complete |
 | CERT-04 | Phase 6 | Complete |
 | CERT-05 | Phase 6 | Complete |
-| FLOW-01 | Phase 7 | Pending |
+| FLOW-01 | Phase 7 | Complete |
 | FLOW-02 | Phase 7 | Pending |
-| FLOW-03 | Phase 7 | Pending |
+| FLOW-03 | Phase 7 | Complete |
 | FLOW-04 | Phase 7 | Pending |
 | FLOW-05 | Phase 7 | Complete |
 | FLOW-06 | Phase 7 | Pending |
