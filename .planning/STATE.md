@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-11-15T08:30:18.113Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-11-15T08:44:35.160Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 06 execution started
-state_head: 1a9624660fd1c8cf6dfef2f57963281d024fecba
+state_head: dc5c6627bd45d3fb1d9386fd125eaa8373c541df
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 31
+  completed_plans: 32
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 06 (Certificates) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 06 execution started
 
@@ -96,6 +96,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 06 P01 | 10min | 2 tasks | 5 files |
 | Phase 06 P02 | 5 min | 2 tasks | 5 files |
 | Phase 06 P03 | 16min | 3 tasks | 5 files |
+| Phase 06 P04 | 11min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -181,6 +182,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-03: _close_writer aborts the transport on any wait_closed exception and on CancelledError (never-raises contract, no open socket)
 - [Phase 06]: 06-03: wildcards cover exactly one label; IP-literal hosts only match by equality; ASCII lowercase + one trailing dot, no Unicode normalization
 - [Phase 06]: 06-03: conftest warms cryptography's cached datetime class before any freezer test (order-dependent TypeError otherwise)
+- [Phase 06]: 06-04: HostCertState (frozen) per host in cert_coordinator.py; days/problem computed at read time; CERT_FAILURES_FOR_PROBLEM=2 module-local
+- [Phase 06]: 06-04: Cert probes connect to the entry URL host on port 443 (PROBE_PORT) with router host as SNI; trust_store kwarg passed to every probe
+- [Phase 06]: 06-04: Failed probe keeps last known certificate (any source), failures counted; cert entities stay available, problem-on via reason precedence
+- [Phase 06]: 06-04: subject attribute = CN or None (empty CN -> None)
 
 ### Pending Todos
 
@@ -222,7 +227,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T08:30:17.978Z
-Stopped at: Completed 06-03-PLAN.md
+Last session: 2026-11-15T08:44:35.035Z
+Stopped at: Completed 06-04-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
