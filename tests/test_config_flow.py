@@ -48,6 +48,7 @@ from custom_components.traefik_proxy.config_flow import (
     CannotConnect,
     InvalidAuth,
     InvalidUrl,
+    Redirect,
     _check_url_shape,
     _validate_input,
 )
@@ -801,11 +802,9 @@ async def test_reauth_redirect_shows_redirect_error(hass: Any, aioclient_mock: A
 @pytest.mark.parametrize("status", [301, 307, 308])
 async def test_validate_input_maps_redirect_status_to_redirect(hass: Any, aioclient_mock: Any, status: int) -> None:
     """Every redirect status of the probe raises the flow's Redirect sentinel."""
-    from custom_components.traefik_proxy import config_flow
-
     _stub_redirect(aioclient_mock, status)
 
-    with pytest.raises(config_flow.Redirect):
+    with pytest.raises(Redirect):
         await _validate_input(hass, {**BEARER_DATA, CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True})
     _assert_single_probe_without_location(aioclient_mock)
 

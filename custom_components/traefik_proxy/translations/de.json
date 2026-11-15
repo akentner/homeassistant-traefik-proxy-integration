@@ -63,6 +63,7 @@
       "invalid_url": "Die URL ist ungültig. Nutze das Schema http oder https und einen nicht leeren Host.",
       "invalid_auth": "Traefik hat die Zugangsdaten abgelehnt, oder sie enthalten Zeichen, die nicht gesendet werden können (ein Steuerzeichen oder einen Doppelpunkt im Benutzernamen).",
       "api_disabled": "Die Traefik-API ist nicht aktiviert. Ergänze den api-Block in deiner statischen Traefik-Konfiguration.",
+      "redirect": "Traefik hat mit einer Weiterleitung geantwortet, der nicht gefolgt wird. Gib stattdessen die Zieladresse der Weiterleitung ein, meist die HTTPS-Adresse der Traefik-API.",
       "required": "Für die gewählte Authentifizierung erforderlich.",
       "unknown": "Unerwarteter Fehler. Sieh im Log nach."
     },

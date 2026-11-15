@@ -63,6 +63,7 @@
       "invalid_url": "The URL is malformed. Use the http or https scheme and a non-empty host.",
       "invalid_auth": "Traefik rejected the credentials, or they contain characters that cannot be sent (a control character, or a colon in the username).",
       "api_disabled": "Traefik's API is not enabled. Add the api block to your Traefik static configuration.",
+      "redirect": "Traefik answered with a redirect, which is not followed. Enter the address it redirects to instead, usually the HTTPS address of the Traefik API.",
       "required": "Required for the selected authentication.",
       "unknown": "Unexpected error. See the logs."
     },

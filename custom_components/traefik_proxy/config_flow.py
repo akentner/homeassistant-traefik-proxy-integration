@@ -58,6 +58,7 @@ from .api import (
     TraefikProxyAuthError,
     TraefikProxyInvalidUrlError,
     TraefikProxyNotFoundError,
+    TraefikProxyRedirectError,
 )
 from .const import (
     CONF_AUTH_TYPE,
@@ -154,6 +155,10 @@ class InvalidUrl(Exception):
     """The provided URL is malformed or carries credentials (userinfo)."""
 
 
+class Redirect(Exception):
+    """Traefik answered the probe with a redirect (3xx); it is never followed."""
+
+
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
@@ -183,8 +188,8 @@ def _check_url_shape(url: str) -> None:
 async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
     """Probe /api/version with entry data and map client errors to flow errors.
 
-    401/403 -> InvalidAuth, 404 -> ApiDisabled, invalid URL -> InvalidUrl,
-    everything else -> CannotConnect. Should aiohttp refuse to build the
+    401/403 -> InvalidAuth, 404 -> ApiDisabled, 3xx -> Redirect, invalid URL
+    -> InvalidUrl, everything else -> CannotConnect. Should aiohttp refuse to build the
     request for the URL, the client error maps to InvalidUrl.
     """
     _check_url_shape(data[CONF_URL])
@@ -206,14 +211,21 @@ async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
         raise InvalidAuth from None
     except TraefikProxyNotFoundError:
         raise ApiDisabled from None
+    # Both are TraefikProxyConnectionError subclasses: catch them before the
+    # generic branch, or they would map to cannot_connect.
+    except TraefikProxyRedirectError:
+        raise Redirect from None
     except TraefikProxyInvalidUrlError:
         raise InvalidUrl(data[CONF_URL]) from None
     except TraefikProxyApiError, TimeoutError:
         raise CannotConnect from None
 
 
-async def _async_probe_errors(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
-    """Probe Traefik with entry data; return the form errors (empty on success)."""
+async def _async_probe(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
+    """Probe Traefik with entry data; return the form errors (empty on success).
+
+    The only place that maps a probe failure to a form error key.
+    """
     try:
         await _validate_input(hass, data)
     except InvalidUrl:
@@ -222,6 +234,8 @@ async def _async_probe_errors(hass: HomeAssistant, data: Mapping[str, Any]) -> d
         return {"base": "invalid_auth"}
     except ApiDisabled:
         return {"base": "api_disabled"}
+    except Redirect:
+        return {"base": "redirect"}
     except CannotConnect:
         return {"base": "cannot_connect"}
     return {}
@@ -386,7 +400,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 credentials, errors = _collect_credentials(user_input, auth_type)
             if not errors:
                 data = _entry_data(url, user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL), auth_type, credentials)
-                errors = await _async_probe_errors(self.hass, data)
+                errors = await _async_probe(self.hass, data)
             if not errors:
                 return self.async_create_entry(title=url_host(url) or url, data=data)
 
@@ -422,9 +436,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                     auth_type,
                     credentials,
                 )
-                errors = await _async_probe_errors(
-                    self.hass, {**new_data, CONF_VERIFY_SSL: effective_verify_ssl(entry)}
-                )
+                errors = await _async_probe(self.hass, {**new_data, CONF_VERIFY_SSL: effective_verify_ssl(entry)})
             if not errors:
                 return self.async_update_reload_and_abort(entry, data=new_data)
 
@@ -470,7 +482,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             if not errors:
                 verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 new_data = _entry_data(url, verify_ssl, auth_type, credentials)
-                errors = await _async_probe_errors(self.hass, new_data)
+                errors = await _async_probe(self.hass, new_data)
             if not errors:
                 title = entry.title
                 if title in {url_host(entry.data.get(CONF_URL, "")), DEFAULT_NAME}:
