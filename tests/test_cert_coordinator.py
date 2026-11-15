@@ -710,7 +710,8 @@ def _entry_with_routers(*routers: dict[str, Any]) -> MagicMock:
 def test_probe_ports(routers: list[dict[str, Any]], expected: int) -> None:
     """Per host: 443 when any router offers it, else the lowest TLS port, else 443."""
     c = CertCoordinator(MagicMock(), _entry_with_routers(*routers))
-    assert c._probe_ports(("h.example.com",)) == {"h.example.com": expected}
+    snapshot = c.config_entry.runtime_data.coordinator.data
+    assert c._probe_ports(("h.example.com",), snapshot) == {"h.example.com": expected}
 
 
 async def test_probe_ports_host_of_several_routers_probed_once(freezer: Any) -> None:
@@ -871,6 +872,52 @@ async def test_cancelled_refresh_closes_connection_and_keeps_data(hass: Any, soc
         server.close()
         server.close_clients()
         await server.wait_closed()
+
+
+async def test_cycle_finishing_after_shutdown_schedules_no_day_boundary(hass: Any) -> None:
+    """A cycle still running at unload must not arm the day-boundary timer on the dead coordinator."""
+    c = CertCoordinator(hass, _probe_mode_entry(("a.example.com",)), trust_store=MagicMock(spec=Store))
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _gated(_connect: str, _port: int, sni: str, **_kw: Any) -> ProbedCertificate:
+        started.set()
+        await release.wait()
+        return _probed(sni)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, AsyncMock(side_effect=_gated))
+        task = asyncio.create_task(c.async_refresh())
+        async with asyncio.timeout(5):
+            await started.wait()
+        await c.async_shutdown()
+        release.set()
+        async with asyncio.timeout(5):
+            await task
+
+    assert c._unsub_day_boundary is None
+    # A day-boundary callback that was already due when shutdown ran does not re-arm either.
+    c._async_handle_day_boundary(dt_util.utcnow())
+    assert c._unsub_day_boundary is None
+
+
+async def test_probe_cycle_never_reads_runtime_data_after_the_api_call() -> None:
+    """The 404 answer may arrive after unload deleted ``runtime_data``: the ports come from the snapshot read before."""
+    entry = _probe_mode_entry(("a.example.com",), port=8443)
+
+    async def _unloaded_then_404() -> None:
+        del entry.runtime_data
+        raise TraefikProxyNotFoundError("/api/certificates", "HTTP 404", status=404)
+
+    entry.runtime_data.client.async_get_certificates = AsyncMock(side_effect=_unloaded_then_404)
+    c = CertCoordinator(MagicMock(), entry, trust_store=MagicMock(spec=Store))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_cycle()
+
+    assert [call.args for call in probe.await_args_list] == [("127.0.0.1", 8443, "a.example.com")]
+    assert data["a.example.com"].port == 8443
 
 
 async def test_overlapping_refreshes_both_complete(hass: Any) -> None:

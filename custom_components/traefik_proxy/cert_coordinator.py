@@ -285,14 +285,20 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         return states
 
     async def _async_cycle(self) -> dict[str, HostCertState]:
-        """Run one cert cycle over the current host set."""
+        """Run one cert cycle over the current host set.
+
+        ``runtime_data`` is read only before the first suspension point: an
+        unload while the cycle waits deletes it.
+        """
+        runtime_data = self.config_entry.runtime_data
+        snapshot = runtime_data.coordinator.data
         hosts = self._collect_hosts()
         now = dt_util.utcnow()
         try:
-            certificates = await self.config_entry.runtime_data.client.async_get_certificates()
+            certificates = await runtime_data.client.async_get_certificates()
         except TraefikProxyNotFoundError:
             # Traefik < 3.7 has no certificate list: probe every host.
-            return await self._async_probe_states(hosts, now)
+            return await self._async_probe_states(hosts, snapshot, now)
         except TraefikProxyApiError as err:
             # The message is "<path>: <detail>" and never carries a URL or credential.
             raise UpdateFailed(f"Reading certificates failed: {err}") from err
@@ -357,14 +363,15 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             self._trust_store_ready = True
         return self._trust_store
 
-    def _probe_ports(self, hosts: Sequence[str]) -> dict[str, int]:
+    @staticmethod
+    def _probe_ports(hosts: Sequence[str], snapshot: TraefikSnapshot) -> dict[str, int]:
         """Return the port each host is probed on.
 
         The candidates of a host are the TLS entrypoint ports of every
-        router that carries it. 443 wins when it is a candidate, else the
-        lowest candidate; without any candidate the host is probed on 443.
+        router of ``snapshot`` that carries it. 443 wins when it is a
+        candidate, else the lowest candidate; without any candidate the host
+        is probed on 443.
         """
-        snapshot = self.config_entry.runtime_data.coordinator.data
         candidates: dict[str, set[int]] = {host: set() for host in hosts}
         for router in snapshot.routers.values():
             router_hosts = _router_hosts(router) & candidates.keys()
@@ -378,7 +385,9 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             for host, ports in candidates.items()
         }
 
-    async def _async_probe_states(self, hosts: Sequence[str], now: datetime) -> dict[str, HostCertState]:
+    async def _async_probe_states(
+        self, hosts: Sequence[str], snapshot: TraefikSnapshot, now: datetime
+    ) -> dict[str, HostCertState]:
         """Probe every host once on its port and return their states in host order.
 
         The dict is built only after every probe returned, so a cancelled
@@ -387,7 +396,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         if not hosts:
             return {}
         connect_host = self._connect_host()
-        ports = self._probe_ports(hosts)
+        ports = self._probe_ports(hosts, snapshot)
         trust_store = self._get_trust_store()
         results = await asyncio.gather(
             *(self._async_probe_host(host, ports[host], connect_host, trust_store, now) for host in hosts)
@@ -452,11 +461,15 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     def _async_schedule_day_boundary(self, states: dict[str, HostCertState]) -> None:
         """Replace the day-boundary timer with one at the earliest day change of ``states``.
 
-        No timer is scheduled when no host has a certificate.
+        No timer is scheduled when no host has a certificate, nor after
+        shutdown: a cycle still running at unload must not arm a timer that
+        keeps the dead coordinator alive.
         """
         if self._unsub_day_boundary is not None:
             self._unsub_day_boundary()
             self._unsub_day_boundary = None
+        if self._shutdown_requested:
+            return
         now = dt_util.utcnow()
         changes = [when for state in states.values() if (when := state.next_day_change(now)) is not None]
         if changes:
