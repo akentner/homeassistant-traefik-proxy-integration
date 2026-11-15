@@ -15,14 +15,18 @@ Covers:
 from __future__ import annotations
 
 import importlib
+import logging
+import typing
 from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
+import custom_components.traefik_proxy as integration
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_SCAN_INTERVAL, CONF_URL, CONF_VERIFY_SSL, DOMAIN
 from custom_components.traefik_proxy.coordinator import build_api_client
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
@@ -69,7 +73,7 @@ async def test_refresh_button_registry_entry(hass, aioclient_mock, mock_tls_prob
     assert reg_entry.entity_category is EntityCategory.DIAGNOSTIC
     assert reg_entry.original_device_class is None
 
-    # Lookup by config entry works on HA 2026.3 and on releases that deprecate async_get_device.
+    # Look the main device up by config entry and identifier.
     main_identifier = device_identifier(entry.entry_id, TraefikDevice.MAIN)
     mains = [
         device
@@ -163,3 +167,26 @@ async def test_update_listener_registered_once_across_reloads(hass, aioclient_mo
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert len(entry.update_listeners) == 0
+
+
+async def test_setup_and_unload_return_none(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Setup and unload are typed and return None; unload and reload work without a usage report."""
+    caplog.set_level(logging.DEBUG)
+    assert typing.get_type_hints(integration.async_setup_entry)["return"] is type(None)
+    assert typing.get_type_hints(integration.async_unload_entry)["return"] is type(None)
+
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(minor_version=2))
+    assert entry.state is ConfigEntryState.LOADED
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.NOT_LOADED
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+
+    for record in caplog.records:
+        assert "Detected that custom integration" not in record.getMessage(), record.getMessage()

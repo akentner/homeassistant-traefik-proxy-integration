@@ -223,7 +223,7 @@ async def test_entry_at_1_2_skips_migration(hass: HomeAssistant, aioclient_mock:
 async def test_issue_survives_reload_and_is_deleted_on_remove(
     hass: HomeAssistant, aioclient_mock: Any, hass_storage: dict[str, Any]
 ) -> None:
-    """The repair issue outlives a reload; removing the entry deletes it and the missing-since Store."""
+    """The entry-bound repair issue outlives reload and unload; Home Assistant deletes it with the entry."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
     _create(hass, entry, "button", "diagnostics_reload")
@@ -231,7 +231,10 @@ async def test_issue_survives_reload_and_is_deleted_on_remove(
     hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": {}}
 
     await setup_traefik_entry(hass, aioclient_mock, entry)
-    assert _get_issue(hass, ENTRY_ID) is not None
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.config_entry_id == ENTRY_ID
+    assert issue.is_persistent is True
 
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -269,6 +272,16 @@ async def test_downgrade_fails_and_keeps_registry(hass: HomeAssistant, aioclient
     problem_entry = registry.async_get(problem)
     assert problem_entry is not None
     assert problem_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert (entry.version, entry.minor_version) == (2, 1)
+    assert _own_issues(hass) == []
+
+
+async def test_downgrade_direct_call_returns_false(hass: HomeAssistant) -> None:
+    """Called directly, the migration refuses an entry from a newer major version and leaves it unchanged."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=2, minor_version=1)
+    entry.add_to_hass(hass)
+
+    assert await integration.async_migrate_entry(hass, entry) is False
     assert (entry.version, entry.minor_version) == (2, 1)
     assert _own_issues(hass) == []
 

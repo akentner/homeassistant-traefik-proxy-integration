@@ -305,6 +305,25 @@ async def test_unload_cancels_the_boundary_timer(hass: HomeAssistant, aioclient_
     assert not _timer_pending(cert_coordinator)
 
 
+async def test_stopping_flag_blocks_the_boundary_timer_after_unload(
+    hass: HomeAssistant, aioclient_mock: Any, certs: CertStub
+) -> None:
+    """The coordinator's own stop flag is set by unload; scheduling afterwards arms no timer."""
+    certs.not_after = {HOST: T0 + timedelta(days=20) + HOUR}
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    assert getattr(cert_coordinator, "_stopping", None) is False
+    states = dict(cert_coordinator.data)
+    assert any(state.certificate is not None for state in states.values())
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert getattr(cert_coordinator, "_stopping", None) is True
+
+    cert_coordinator._async_schedule_day_boundary(states)
+    assert not _timer_pending(cert_coordinator)
+
+
 async def _setup_failing_certificates(
     hass: HomeAssistant,
     aioclient_mock: Any,
