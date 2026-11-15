@@ -194,6 +194,7 @@ No REFACTOR commits (nothing to clean up).
 | Wordmark luminance measured on fully opaque pixels only (alpha 255), BT.601 luma via Pillow `convert("L")`, with planted self-check samples | Anti-aliased edge pixels would blur the mean; planted samples keep the guard non-vacuous (08-03/08-04 convention) | Exact colour match of the wordmark |
 | Provenance comment (source, tag, SHA, MIT, trademark) at the top of both SVGs | The SVGs are copies of upstream artwork; the notice travels with them | Provenance only in BRAND.md |
 | Kept the upstream `clip0`/`clip1` rect fills as `#000`/`#fff` (from `fill={textColor}`) | Fill of a clipPath child has no visual effect; keeping the plain substitution keeps the conversion auditable | Hand-edit the clip rects |
+| REL-02 left unchecked in REQUIREMENTS.md (`requirements.mark-complete` run, then reverted) | 08-09 (local brand serving on 2026.11.0) and 08-10 (README trademark note) also carry REL-02; checking it now would claim the requirement before its last parts land | Mark it complete after 08-05 |
 | Re-exported the icons into scratch with the recorded commands and compared bytes (no change to the shipped icons) | Proves the BRAND.md recipe for all six PNGs is exact, without touching 08-04's output | Copy the commands unverified |
 
 ## Deviations from Plan
