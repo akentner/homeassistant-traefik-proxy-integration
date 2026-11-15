@@ -187,8 +187,11 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             return {}
         connect_host = self._connect_host()
         results = await asyncio.gather(*(self._async_probe_host(host, PROBE_PORT, connect_host, now) for host in hosts))
+        # Only hosts of this cycle's host set are kept; history comes from the last data.
+        previous = self.data or {}
         return {
-            host: self._probe_state(host, PROBE_PORT, result, now) for host, result in zip(hosts, results, strict=True)
+            host: self._probe_state(host, PROBE_PORT, result, previous.get(host), now)
+            for host, result in zip(hosts, results, strict=True)
         }
 
     async def _async_probe_host(self, host: str, port: int, connect_host: str, now: datetime) -> ProbeResult:
@@ -204,8 +207,15 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             )
 
     @staticmethod
-    def _probe_state(host: str, port: int, result: ProbeResult, now: datetime) -> HostCertState:
-        """Map one probe result to the host's state."""
+    def _probe_state(
+        host: str, port: int, result: ProbeResult, previous: HostCertState | None, now: datetime
+    ) -> HostCertState:
+        """Map one probe result and the host's previous state to its new state.
+
+        A success replaces the certificate and resets the failures. A failure
+        keeps the last known certificate with its trust flags and read time
+        (from either source) and counts one more consecutive failure.
+        """
         if isinstance(result, ProbedCertificate):
             return HostCertState(
                 host=host,
@@ -222,13 +232,13 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         return HostCertState(
             host=host,
             source=CertSource.PROBE,
-            certificate=None,
-            verified=None,
-            san_mismatch=None,
+            certificate=previous.certificate if previous is not None else None,
+            verified=previous.verified if previous is not None else None,
+            san_mismatch=previous.san_mismatch if previous is not None else None,
             port=port,
             error=result.error.value,
-            failures=1,
-            fetched_at=None,
+            failures=previous.failures + 1 if previous is not None else 1,
+            fetched_at=previous.fetched_at if previous is not None else None,
         )
 
     async def async_set_threshold(self, threshold_days: int) -> None:
