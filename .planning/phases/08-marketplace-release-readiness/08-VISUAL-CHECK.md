@@ -124,6 +124,8 @@ and `[%key:`: **0 hits in all 24 shots of Task 2** (and in the two Task 3 shots,
 | en-10-integration-light.jpg | en | Integration page, light | Brand icon, "Version 1.0.0", "Custom integration", 4 services / 151 entities |
 | en-11-integration-dark.jpg | en | Integration page, dark | Dark theme of the same page |
 | en-13-device-main-dark.jpg | en | Main device, dark | Dark theme; `dark_logo.png` top right |
+| de-12-repair-entities-migrated.jpg | de | Migration repair (Task 3) | "Traefik-Entitäten wurden ersetzt" after the real 0.3.0 -> 1.0.0 migration, see "Migration" |
+| en-12-repair-entities-migrated.jpg | en | Migration repair (Task 3) | "Traefik entities were replaced", see "Migration" |
 
 Both add flows were closed with the dialog's close action; WS
 `config_entries/flow/progress` listed no open `traefik_proxy` flow afterwards, and
@@ -142,3 +144,72 @@ Observations that are Home Assistant's design and not findings: the unit symbols
 the integration page shows the icon (not the logo) in both themes; on the main
 device the "Download diagnostics" action sits in the overflow menu because the
 device has a `configuration_url` ("Visit"), while the sub-devices show it inline.
+
+## Migration (0.3.0 -> 1.0.0)
+
+A real 0.3.0 entry, created by the 0.3.0 code itself, was migrated by the working
+tree on the same config volume (F5 step 9). No hand-written `.storage`.
+
+1. `git archive v0.3.0 custom_components/traefik_proxy | tar -x -C <scratch>/v030`
+   (manifest `0.3.0`), second container `ha-visual-08-mig` on
+   `traefik-harness_default`, `127.0.0.1:18124`, volume `ha-visual-08-mig`, the
+   0.3.0 code mounted read-only; REST onboarding with a throwaway user.
+2. 0.3.0 config flow: fields `url`, `api_key`, `verify_ssl`; URL with the
+   harness-only basicAuth userinfo (`http://capture:…@traefik-v3:8080`) ->
+   `create_entry`, **title before: `Traefik Proxy`**, 115 entities, among them
+   **100** `binary_sensor.traefik_http_router_*` and `button.traefik_reload`.
+3. To exercise the kept-ID rule, `binary_sensor.traefik_http_router_bulk_001_file`
+   was disabled (`disabled_by: user`) and `binary_sensor.traefik_http_router_bulk_002_file`
+   hidden (`hidden_by: user`) through WS `config/entity_registry/update`.
+4. `docker stop` + `docker rm` of the container, then `docker run` again on the
+   **same volume** with the working-tree mount (manifest `1.0.0`).
+
+Result (WS `config_entries/get`, `repairs/list_issues`, `config/entity_registry/list`):
+
+| Item | Value |
+|---|---|
+| Entry title before / after | `Traefik Proxy` / `traefik-v3` (state `loaded`) |
+| Entities after | 151; 0 `binary_sensor.traefik_http_router_*`; button `button.traefik_traefik_v3_refresh_now` (the reload button is gone) |
+| Kept IDs | disabled router -> `sensor.traefik_http_router_bulk_001_file` (`disabled_by: user`); hidden router -> `sensor.traefik_http_router_bulk_002_file` (`hidden_by: user`); an enabled, visible router got the new ID `sensor.traefik_routers_traefik_v3_bulk_000_file` |
+| Repair 1 | `entities_migrated_<entry_id>`, translation key `entities_migrated`, placeholders `entry_title: traefik-v3`, `removed_count: "101"` (100 router binary sensors + the reload button), severity warning, not fixable |
+| Repair 2 | `insecure_credentials_<entry_id>`, `entry_title: traefik-v3`, severity warning |
+| Errors / warnings in the HA log after the swap | none (apart from core's standard "custom integration not tested" line) |
+
+Screenshots: `visual/de-12-repair-entities-migrated.jpg` and
+`visual/en-12-repair-entities-migrated.jpg`. Both dialogs name the post-migration
+title (`„traefik-v3“` / `"traefik-v3"`), state that disabled or hidden router
+sensors keep their previous entity ID under the sensor domain (`sensor.… statt
+binary_sensor.…` / `sensor.… instead of binary_sensor.…`), point to "Jetzt
+aktualisieren" / "Refresh now" and show the count 101 — matching the registry
+state above (08-03). Page text of both shots: no `component.traefik_proxy.` and no
+`[%key:`; the expected strings (`traefik-v3`, `101`, `sensor.…`, `binary_sensor.…`,
+the button name) were all present.
+
+## Cleanup
+
+Teardown:
+
+```bash
+docker rm -f ha-visual-08 ha-visual-08-mig
+docker compose -f tests/traefik/compose.yaml down -v --remove-orphans
+docker volume rm ha-visual-08-config ha-visual-08-mig
+```
+
+The token file, the auth header file, the entry-id files, the 0.3.0 scratch copy
+and the downloaded brand bodies were deleted from the scratch directory.
+`git status --porcelain -- custom_components tests` is empty (the integration was
+mounted read-only and `/config` lived in named volumes).
+
+Baseline (taken before the first container, identical to
+`docker-baseline-phase8.txt`) vs. after teardown — `diff` of all three lists is
+empty, container IDs and names identical:
+
+| List | Baseline | After |
+|---|---|---|
+| `docker ps -a` (names) | beautiful_leakey, boring_nobel, cranky_curran, cranky_kapitsa, epic_kare, gifted_chaplygin, WinBoat | beautiful_leakey, boring_nobel, cranky_curran, cranky_kapitsa, epic_kare, gifted_chaplygin, WinBoat |
+| `docker network ls` | bridge, host, none, winboat_default | bridge, host, none, winboat_default |
+| `docker volume ls` | 6 anonymous volumes (0c8e1d4ec363, 28f09eb3dead, 49c5514ec6b7, 6113a3b6ca61, 86f55dc37656, d78dc62758be) | 6 anonymous volumes, same IDs |
+
+No `ha-visual-08*` container or volume and no `traefik-harness*` container,
+network or volume remains. Pre-existing containers (`WinBoat`, `boring_nobel`, …)
+and the network `winboat_default` were never touched.
