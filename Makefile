@@ -1,5 +1,9 @@
 .PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity hassfest hacs-action clean help
 
+# Every `uv run` / `uv sync` uses the committed uv.lock as is and fails when it
+# is stale (same as CI). After changing dependencies in pyproject.toml run `uv lock`.
+export UV_LOCKED := 1
+
 REPO         ?= akentner/homeassistant-traefik-proxy-integration
 # Pinned by digest (ghcr.io/home-assistant/hassfest:latest as of 2026-11-09, HA 2026.11.1); bump deliberately.
 # CI's home-assistant/actions/hassfest runs the moving :latest tag instead.

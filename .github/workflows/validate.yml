@@ -8,7 +8,9 @@ name: Validate
 # (ghcr.io/home-assistant/hassfest:latest, ghcr.io/hacs/action:main), so the
 # validator code can change between runs without a commit here. Every job
 # runs with `permissions: {}`. `make hassfest` / `make hacs-action` pin those
-# images by digest for local runs.
+# images by digest for local runs. Dev dependencies come from the committed
+# uv.lock: `uv sync --locked`, and UV_LOCKED makes every `uv run` refuse a
+# stale lock (the Makefile exports the same variable).
 on:
   push:
     branches: [main]
@@ -19,6 +21,9 @@ on:
   workflow_dispatch:
 
 permissions: {}
+
+env:
+  UV_LOCKED: "1"
 
 jobs:
   lint:
@@ -34,7 +39,7 @@ jobs:
         run: uv python install 3.14
 
       - name: Sync dev dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Ruff lint
         run: uv run ruff check custom_components tests
@@ -58,7 +63,7 @@ jobs:
         run: uv python install 3.14
 
       - name: Sync dev dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Pytest with the coverage gate
         run: uv run pytest -q tests

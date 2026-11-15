@@ -31,6 +31,7 @@ repos:
       - id: check-merge-conflict
       - id: check-added-large-files
         args: ["--maxkb=500"]
+        exclude: ^uv\.lock$
       - id: mixed-line-ending
         args: ["--fix=lf"]
 

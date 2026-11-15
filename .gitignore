@@ -19,9 +19,6 @@ ENV/
 .pytest_cache/
 htmlcov/
 
-# uv
-uv.lock
-
 # IDE
 .idea/
 .vscode/
