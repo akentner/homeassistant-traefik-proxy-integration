@@ -18,18 +18,21 @@ covered by ``tests/test_tls.py``.
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.x509.verification import Store
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from custom_components.traefik_proxy import cert_coordinator as cert_coordinator_module
 from custom_components.traefik_proxy import tls
 from custom_components.traefik_proxy.api import (
     TraefikProxyApiError,
@@ -47,7 +50,9 @@ from custom_components.traefik_proxy.cert_coordinator import (
     HostCertState,
 )
 from custom_components.traefik_proxy.const import (
+    CONF_API_KEY,
     CONF_URL,
+    CONF_VERIFY_SSL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
     MAX_CERT_HOSTS,
@@ -57,21 +62,26 @@ from custom_components.traefik_proxy.const import (
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
 from custom_components.traefik_proxy.models import TraefikCertificate, parse_certificates
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
-from tests.certgen import make_ca, make_leaf, write_pem
+from tests.certgen import make_ca, make_intermediate, make_leaf, write_pem
 from tests.conftest import (
     TlsServerStarter,
     entity_id_for,
     frozen_v37_certificates,
+    load_fixture,
     make_cert_state,
     make_snapshot,
+    make_traefik_entry,
     rawdata_copy,
     setup_traefik_entry,
+    stub_traefik,
 )
 
 PROBE_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate"
 CONNECT_HOST = "traefik.example.com"
 NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
 _CERT_LOGGER = "custom_components.traefik_proxy.cert_coordinator"
+# HA's pre-built client context; the cert coordinator reads its roots through it.
+HA_CLIENT_CONTEXT = "homeassistant.util.ssl.client_context"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -318,7 +328,10 @@ async def test_probe_connects_to_traefik_host_with_router_host_as_sni(freezer: A
         (CONNECT_HOST, 443, "b.example.com"),
     ]
     for call in probe.await_args_list:
-        assert call.kwargs == {"handshake_timeout": TLS_HANDSHAKE_TIMEOUT, "trust_store": None, "now": NOW}
+        assert call.kwargs["handshake_timeout"] == TLS_HANDSHAKE_TIMEOUT
+        assert call.kwargs["now"] == NOW
+        # Without a trust_store kwarg the probe verifies against HA's roots.
+        assert isinstance(call.kwargs["trust_store"], Store)
 
 
 async def test_probed_certificate_becomes_probe_state(freezer: Any) -> None:
@@ -527,6 +540,225 @@ async def test_certificates_error_fails_the_cycle_without_probe(error: TraefikPr
             await c._async_update_data()
     probe.assert_not_awaited()
     assert "/api/certificates" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Trust anchors (Home Assistant's client context)
+# ---------------------------------------------------------------------------
+
+
+def _root_der() -> bytes:
+    now = dt_util.utcnow()
+    root, _key = make_ca("HA Test Root", not_before=now - timedelta(days=1), not_after=now + timedelta(days=3650))
+    return root.public_bytes(Encoding.DER)
+
+
+def _ha_context(*ders: bytes) -> MagicMock:
+    """A stand-in for HA's client context whose ``get_ca_certs`` returns ``ders``."""
+    context = MagicMock()
+    context.get_ca_certs.return_value = list(ders)
+    return context
+
+
+async def test_trust_store_defaults_to_ha_roots_built_once() -> None:
+    """Without the kwarg the first probe-mode cycle builds the store from HA's roots, once."""
+    context = _ha_context(_root_der())
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probe = AsyncMock(return_value=_probed("a.example.com"))
+    with patch(HA_CLIENT_CONTEXT, return_value=context), pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        await c._async_update_data()
+        await c._async_update_data()
+
+    context.get_ca_certs.assert_called_once_with(binary_form=True)
+    stores = [call.kwargs["trust_store"] for call in probe.await_args_list]
+    assert len(stores) == 2
+    assert isinstance(stores[0], Store)
+    assert stores[1] is stores[0]
+
+
+async def test_trust_store_kwarg_replaces_ha_roots() -> None:
+    """A given trust store is used as is; HA's roots are never read."""
+    now = dt_util.utcnow()
+    root = make_ca("Kwarg Root", not_before=now - timedelta(days=1), not_after=now + timedelta(days=3650))
+    store = Store([root[0]])
+    context = _ha_context(_root_der())
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"), trust_store=store)
+    probe = AsyncMock(return_value=_probed("a.example.com"))
+    with patch(HA_CLIENT_CONTEXT, return_value=context) as client_context, pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        await c._async_update_data()
+
+    client_context.assert_not_called()
+    context.get_ca_certs.assert_not_called()
+    assert probe.await_args is not None
+    assert probe.await_args.kwargs["trust_store"] is store
+
+
+async def test_trust_store_never_built_in_api_mode(freezer: Any) -> None:
+    """API-mode cycles never read HA's roots."""
+    certificates = parse_certificates(frozen_v37_certificates(freezer))
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=certificates))
+    with patch(HA_CLIENT_CONTEXT, return_value=_ha_context(_root_der())) as client_context:
+        await c._async_update_data()
+        await c._async_update_data()
+    client_context.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Probe port: the router's TLS entrypoint
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("address", "expected"),
+    [
+        (":443", 443),
+        ("0.0.0.0:443", 443),
+        ("[::]:8443", 8443),
+        ("[::]:443", 443),
+        (":8443/tcp", 8443),
+        (":9999/udp", None),
+        (":http", None),
+        (":0", None),
+        (":70000", None),
+        ("", None),
+    ],
+)
+def test_entrypoint_port(address: str, expected: int | None) -> None:
+    """Digits-only ports in 1..65535; UDP and anything else -> None."""
+    assert cert_coordinator_module.entrypoint_port(address) == expected
+
+
+PORT_ENTRYPOINTS = [
+    {"name": "websecure", "address": ":443"},
+    {"name": "alt", "address": ":8443"},
+    {"name": "alt2", "address": "0.0.0.0:9443/tcp"},
+    {"name": "udp-ep", "address": ":9999/udp"},
+]
+
+
+def _router(name: str, *entry_points: str, host: str = "h.example.com") -> dict[str, Any]:
+    return {"name": name, "tls": {}, "rule": f"Host(`{host}`)", "entryPoints": list(entry_points)}
+
+
+def _entry_with_routers(*routers: dict[str, Any]) -> MagicMock:
+    entry = _make_entry()
+    entry.runtime_data.coordinator.data = make_snapshot(routers=list(routers), entrypoints=PORT_ENTRYPOINTS)
+    return entry
+
+
+@pytest.mark.parametrize(
+    ("routers", "expected"),
+    [
+        ([_router("a", "websecure"), _router("b", "alt")], 443),
+        ([_router("b", "alt")], 8443),
+        ([_router("b", "alt"), _router("c", "alt2")], 8443),
+        ([_router("c", "alt2")], 9443),
+        ([_router("d", "unknown")], 443),
+        ([_router("e", "udp-ep")], 443),
+        ([_router("f")], 443),
+    ],
+    ids=["443_wins", "only_8443", "lowest", "tcp_suffix", "unknown_entrypoint", "udp_entrypoint", "no_entrypoint"],
+)
+def test_probe_ports(routers: list[dict[str, Any]], expected: int) -> None:
+    """Per host: 443 when any router offers it, else the lowest TLS port, else 443."""
+    c = CertCoordinator(MagicMock(), _entry_with_routers(*routers))
+    assert c._probe_ports(("h.example.com",)) == {"h.example.com": expected}
+
+
+async def test_probe_ports_host_of_several_routers_probed_once(freezer: Any) -> None:
+    """A host reached by several routers is probed once per cycle, on its chosen port."""
+    freezer.move_to(NOW)
+    entry = _entry_with_routers(
+        _router("a", "alt", "websecure"),
+        _router("b", "alt"),
+        _router("c", "alt2", host="other.example.com"),
+    )
+    c = CertCoordinator(MagicMock(), entry, trust_store=MagicMock(spec=Store))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        data = await c._async_update_data()
+
+    assert sorted(call.args for call in probe.await_args_list) == [
+        (CONNECT_HOST, 443, "h.example.com"),
+        (CONNECT_HOST, 9443, "other.example.com"),
+    ]
+    assert data["h.example.com"].port == 443
+    assert data["other.example.com"].port == 9443
+
+
+# ---------------------------------------------------------------------------
+# End to end: full setup, real handshake on the TLS entrypoint port
+# ---------------------------------------------------------------------------
+
+E2E_URL = "https://127.0.0.1:8080"
+E2E_HOSTS = ("secure.example.com", "www.secure.example.com")
+
+
+@pytest.mark.parametrize("trusted", [True, False], ids=["test_root_as_ha_roots", "real_ha_roots"])
+async def test_end_to_end_probe_reaches_tls_entrypoint_port(
+    hass: Any,
+    aioclient_mock: Any,
+    tls_server: TlsServerStarter,
+    tmp_path: Path,
+    freezer: Any,
+    trusted: bool,
+) -> None:
+    """v2.11 (404) setup: the probe connects to 127.0.0.1 on the websecure port with each router host as SNI."""
+    now = dt_util.utcnow()
+    root = make_ca("E2E Root", not_before=now - timedelta(days=30), not_after=now + timedelta(days=3650))
+    intermediate = make_intermediate(
+        "E2E Intermediate", root, not_before=now - timedelta(days=30), not_after=now + timedelta(days=1825)
+    )
+    leaf, key = make_leaf(
+        list(E2E_HOSTS), intermediate, not_before=now - timedelta(days=1), not_after=now + timedelta(days=45)
+    )
+    fallback, fallback_key = make_leaf(
+        ["fallback.invalid"], intermediate, not_before=now - timedelta(days=1), not_after=now + timedelta(days=300)
+    )
+    served = write_pem(tmp_path, "leaf", [leaf, intermediate[0]], key)
+    server = await tls_server(
+        {
+            E2E_HOSTS[0]: served,
+            E2E_HOSTS[1]: served,
+            "fallback.invalid": write_pem(tmp_path, "fallback", [fallback, intermediate[0]], fallback_key),
+        },
+        default="fallback.invalid",
+    )
+    entrypoints = copy.deepcopy(load_fixture("v2.11", "entrypoints.json"))
+    for entrypoint in entrypoints:
+        if entrypoint["name"] == "websecure":
+            entrypoint["address"] = f":{server.port}"
+    stub_traefik(aioclient_mock, version="v2.11", base_url=E2E_URL, entrypoints=entrypoints)
+    entry = make_traefik_entry(
+        data={CONF_URL: E2E_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True}, unique_id="127.0.0.1"
+    )
+    entry.add_to_hass(hass)
+    real_probe = tls.async_probe_certificate
+    connects: list[tuple[str, int, str]] = []
+
+    async def _recording_probe(connect_host: str, port: int, sni: str, **kwargs: Any) -> tls.ProbeResult:
+        connects.append((connect_host, port, sni))
+        return await real_probe(connect_host, port, sni, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, _recording_probe)
+        if trusted:
+            mp.setattr(HA_CLIENT_CONTEXT, lambda *_a, **_kw: _ha_context(root[0].public_bytes(Encoding.DER)))
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    assert sorted(connects) == [("127.0.0.1", server.port, host) for host in E2E_HOSTS]
+    for host in E2E_HOSTS:
+        state = hass.states.get(entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, host)))
+        assert state is not None
+        assert dt_util.parse_datetime(state.state) == leaf.not_valid_after_utc
+        assert state.attributes["source"] == "probe"
+        assert state.attributes["port"] == server.port
+        assert state.attributes["verified"] is trusted
 
 
 # ---------------------------------------------------------------------------

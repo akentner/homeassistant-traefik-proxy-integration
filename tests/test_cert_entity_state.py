@@ -28,6 +28,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from cryptography.x509.verification import Store
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -455,7 +456,10 @@ async def test_probe_driven_setup_publishes_probe_state(
     expected_calls = {(CONNECT_HOST, 443, HOST), (CONNECT_HOST, 443, OTHER_HOST)}
     assert {call.args for call in cert_probe_ok.await_args_list} == expected_calls
     for call in cert_probe_ok.await_args_list:
-        assert call.kwargs == {"handshake_timeout": TLS_HANDSHAKE_TIMEOUT, "trust_store": None, "now": REFERENCE}
+        assert call.kwargs["handshake_timeout"] == TLS_HANDSHAKE_TIMEOUT
+        assert call.kwargs["now"] == REFERENCE
+        # The default trust store holds Home Assistant's roots.
+        assert isinstance(call.kwargs["trust_store"], Store)
 
     expiry = _state(hass, _expiry(hass, entry))
     assert dt_util.parse_datetime(expiry.state) == REFERENCE + timedelta(days=30)
