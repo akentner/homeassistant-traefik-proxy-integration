@@ -10,7 +10,8 @@
 - :meth:`TraefikProxyConfigFlow.async_step_reconfigure` changes URL, TLS
   verification and credentials of an existing entry. Secrets are never sent to
   the form; with an unchanged auth type an empty secret keeps the stored one.
-- :class:`TraefikProxyOptionsFlow` holds the polling and certificate options.
+- :class:`TraefikProxyOptionsFlow` holds the polling and certificate options;
+  saving changed options reloads the entry.
 
 Every step probes ``/api/version`` before it stores anything, and stores the
 complete entry data (``_entry_data``), so no credential of an auth type the
@@ -31,14 +32,16 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
-    OptionsFlow,
+    OptionsFlowWithReload,
 )
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -124,22 +127,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_URL): _URL_SELECTOR,
         vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
         **_auth_fields(AuthMode.none.value),
-    }
-)
-
-# Options Flow schema — scan_interval (15..300s), verify_ssl (bool),
-# tls_warn_days (1..90d) per CONTEXT.md D-09. Clamps enforced via
-# ``vol.Range``; the matching translation keys live at
-# ``options.step.init.errors.scan_interval_out_of_range`` in translations/en.json.
-STEP_OPTIONS_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
-            int, vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL)
-        ),
-        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): cv.boolean,
-        vol.Optional(CONF_TLS_WARN_DAYS, default=DEFAULT_TLS_WARN_DAYS): vol.All(
-            int, vol.Range(min=MIN_TLS_WARN_DAYS, max=MAX_TLS_WARN_DAYS)
-        ),
     }
 )
 
@@ -287,68 +274,66 @@ def _stored_auth_type(data: Mapping[str, Any]) -> str:
     return stored if stored in {mode.value for mode in AuthMode} else AuthMode.none.value
 
 
-class TraefikProxyOptionsFlow(OptionsFlow):
-    """Post-setup options flow (CFG-05, CONTEXT.md D-09).
+def _number_selector(minimum: int, maximum: int, unit: str) -> NumberSelector:
+    """Return a whole-number input box from ``minimum`` to ``maximum`` in ``unit``."""
+    return NumberSelector(
+        NumberSelectorConfig(
+            min=minimum,
+            max=maximum,
+            step=1,
+            unit_of_measurement=unit,
+            mode=NumberSelectorMode.BOX,
+        )
+    )
 
-    Exposes three knobs:
 
-    - ``scan_interval`` (15..300s, default 15) — applied live by the
-      ``_async_options_updated`` listener in ``__init__.py`` so a value
-      change does not require an integration reload.
-    - ``verify_ssl`` (bool, default: the effective value) — the same
-      listener rebuilds the running API client, so the change takes effect
-      on the next request without a reload.
-    - ``tls_warn_days`` (1..90d, default 14) — stored as a placeholder for
-      Phase 3 TLS binary sensors (CONTEXT.md D-09). Phase 3 picks the value
-      up via ``coordinator.tls_warn_days``.
+class TraefikProxyOptionsFlow(OptionsFlowWithReload):
+    """Options of a Traefik entry; saving changed options reloads the entry.
+
+    - ``scan_interval``: seconds between two polls of the Traefik API
+      (15..300, default 15).
+    - ``verify_ssl``: TLS verification of the Traefik API (default: the
+      effective value of the entry).
+    - ``tls_warn_days``: days before expiry at which a certificate counts as
+      expiring (1..90, default 14).
+
+    The selectors validate the ranges, so a value outside one never reaches
+    the step. Home Assistant reloads the entry only when the saved options
+    differ from the stored ones; the reloaded entry reads them at setup.
     """
 
     config_entry: ConfigEntry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Render the options form and persist user input."""
-        errors: dict[str, str] = {}
+        """Show the options form pre-filled with the active values, or store the submitted ones.
 
-        # Pre-fill defaults from the entry's currently-saved options so the
-        # form shows the active values (not the integration defaults).
+        The number selectors return floats; both numbers are stored as int.
+        Options the form does not show are kept.
+        """
         current = self.config_entry.options
-        defaults = {
-            CONF_SCAN_INTERVAL: current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL),
-            CONF_VERIFY_SSL: effective_verify_ssl(self.config_entry),
-            CONF_TLS_WARN_DAYS: current.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS),
-        }
 
         if user_input is not None:
-            try:
-                validated = STEP_OPTIONS_SCHEMA(user_input)
-            except vol.Invalid as err:
-                # Per-field error so the UI can highlight the failing knob.
-                # ``options.step.init.errors.scan_interval_out_of_range`` is
-                # the shared translation key for both scan_interval and
-                # tls_warn_days out-of-range (the bounds differ but the
-                # user-facing message is the same shape).
-                if err.path and err.path[0] in (CONF_SCAN_INTERVAL, CONF_TLS_WARN_DAYS):
-                    errors[str(err.path[0])] = "scan_interval_out_of_range"
-                else:
-                    errors["base"] = "scan_interval_out_of_range"
-            else:
-                return self.async_create_entry(title="", data=validated)
+            return self.async_create_entry(
+                data={
+                    **current,
+                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                    CONF_VERIFY_SSL: bool(user_input[CONF_VERIFY_SSL]),
+                    CONF_TLS_WARN_DAYS: int(user_input[CONF_TLS_WARN_DAYS]),
+                }
+            )
 
-        # Build a schema whose default values match the current entry options.
-        schema_dict: dict[Any, Any] = {
-            vol.Required(CONF_SCAN_INTERVAL, default=defaults[CONF_SCAN_INTERVAL]): vol.All(
-                int, vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL)
-            ),
-            vol.Optional(CONF_VERIFY_SSL, default=defaults[CONF_VERIFY_SSL]): cv.boolean,
-            vol.Optional(CONF_TLS_WARN_DAYS, default=defaults[CONF_TLS_WARN_DAYS]): vol.All(
-                int, vol.Range(min=MIN_TLS_WARN_DAYS, max=MAX_TLS_WARN_DAYS)
-            ),
-        }
-        return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema_dict),
-            errors=errors,
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_SCAN_INTERVAL, default=current.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+                ): _number_selector(MIN_SCAN_INTERVAL, MAX_SCAN_INTERVAL, "s"),
+                vol.Required(CONF_VERIFY_SSL, default=effective_verify_ssl(self.config_entry)): BooleanSelector(),
+                vol.Required(
+                    CONF_TLS_WARN_DAYS, default=current.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
+                ): _number_selector(MIN_TLS_WARN_DAYS, MAX_TLS_WARN_DAYS, "d"),
+            }
         )
+        return self.async_show_form(step_id="init", data_schema=schema)
 
 
 class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -360,7 +345,7 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> TraefikProxyOptionsFlow:
-        """Return the options flow handler."""
+        """Return the options flow; saving changed options reloads the entry."""
         return TraefikProxyOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

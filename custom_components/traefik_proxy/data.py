@@ -14,14 +14,14 @@ if TYPE_CHECKING:
     from .entity_manager import TraefikEntityManager
 
 
-@dataclass
+@dataclass(frozen=True)
 class TraefikRuntimeData:
     """Objects owned by one loaded Traefik config entry.
 
-    ``client`` is the single API client of the entry: the coordinator reads it
-    from here, so replacing it (options change) reaches every caller at once.
-    The dataclass is mutable on purpose for exactly that replacement.
-    ``entity_manager`` owns the lifecycle of the per-item entities.
+    ``client`` is the single API client of the entry; the coordinator reads it
+    from here. Nothing replaces a field: an options change reloads the entry,
+    which builds new runtime data. ``entity_manager`` owns the lifecycle of the
+    per-item entities.
     """
 
     client: TraefikProxyApiClient

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from datetime import timedelta
 from typing import Any, Final
 
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
@@ -17,13 +16,9 @@ from .cert_coordinator import CertCoordinator
 from .const import (
     CONF_API_KEY,
     CONF_AUTH_TYPE,
-    CONF_SCAN_INTERVAL,
-    CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
     DEFAULT_NAME,
-    DEFAULT_SCAN_INTERVAL,
-    DEFAULT_TLS_WARN_DAYS,
     DOMAIN,
     PLATFORMS,
     UID_MIDDLEWARES_PROBLEM,
@@ -270,46 +265,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     return True
 
 
-async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
-    """Apply Options changes to the running coordinator (CONTEXT.md D-08).
-
-    Options Flow writes the new scan_interval / verify_ssl / tls_warn_days
-    into ``entry.options`` and HA fires this listener. We mutate the
-    coordinator's ``update_interval`` directly so a scan-interval change
-    takes effect on the next scheduled cycle without a full reload, and
-    rebuild the API client so a verify_ssl change reaches the running
-    client immediately (cheap: shared session, no network call). URL
-    changes (reconfigure flow) come through ``entry.data`` instead of
-    ``entry.options`` — HA's standard entry-data-change reload handles those
-    by re-running ``async_setup_entry`` with the new URL, which rebuilds
-    the API client + coordinator from scratch.
-    """
-    runtime = entry.runtime_data
-    scan_interval = entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
-    runtime.coordinator.update_interval = timedelta(seconds=scan_interval)
-    # The runtime data owns the only client; the coordinator reads it from
-    # there, so this one assignment switches every caller to the new client.
-    runtime.client = build_api_client(hass, entry)
-    _LOGGER.debug(
-        "Traefik options updated: entry_id=%s scan_interval=%ss",
-        entry.entry_id,
-        scan_interval,
-    )
-    # CONTEXT.md D-08: push tls_warn_days into CertCoordinator and
-    # immediately re-render all cert binary sensors (no re-handshake
-    # needed — threshold change is a UX concern, cert data is unchanged).
-    # Defensive try/except so an options-mutation race never blocks the
-    # listener from completing.
-    new_threshold = entry.options.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
-    try:
-        await runtime.cert_coordinator.async_set_threshold(new_threshold)
-    except Exception as err:  # final-resort catch-all; listener must complete
-        _LOGGER.debug(
-            "CertCoordinator.async_set_threshold raised (listener continues): %s",
-            err,
-        )
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
     """Set up Traefik from a config entry; a failure raises, success returns None.
 
@@ -377,12 +332,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     async_remove_legacy_devices(hass, entry)
     entry.async_on_unload(async_track_sw_version(hass, entry, main.id))
 
-    # HA fires the update listener whenever entry.options (Options Flow) or
-    # entry.data (reconfigure / reauth flow) changes. HA does not clear update
-    # listeners on unload by itself, so the remover is registered through
-    # entry.async_on_unload: unload removes it and a reload adds exactly one.
-    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
-
     _LOGGER.debug(
         "Traefik integration ready: entry_id=%s, scan_interval=%ss",
         entry.entry_id,
@@ -395,8 +344,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry
 
     Unloads the platforms; a platform that fails to unload raises Home
     Assistant's translated unload error. Home Assistant then runs every
-    callback the setup registered through ``entry.async_on_unload`` (the
-    update listener remover, timers and coordinator listeners).
+    callback the setup registered through ``entry.async_on_unload`` (timers
+    and coordinator listeners).
     """
     await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
 
