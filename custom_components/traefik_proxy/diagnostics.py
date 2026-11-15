@@ -3,7 +3,8 @@
 Holds the entry, both coordinators' status, the parsed snapshot, the
 certificate state per host and the missing-since times of vanished items.
 Only parsed models are dumped, never a raw API payload. Credentials are
-redacted and the URL loses any userinfo.
+redacted, the URL loses any userinfo, and router rules lose the values of
+their header and query matchers, also where a router error repeats the rule.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from homeassistant.core import HomeAssistant
 from .const import CONF_API_KEY, CONF_URL
 from .coordinator import split_url_userinfo
 from .data import TraefikProxyConfigEntry
+from .rules import redact_rule
 
 TO_REDACT: Final = {CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME, CONF_API_KEY, "users", "authorization"}
 
@@ -53,6 +55,17 @@ def _safe_url(url: Any) -> Any:
         return REDACTED
 
 
+def _redact_router_rules(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Redact the rule of every router in a dumped snapshot, also where an error repeats it."""
+    for router in snapshot["routers"].values():
+        rule = router["rule"]
+        redacted = redact_rule(rule)
+        router["rule"] = redacted
+        if rule:
+            router["errors"] = [error.replace(rule, redacted) for error in router["errors"]]
+    return snapshot
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> dict[str, Any]:
     """Return the redacted diagnostics of a loaded Traefik config entry."""
     runtime_data = entry.runtime_data
@@ -78,7 +91,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Traefik
                 "update_interval": _seconds(coordinator.update_interval),
                 "paginated": runtime_data.client.paginated,
             },
-            "snapshot": _jsonable(dataclasses.asdict(snapshot)) if snapshot is not None else None,
+            "snapshot": (
+                _redact_router_rules(_jsonable(dataclasses.asdict(snapshot))) if snapshot is not None else None
+            ),
             "certificates": {
                 "last_update_success": cert_coordinator.last_update_success,
                 "update_interval": _seconds(cert_coordinator.update_interval),
