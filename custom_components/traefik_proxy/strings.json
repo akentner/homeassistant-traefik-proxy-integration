@@ -137,7 +137,18 @@
         "name": "Certificate problems"
       },
       "certificate_expiring": {
-        "name": "{host} expiring"
+        "name": "{host} expiring",
+        "state_attributes": {
+          "reason": {
+            "name": "Reason",
+            "state": {
+              "expired": "Expired",
+              "probe_failed": "Probe failed",
+              "not_found": "No certificate found",
+              "expiring": "Expiring soon"
+            }
+          }
+        }
       }
     },
     "button": {

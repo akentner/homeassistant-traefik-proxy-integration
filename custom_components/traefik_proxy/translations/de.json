@@ -69,7 +69,18 @@
         "name": "Zertifikatsprobleme"
       },
       "certificate_expiring": {
-        "name": "{host} läuft ab"
+        "name": "{host} läuft ab",
+        "state_attributes": {
+          "reason": {
+            "name": "Grund",
+            "state": {
+              "expired": "Abgelaufen",
+              "probe_failed": "Abruf fehlgeschlagen",
+              "not_found": "Kein Zertifikat gefunden",
+              "expiring": "Läuft bald ab"
+            }
+          }
+        }
       }
     },
     "button": {
