@@ -16,9 +16,11 @@ from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.cert_coordinator import CertSource
 from custom_components.traefik_proxy.const import CONF_URL, CONF_VERIFY_SSL
 from custom_components.traefik_proxy.diagnostics import _jsonable, _safe_url
+from custom_components.traefik_proxy.entity_manager import ROUTERS
 from tests.conftest import (
     AUTH_TYPE,
     MOCK_URL,
+    entity_id_for,
     load_fixture,
     make_traefik_entry,
     rawdata_copy,
@@ -33,6 +35,9 @@ PASSWORD = "diag-pass-9c1"
 TOKEN = "diag-token-5e2"
 CERT_HOST = "secure.example.com"
 VANISHING_ROUTER = "file-ok@file"
+SECRET_ROUTER = "secure@file"
+HEADER_SECRET = "diag-secret-41a"
+SECRET_RULE = f"Host(`secure.example.com`) && Header(`X-Api-Key`, `{HEADER_SECRET}`)"
 
 
 def _basic_entry() -> Any:
@@ -121,6 +126,28 @@ async def test_diagnostics_contain_no_raw_payload(hass: HomeAssistant, hass_clie
 
     assert "serverStatus" not in dump
     assert "usedBy" not in dump
+
+
+async def test_diagnostics_redact_header_value_in_router_rule(
+    hass: HomeAssistant, hass_client: Any, aioclient_mock: Any
+) -> None:
+    """A header value in a router rule is redacted in the download; the entity attribute keeps it."""
+    rawdata = rawdata_copy()
+    rawdata["routers"][SECRET_ROUTER]["rule"] = SECRET_RULE
+    entry = await setup_traefik_entry(hass, aioclient_mock, _bearer_entry(), rawdata=rawdata)
+
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+    dump = json.dumps(diag)
+
+    assert HEADER_SECRET not in dump
+    assert "X-Api-Key" in dump
+    assert REDACTED in dump
+    assert diag["snapshot"]["routers"][SECRET_ROUTER]["rule"] == (
+        f"Host(`secure.example.com`) && Header(`X-Api-Key`, `{REDACTED}`)"
+    )
+    state = hass.states.get(entity_id_for(hass, ROUTERS.domain, ROUTERS.unique_id(entry.entry_id, SECRET_ROUTER)))
+    assert state is not None
+    assert HEADER_SECRET in state.attributes["rule"]
 
 
 async def test_diagnostics_report_paginated_client(

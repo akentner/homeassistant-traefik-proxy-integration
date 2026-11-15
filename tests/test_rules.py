@@ -1,9 +1,11 @@
-"""Tests for the pure Traefik rule parser and host normalizer (``rules.py``)."""
+"""Tests for the pure Traefik rule parser, host normalizer and rule redactor (``rules.py``)."""
 
 from __future__ import annotations
 
 import pytest
+from homeassistant.components.diagnostics import REDACTED
 
+from custom_components.traefik_proxy import rules
 from custom_components.traefik_proxy.rules import extract_hosts, normalize_host
 
 # ---------------------------------------------------------------------------
@@ -122,3 +124,31 @@ def test_normalize_host_accepts(name: str, expected: str) -> None:
 def test_normalize_host_rejects(name: str) -> None:
     """Empty, wildcard, template, regex, host:port and other invalid names are skipped."""
     assert normalize_host(name) is None
+
+
+# ---------------------------------------------------------------------------
+# redact_rule — header/query matcher values
+# ---------------------------------------------------------------------------
+
+
+def test_redact_rule_hides_a_header_value() -> None:
+    """The header value becomes the marker; matcher names, the header key and Host stay readable."""
+    assert (
+        rules.redact_rule("Host(`a.example.com`) && Header(`X-Token`, `s3cret`)")
+        == "Host(`a.example.com`) && Header(`X-Token`, `**REDACTED**`)"
+    )
+
+
+def test_redact_rule_keeps_a_host_only_rule() -> None:
+    """A rule without secret-bearing matchers is returned unchanged."""
+    assert rules.redact_rule("Host(`a.example.com`)") == "Host(`a.example.com`)"
+
+
+def test_redact_rule_keeps_an_empty_rule() -> None:
+    """An empty rule stays empty."""
+    assert rules.redact_rule("") == ""
+
+
+def test_redact_marker_matches_home_assistant() -> None:
+    """The marker equals the one Home Assistant diagnostics use."""
+    assert rules._REDACTED == REDACTED
