@@ -69,7 +69,7 @@ re-confirmed by this spike):
 ## Signal for Phase 3 Plan
 
 The stdlib TLS approach is **validated and ready for Phase 3**. The
-planned `custom_components/traefik/tls.py` can be built directly from
+planned `custom_components/traefik_proxy/tls.py` can be built directly from
 the spike prototype at `.planning/spikes/03-tls-handshake/shared/tls.py`
 with minimal changes:
 

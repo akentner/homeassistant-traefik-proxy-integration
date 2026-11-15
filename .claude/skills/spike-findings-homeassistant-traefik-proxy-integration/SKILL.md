@@ -1,16 +1,20 @@
 ---
-name: spike-findings-homeassistant-traefik-integration
-description: Implementation blueprint for Home Assistant Traefik integration Phase 3 (TLS Certificate Expiry). Stdlib TLS handshake patterns, SNI routing, format-string parsing, async wrapping. Auto-loaded during implementation work on `custom_components/traefik/`.
+name: spike-findings-homeassistant-traefik-proxy-integration
+description: Implementation blueprint for Home Assistant Traefik Proxy integration Phase 3 (TLS Certificate Expiry). Stdlib TLS handshake patterns, SNI routing, format-string parsing, async wrapping. Auto-loaded during implementation work on `custom_components/traefik_proxy/`.
 ---
 
 <context>
-## Project: homeassistant-traefik-integration
+## Project: homeassistant-traefik-proxy-integration
 
 Custom Home Assistant integration (HACS-distributable) that connects to a
 Traefik reverse proxy and surfaces routers, services, entrypoints,
 middleware, and TLS certificate health as HA entities. Phase 3 adds TLS
 cert expiry sensors via out-of-band TLS handshakes to each router's
 public hostname.
+
+Note: this spike predates the shipped threadless asyncio probe in
+`custom_components/traefik_proxy/tls.py`, which is authoritative where the
+two differ (for example, the spike's `asyncio.to_thread` wrapping).
 
 Spike session wrapped: 2026-07-06
 Idea: validate stdlib `ssl` + `socket` TLS handshake approach before

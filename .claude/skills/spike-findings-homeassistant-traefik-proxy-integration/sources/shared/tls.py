@@ -2,7 +2,7 @@
 
 NOT production code — exercised by the 4 spike scripts under
 `.planning/spikes/03-tls-handshake/0XX-*`. After the spike validates the
-approach, the working version lands in `custom_components/traefik/tls.py`
+approach, the working version lands in `custom_components/traefik_proxy/tls.py`
 during Phase 3 plan execution.
 
 Design goals (from PROJECT.md, PITFALLS #14, CONTEXT.md D-10/D-11):

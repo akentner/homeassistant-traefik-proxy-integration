@@ -1,6 +1,6 @@
 # TLS Handshake — Implementation Blueprint
 
-Build `custom_components/traefik/tls.py` + `custom_components/traefik/cert_coordinator.py`
+Build `custom_components/traefik_proxy/tls.py` + `custom_components/traefik_proxy/cert_coordinator.py`
 that surface every Traefik TLS router's certificate `notAfter` as a Home
 Assistant timestamp sensor. Out-of-band TLS handshake using **only Python
 stdlib** (`ssl`, `socket`, `asyncio`).
@@ -26,7 +26,7 @@ Non-negotiable decisions from MANIFEST.md (every line is locked by spike evidenc
 ### File layout
 
 ```
-custom_components/traefik/
+custom_components/traefik_proxy/
 ├── tls.py                  # NEW — stdlib handshake helper (below)
 ├── cert_coordinator.py     # NEW — 6h cadence, sem=4, cache
 ├── sensor.py               # + TraefikCertTimestampSensor(SensorDeviceClass.TIMESTAMP)
@@ -163,7 +163,7 @@ Hard facts discovered during spiking:
 Run the spike to confirm the approach still works in CI:
 
 ```bash
-bash .claude/skills/spike-findings-homeassistant-traefik-integration/run-all.sh
+bash .claude/skills/spike-findings-homeassistant-traefik-proxy-integration/run-all.sh
 ```
 
 Expected output: 4 `Verdict: VALIDATED ✓` lines.
