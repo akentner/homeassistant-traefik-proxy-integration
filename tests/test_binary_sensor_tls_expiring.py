@@ -241,8 +241,9 @@ def test_identity_and_device() -> None:
     assert not hasattr(entity, "_coordinator")
 
 
-def test_host_is_lowercased() -> None:
+def test_host_key_is_used_unchanged() -> None:
+    """The cert coordinator normalises hosts; the entity keeps its key as given."""
     entity = TraefikCertExpiringBinarySensor(_entry(_coord()), "API.Example.COM")
-    assert entity.unique_id == f"test-entry_tls_expiring_{HOST}"
-    assert entity.translation_placeholders == {"host": HOST}
-    assert entity.is_on is False
+    assert entity.unique_id == "test-entry_tls_expiring_API.Example.COM"
+    assert entity.translation_placeholders == {"host": "API.Example.COM"}
+    assert entity.is_on is None

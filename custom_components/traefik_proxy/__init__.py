@@ -138,6 +138,8 @@ def _migrated_entry_data(data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]
     """
     new_data: dict[str, Any] = {key: data[key] for key in (CONF_URL, CONF_VERIFY_SSL) if key in data}
     if CONF_AUTH_TYPE in data:
+        # Deliberate defence: no older version wrote an auth type, so this only
+        # keeps the auth keys of a hand-edited core.config_entries entry.
         new_data.update(
             {key: data[key] for key in (CONF_AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN) if key in data}
         )

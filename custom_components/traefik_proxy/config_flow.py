@@ -214,7 +214,9 @@ async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
     try:
         auth = auth_from_entry_data(data)
     except ValueError:
-        # A credential the client refuses to send (e.g. a control character).
+        # Deliberate defence: the flows pass only credentials _collect_credentials
+        # accepted, but a credential from a hand-edited core.config_entries (or
+        # another out-of-band value) can still be one the client refuses to send.
         raise InvalidAuth from None
     client = TraefikProxyApiClient(
         session=async_get_clientsession(hass),
@@ -291,6 +293,9 @@ def _collect_credentials(
     try:
         mode = AuthMode(auth_type)
     except ValueError:
+        # Deliberate defence: the form's selector never yields an unknown auth
+        # type and a stored one is mapped to a known type first; this guards
+        # against an out-of-band value the flows themselves never produce.
         return {}, {CONF_AUTH_TYPE: "invalid_auth"}
     credentials: dict[str, str] = {}
     errors: dict[str, str] = {}

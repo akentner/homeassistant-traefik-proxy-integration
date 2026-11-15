@@ -285,8 +285,12 @@ class TraefikItemEntity[ModelT](TraefikEntity):
 
 
 def cert_hosts(coordinator: CertCoordinator) -> set[str]:
-    """Return the lowercase hosts of the cert data, with and without a certificate."""
-    return {host.lower() for host in coordinator.data or {}}
+    """Return the hosts of the cert data, with and without a certificate.
+
+    They are the keys as the cert coordinator stores them, already normalised
+    there; they are not changed here, so a key maps back to its unique_id.
+    """
+    return set(coordinator.data or {})
 
 
 class TraefikCertCoordinatorEntity(_TraefikEntityBase[CertCoordinator]):
@@ -320,7 +324,9 @@ class TraefikCertEntity(TraefikCertCoordinatorEntity):
     _spec: ClassVar[KindSpec]
 
     def __init__(self, entry: TraefikProxyConfigEntry, host: str) -> None:
-        host = host.lower()
+        # ``host`` is a cert data key (normalised by the cert coordinator) or
+        # the key of an adopted registry entry; it is used unchanged, so the
+        # unique_id is the one ``KindSpec.key_of`` maps back to ``host``.
         super().__init__(entry, self._spec.unique_id(entry.entry_id, host))
         self._host = host
         self._attr_translation_placeholders = {"host": host}

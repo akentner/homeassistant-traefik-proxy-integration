@@ -237,11 +237,12 @@ def test_identity_and_device() -> None:
     assert sensor.has_entity_name is True
 
 
-def test_host_is_lowercased() -> None:
+def test_host_key_is_used_unchanged() -> None:
+    """The cert coordinator normalises hosts; the entity keeps its key as given."""
     sensor = TraefikCertExpirySensor(_entry(_coord()), "API.Example.COM")
-    assert sensor.unique_id == f"test-entry_tls_cert_{HOST}"
-    assert sensor.translation_placeholders == {"host": HOST}
-    assert sensor.native_value == NOW + timedelta(days=30)
+    assert sensor.unique_id == "test-entry_tls_cert_API.Example.COM"
+    assert sensor.translation_placeholders == {"host": "API.Example.COM"}
+    assert sensor.native_value is None
 
 
 def test_no_alias_attribute_for_the_coordinator() -> None:
