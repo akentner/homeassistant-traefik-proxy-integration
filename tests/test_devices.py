@@ -237,11 +237,26 @@ async def test_main_device_sw_version_follows_traefik(hass: HomeAssistant, aiocl
 
 
 async def test_sub_devices_linked_without_deprecation(
-    hass: HomeAssistant, aioclient_mock: Any, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant, aioclient_mock: Any, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Sub-devices carry via_device_id == main.id; setup and a refresh report no deprecation."""
+    """Sub-devices are linked at creation (no registry update); setup and a refresh report no deprecation."""
     caplog.set_level(logging.DEBUG)
+    update_calls: list[dict[str, Any]] = []
+    original_update = dr.DeviceRegistry.async_update_device
+
+    def _spy_update(self: dr.DeviceRegistry, device_id: str, **kwargs: Any) -> dr.DeviceEntry | None:
+        update_calls.append(kwargs)
+        return original_update(self, device_id, **kwargs)
+
+    monkeypatch.setattr(dr.DeviceRegistry, "async_update_device", _spy_update)
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(entry_id=ENTRY_ID, minor_version=2))
+
+    devices = _devices(hass, ENTRY_ID)
+    main = devices[device_identifier(ENTRY_ID, TraefikDevice.MAIN)]
+    for sub in (TraefikDevice.ROUTERS, TraefikDevice.SERVICES, TraefikDevice.CERTIFICATES):
+        assert devices[device_identifier(ENTRY_ID, sub)].via_device_id == main.id, sub
+    assert not [kwargs for kwargs in update_calls if "via_device_id" in kwargs]
+
     await entry.runtime_data.coordinator.async_refresh()
     await hass.async_block_till_done()
 

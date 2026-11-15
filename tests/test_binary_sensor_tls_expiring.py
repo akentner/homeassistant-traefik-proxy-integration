@@ -233,7 +233,7 @@ def test_identity_and_device() -> None:
     assert entity.coordinator is coord
     assert entity.coordinator is not entry.runtime_data.coordinator
     assert entity.device_info is not None
-    assert entity.device_info["identifiers"] == {(DOMAIN, "test-entry_certificates")}
+    assert entity.device_info.identifiers == {(DOMAIN, "test-entry_certificates")}
     assert entity.translation_key == "certificate_expiring"
     assert entity.translation_placeholders == {"host": HOST}
     assert entity.device_class == BinarySensorDeviceClass.PROBLEM

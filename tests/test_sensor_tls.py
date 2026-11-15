@@ -229,7 +229,7 @@ def test_identity_and_device() -> None:
     assert sensor.entity_id is None
     assert sensor.coordinator is coord
     assert sensor.device_info is not None
-    assert sensor.device_info["identifiers"] == {(DOMAIN, "test-entry_certificates")}
+    assert sensor.device_info.identifiers == {(DOMAIN, "test-entry_certificates")}
     assert sensor.translation_key == "certificate_expiry"
     assert sensor.translation_placeholders == {"host": HOST}
     assert sensor.device_class == SensorDeviceClass.TIMESTAMP

@@ -160,7 +160,7 @@ def test_identity_device_and_coordinator() -> None:
     assert entity.device_class is BinarySensorDeviceClass.PROBLEM
     assert entity.entity_registry_enabled_default is True
     assert entity.device_info is not None
-    assert entity.device_info["identifiers"] == {(DOMAIN, ENTRY_ID)}
+    assert entity.device_info.identifiers == {(DOMAIN, ENTRY_ID)}
     assert entity.coordinator is entity._entry.runtime_data.cert_coordinator
 
 
