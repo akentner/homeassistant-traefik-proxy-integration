@@ -251,6 +251,35 @@ containers that are removed afterwards.
   Draft PR are done by the manager after phase verification; the verifier
   treats REL-08's push/PR clause as a manager action (M41), not a gap.
 
+### Resolved after research (orchestrator decisions on 08-RESEARCH.md open questions)
+- **D-28 (OQ1):** Ship `brand/dark_logo.png` / `brand/dark_logo@2x.png` (wordmark
+  in a light colour) next to `logo.png` / `logo@2x.png`, because the black
+  wordmark is unreadable on dark themes — exactly the case research §3 names for
+  `dark_*`. Still no `dark_icon` (teal mark reads on dark). Alternative: logo
+  without dark variant (unreadable in dark mode).
+- **D-29 (OQ2):** M40 redaction applies to the **diagnostics download only**,
+  and there to both the router `rule` and any `errors` entries that repeat the
+  rule. Entity state attributes (`rule`, `errors`) stay unredacted: they live in
+  the user's own HA (same trust domain as the stored Traefik credentials) and
+  M40's reason is the publicly posted diagnostics file. Alternative: also redact
+  attributes (loses the most useful attribute for automations/debugging).
+- **D-30 (OQ3):** Logo source = Traefik webui `ProxyLogo` (same upstream file as
+  the current `icon.svg`, geometry verified in research), exported per
+  08-RESEARCH.md; trademark note in README (D-03). The press-kit variant is
+  not used (not fetched/verified).
+- **D-31 (OQ4):** CI triggers: `push` restricted to `branches: [main]`, plus
+  `pull_request`, nightly `schedule`, `workflow_dispatch` — avoids duplicate
+  runs on PR branches while still covering "push, PR, nightly, manual" (REL-05).
+- **D-32:** `fail_under = 99` (measured 99 % on `custom_components.traefik_proxy`,
+  D-10 floor rule). The minimum-HA lock is a hashed `uv pip compile` file
+  (`--python-version 3.14.2`) installed with `uv pip sync --require-hashes`; the
+  `-o addopts="-p no:respx"` override is dropped from CI when the lock makes it
+  unnecessary (research Q4). Local hacs/action runs through the overlay script
+  `scripts/hacs_action_local.py` from research Q2 with `INPUT_REPOSITORY` set
+  (otherwise 5 checks are silently skipped). Dev tools Playwright / pre-commit
+  are run ephemerally (`uv run --with`, `uvx`) without a checkpoint — same
+  handling as M38 (well-known packages, not added to shipped requirements).
+
 ### Claude's Discretion
 - Plan split and wave order (suggested: code findings ∥ tooling/CI ∥
   metadata/brand → docs → Docker validation + visual check → drafts and
