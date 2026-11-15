@@ -37,8 +37,8 @@ EN = PACKAGE / "translations" / "en.json"
 DE = PACKAGE / "translations" / "de.json"
 ICONS = PACKAGE / "icons.json"
 
-# Sections this phase owns; config/options stay English until Phase 7.
-PHASE_SECTIONS = ("exceptions", "device", "entity", "issues")
+# Sections whose keys and placeholders de.json mirrors.
+PHASE_SECTIONS = ("config", "options", "selector", "exceptions", "device", "entity", "issues")
 # Modules whose Home Assistant exceptions must all be translated (D-25).
 EXCEPTION_MODULES = ("coordinator.py", "cert_coordinator.py", "__init__.py")
 HA_EXCEPTIONS = frozenset({"UpdateFailed", "ConfigEntryAuthFailed", "ConfigEntryNotReady", "ConfigEntryError"})
@@ -113,7 +113,7 @@ def test_english_texts_have_one_source() -> None:
 
 
 def test_de_matches_en_keys_and_placeholders() -> None:
-    """de.json parses as UTF-8 JSON and mirrors en.json's exceptions/device/entity/issues keys and placeholders."""
+    """de.json parses as UTF-8 JSON and mirrors en.json's keys and placeholders of every PHASE_SECTIONS section."""
     en = _phase_strings(EN)
     de = _phase_strings(DE)
     assert set(de) == set(en)
@@ -247,3 +247,22 @@ async def test_german_device_names(hass: HomeAssistant, aioclient_mock: Any) -> 
     assert names[device_identifier(entry.entry_id, TraefikDevice.SERVICES)] == f"Traefik-Dienste ({host})"
     assert names[device_identifier(entry.entry_id, TraefikDevice.CERTIFICATES)] == f"Traefik-Zertifikate ({host})"
     assert names[device_identifier(entry.entry_id, TraefikDevice.MAIN)] == f"Traefik ({host})"
+
+
+@pytest.mark.usefixtures("mock_tls_probe")
+async def test_every_option_field_is_labelled_and_described(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """Every options form field has a label and a description in en and de; no options error text is left."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry())
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    hass.config_entries.options.async_abort(result["flow_id"])
+    fields = [str(marker) for marker in result["data_schema"].schema]
+    assert fields
+
+    for path in (EN, DE):
+        options = _load(path)["options"]
+        init = options["step"]["init"]
+        assert init["title"].strip(), path.name
+        assert init["description"].strip(), path.name
+        assert list(init["data"]) == fields, path.name
+        assert list(init["data_description"]) == fields, path.name
+        assert "error" not in options, path.name

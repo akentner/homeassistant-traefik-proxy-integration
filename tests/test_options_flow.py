@@ -1,9 +1,12 @@
 """Tests for the options flow: selectors, int storage, bounds and the reload.
 
 Covers:
-- the form: ``scan_interval``, ``tls_warn_days`` and ``missing_grace_hours`` are
-  box NumberSelectors with units and bounds, ``verify_ssl`` is a BooleanSelector;
-  defaults for an entry without options (D-17)
+- the form: exactly scan_interval, verify_ssl, tls_warn_days,
+  per_item_entities, missing_grace_hours in that order; the numbers are box
+  NumberSelectors with units and bounds, ``verify_ssl`` and
+  ``per_item_entities`` are BooleanSelectors; defaults for an entry without
+  options, whose first submit stores all five keys (D-17, FLOW-02/empty,
+  FLOW-02/ordering)
 - the flow is an ``OptionsFlowWithReload``: changed options reload the entry
   and the reloaded runtime uses the new values; unchanged options (also a
   float of the stored int) do not reload (D-16, FLOW-02/adjacency)
@@ -11,6 +14,9 @@ Covers:
   ``InvalidData``, the bounds are accepted (D-17)
 - no update listener exists after setup or after the reload, and Home
   Assistant reports no listener usage (D-16, WR-03)
+- turning per-item entities off removes router/service entities and the
+  Routers/Services sub-devices after the reload, on again recreates them; an
+  identical second submit does not reload (D-19, FLOW-02/idempotency)
 """
 
 from __future__ import annotations
@@ -25,10 +31,13 @@ from aiohttp import ClientSession
 from homeassistant.config_entries import ConfigEntryState, OptionsFlowWithReload
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.selector import BooleanSelector, NumberSelector
 from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy.config_flow import TraefikProxyOptionsFlow
+from custom_components.traefik_proxy.entity_manager import ROUTERS, SERVICES, KindSpec
 from tests.conftest import ENTRY_DATA, make_traefik_entry, setup_traefik_entry
 
 # Stored option keys are a persistence contract, so the tests spell them out.
@@ -38,8 +47,16 @@ TLS_WARN_DAYS = "tls_warn_days"
 PER_ITEM_ENTITIES = "per_item_entities"
 MISSING_GRACE_HOURS = "missing_grace_hours"
 
-# The form defaults of an entry without options (verify_ssl: the entry data's True).
-DEFAULT_INPUT: dict[str, Any] = {SCAN_INTERVAL: 15, VERIFY_SSL: True, TLS_WARN_DAYS: 14, MISSING_GRACE_HOURS: 24}
+# The form defaults of an entry without options (verify_ssl: the entry data's True), in form order.
+DEFAULT_INPUT: dict[str, Any] = {
+    SCAN_INTERVAL: 15,
+    VERIFY_SSL: True,
+    TLS_WARN_DAYS: 14,
+    PER_ITEM_ENTITIES: True,
+    MISSING_GRACE_HOURS: 24,
+}
+# Integration domain of the device identifiers (spelled out like the option keys).
+DOMAIN = "traefik_proxy"
 
 USAGE_REPORT = "Detected that custom integration 'traefik_proxy'"
 LISTENER_MESSAGE = "update listeners should not be used"
@@ -78,7 +95,8 @@ async def test_options_form_selectors(hass: HomeAssistant, aioclient_mock: Any, 
 
     fields = _fields(await _init_options(hass, entry))
 
-    assert list(fields) == [SCAN_INTERVAL, VERIFY_SSL, TLS_WARN_DAYS, MISSING_GRACE_HOURS]
+    assert list(fields) == list(DEFAULT_INPUT)
+    assert list(fields) == [SCAN_INTERVAL, VERIFY_SSL, TLS_WARN_DAYS, PER_ITEM_ENTITIES, MISSING_GRACE_HOURS]
     scan = fields[SCAN_INTERVAL][1]
     assert isinstance(scan, NumberSelector)
     assert scan.config == {"min": 15, "max": 300, "step": 1, "unit_of_measurement": "s", "mode": "box"}
@@ -86,6 +104,7 @@ async def test_options_form_selectors(hass: HomeAssistant, aioclient_mock: Any, 
     assert isinstance(warn, NumberSelector)
     assert warn.config == {"min": 1, "max": 90, "step": 1, "unit_of_measurement": "d", "mode": "box"}
     assert isinstance(fields[VERIFY_SSL][1], BooleanSelector)
+    assert isinstance(fields[PER_ITEM_ENTITIES][1], BooleanSelector)
     grace = fields[MISSING_GRACE_HOURS][1]
     assert isinstance(grace, NumberSelector)
     assert grace.config == {"min": 1, "max": 168, "step": 1, "unit_of_measurement": "h", "mode": "box"}
@@ -95,7 +114,7 @@ async def test_options_form_selectors(hass: HomeAssistant, aioclient_mock: Any, 
 async def test_options_form_defaults_without_options(
     hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, data_verify_ssl: bool
 ) -> None:
-    """Without options the form shows 15 s, the effective TLS verification, 14 days and 24 h."""
+    """Without options the form shows 15 s, the effective TLS verification, 14 days, per-item on and 24 h."""
     entry_data = {**ENTRY_DATA, VERIFY_SSL: data_verify_ssl}
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(data=entry_data))
     assert dict(entry.options) == {}
@@ -160,11 +179,11 @@ async def test_options_outside_the_form_are_kept(
     hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
 ) -> None:
     """An option the form does not show survives a save."""
-    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options={PER_ITEM_ENTITIES: False}))
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options={"not_in_form": "kept"}))
 
     await _submit(hass, entry, {**DEFAULT_INPUT, SCAN_INTERVAL: 60})
 
-    assert dict(entry.options) == {PER_ITEM_ENTITIES: False, **DEFAULT_INPUT, SCAN_INTERVAL: 60}
+    assert dict(entry.options) == {"not_in_form": "kept", **DEFAULT_INPUT, SCAN_INTERVAL: 60}
     assert entry.state is ConfigEntryState.LOADED
 
 
@@ -241,3 +260,87 @@ async def test_missing_grace_hours_stored_as_truncated_int(
 
     assert entry.options[MISSING_GRACE_HOURS] == 24
     assert type(entry.options[MISSING_GRACE_HOURS]) is int
+
+
+async def test_first_submit_of_empty_options_stores_all_five_keys(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """Saving the untouched form of an entry without options stores every field with its default."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    assert dict(entry.options) == {}
+    fields = _fields(await _init_options(hass, entry))
+    defaults = {name: marker.default() for name, (marker, _selector) in fields.items()}
+
+    result = await _submit(hass, entry, defaults)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert dict(entry.options) == DEFAULT_INPUT
+    assert entry.state is ConfigEntryState.LOADED
+
+
+def _kind_count(hass: HomeAssistant, entry: MockConfigEntry, spec: KindSpec) -> int:
+    """Return the number of the entry's registry entries of ``spec``."""
+    return sum(
+        1
+        for reg_entry in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+        if reg_entry.domain == spec.domain and spec.key_of(entry.entry_id, reg_entry.unique_id) is not None
+    )
+
+
+def _sub_devices(hass: HomeAssistant, entry: MockConfigEntry) -> set[str]:
+    """Return the suffixes of the entry's sub-devices (routers, services, certificates)."""
+    prefix = f"{entry.entry_id}_"
+    return {
+        identifier[1].removeprefix(prefix)
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        for identifier in device.identifiers
+        if identifier[0] == DOMAIN and identifier[1].startswith(prefix)
+    }
+
+
+async def test_per_item_entities_off_and_on_through_the_options_flow(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """Off removes router/service entities and their sub-devices after the reload; on recreates them."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    assert _kind_count(hass, entry, ROUTERS)
+    assert _kind_count(hass, entry, SERVICES)
+    assert _sub_devices(hass, entry) == {"routers", "services", "certificates"}
+
+    await _submit(hass, entry, {**DEFAULT_INPUT, PER_ITEM_ENTITIES: False})
+
+    assert entry.options[PER_ITEM_ENTITIES] is False
+    assert entry.state is ConfigEntryState.LOADED
+    assert _kind_count(hass, entry, ROUTERS) == 0
+    assert _kind_count(hass, entry, SERVICES) == 0
+    assert _sub_devices(hass, entry) == {"certificates"}
+
+    await _submit(hass, entry, {**DEFAULT_INPUT, PER_ITEM_ENTITIES: True})
+
+    assert entry.options[PER_ITEM_ENTITIES] is True
+    assert entry.state is ConfigEntryState.LOADED
+    assert _kind_count(hass, entry, ROUTERS)
+    assert _kind_count(hass, entry, SERVICES)
+    assert _sub_devices(hass, entry) == {"routers", "services", "certificates"}
+
+
+async def test_per_item_entities_off_twice_reloads_once(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """A second identical "off" submit stores identical options and keeps the running entry."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    user_input = {**DEFAULT_INPUT, PER_ITEM_ENTITIES: False}
+    await _submit(hass, entry, user_input)
+    options = dict(entry.options)
+    runtime = entry.runtime_data
+    entity_ids = {reg.entity_id for reg in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)}
+
+    result = await _submit(hass, entry, user_input)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert dict(entry.options) == options
+    assert entry.runtime_data is runtime
+    assert {
+        reg.entity_id for reg in er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    } == entity_ids
+    assert _sub_devices(hass, entry) == {"certificates"}
