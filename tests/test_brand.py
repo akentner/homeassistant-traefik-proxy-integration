@@ -27,7 +27,15 @@ BRAND = PACKAGE / "brand"
 # Icon file name -> required square edge in pixels.
 ICONS = {"icon.png": 256, "icon@2x.png": 512}
 # Logo file name -> required height in pixels (landscape, so the height is the shortest side).
-LOGOS = {"logo.png": 128, "logo@2x.png": 256}
+# The dark-theme logos carry a light wordmark and share the light-theme sizes.
+LOGOS = {"logo.png": 128, "logo@2x.png": 256, "dark_logo.png": 128, "dark_logo@2x.png": 256}
+# Dark-theme logo -> the light-theme logo it mirrors.
+DARK_LOGOS = {"dark_logo.png": "logo.png", "dark_logo@2x.png": "logo@2x.png"}
+# The complete set of files shipped in brand/ (no dark_icon: the teal mark reads on dark themes).
+BRAND_FILES = {*ICONS, *LOGOS}
+# Mean luminance (0-255) of the opaque wordmark pixels: dark text below, light text above.
+DARK_TEXT_MAX_LUMINANCE = 96
+LIGHT_TEXT_MIN_LUMINANCE = 160
 # Allowed difference between the @2x width and twice the 1x width (independent resizes round).
 SCALE_TOLERANCE_PX = 2
 # Shipped images stay well below the repository's 500 KB large-file hook.
@@ -71,6 +79,17 @@ def trim_problems(image: Image.Image) -> list[str]:
             return [f"not centred horizontally: left {left} px, right {right} px"]
         return []
     return [f"padded on every axis: margins left {left}, top {top}, right {right}, bottom {bottom} px"]
+
+
+def wordmark_luminance(image: Image.Image) -> float:
+    """Return the mean luminance of the fully opaque pixels in the right half (the wordmark)."""
+    width, height = image.size
+    half = image.crop((width // 2, 0, width, height))
+    alpha = half.getchannel("A").tobytes()
+    luma = half.convert("L").tobytes()
+    values = [value for value, opacity in zip(luma, alpha, strict=True) if opacity == 255]
+    assert values, "no opaque pixels in the right half"
+    return sum(values) / len(values)
 
 
 def _planted(size: tuple[int, int], box: Box) -> Image.Image:
@@ -149,3 +168,36 @@ def test_logo_is_trimmed(name: str) -> None:
     """The logo artwork touches all four edges: no transparent padding at all."""
     image = open_image(BRAND / name)
     assert margins(image) == (0, 0, 0, 0), f"{name}: alpha bbox {alpha_bbox(image)}"
+
+
+@pytest.mark.parametrize(
+    ("colour", "luminance"),
+    [((0, 0, 0), 0.0), ((255, 255, 255), 255.0), ((42, 162, 193), 130.0)],
+)
+def test_wordmark_luminance_against_planted_samples(colour: tuple[int, int, int], luminance: float) -> None:
+    """The luminance helper reads only the opaque right half, ignoring the transparent rest."""
+    image = Image.new("RGBA", (40, 10), (255, 255, 255, 0))
+    image.paste((*colour, 255), (24, 2, 36, 8))
+    image.paste((255, 0, 0, 255), (0, 0, 20, 10))  # left half: ignored
+    assert wordmark_luminance(image) == pytest.approx(luminance, abs=1)
+
+
+@pytest.mark.parametrize(("dark", "light"), DARK_LOGOS.items())
+def test_dark_logo_mirrors_the_logo(dark: str, light: str) -> None:
+    """Each dark-theme logo has the size of its light-theme logo, but different pixels."""
+    dark_image = open_image(BRAND / dark)
+    light_image = open_image(BRAND / light)
+    assert dark_image.size == light_image.size
+    assert dark_image.tobytes() != light_image.tobytes()
+
+
+@pytest.mark.parametrize(("dark", "light"), DARK_LOGOS.items())
+def test_wordmark_is_dark_on_logo_and_light_on_dark_logo(dark: str, light: str) -> None:
+    """The light-theme wordmark is dark, the dark-theme wordmark is light, so both stay readable."""
+    assert wordmark_luminance(open_image(BRAND / light)) < DARK_TEXT_MAX_LUMINANCE
+    assert wordmark_luminance(open_image(BRAND / dark)) > LIGHT_TEXT_MIN_LUMINANCE
+
+
+def test_brand_folder_holds_exactly_the_brand_files() -> None:
+    """``brand/`` ships the icons, the logos and the dark logos, and nothing else."""
+    assert sorted(p.name for p in BRAND.iterdir()) == sorted(BRAND_FILES)
