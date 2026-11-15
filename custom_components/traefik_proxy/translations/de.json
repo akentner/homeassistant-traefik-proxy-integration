@@ -8,6 +8,21 @@
     },
     "redirect": {
       "message": "Die Traefik-API hat {path} umgeleitet (HTTP {status}). Die Integration folgt keinen Umleitungen; gib über „Neu konfigurieren“ die Adresse ein, auf die Traefik umleitet (zum Beispiel die HTTPS-Adresse)."
+    },
+    "invalid_url": {
+      "message": "Home Assistant kann keine Anfragen an die gespeicherte Traefik-URL senden. Korrigiere die URL über „Neu konfigurieren“."
+    },
+    "invalid_credentials": {
+      "message": "Die gespeicherten Zugangsdaten können nicht an Traefik gesendet werden. Gib sie im Dialog zur erneuten Authentifizierung neu ein."
+    },
+    "version_unavailable": {
+      "message": "Die Traefik-Version ist noch nicht verfügbar."
+    },
+    "certificates_failed": {
+      "message": "Das Lesen der Zertifikate von {path} ist fehlgeschlagen: {detail}."
+    },
+    "no_probe_host": {
+      "message": "Die Traefik-URL enthält keinen Host, an dem Zertifikate geprüft werden können. Korrigiere die URL über „Neu konfigurieren“."
     }
   },
   "device": {

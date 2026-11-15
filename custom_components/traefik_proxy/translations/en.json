@@ -63,9 +63,6 @@
     }
   },
   "exceptions": {
-    "cert_unavailable": {
-      "message": "TLS probe failed \u2014 {error}. See logbook for details."
-    },
     "auth_failed": {
       "message": "Traefik rejected the credentials for {path}. Enter them again in the re-authentication dialog."
     },
@@ -74,6 +71,21 @@
     },
     "redirect": {
       "message": "The Traefik API redirected {path} (HTTP {status}). The integration does not follow redirects; enter the address Traefik redirects to (for example the HTTPS address) via Reconfigure."
+    },
+    "invalid_url": {
+      "message": "Home Assistant cannot send requests to the stored Traefik URL. Correct the URL via Reconfigure."
+    },
+    "invalid_credentials": {
+      "message": "The stored credentials cannot be sent to Traefik. Enter them again in the re-authentication dialog."
+    },
+    "version_unavailable": {
+      "message": "The Traefik version is not available yet."
+    },
+    "certificates_failed": {
+      "message": "Reading the certificates from {path} failed: {detail}."
+    },
+    "no_probe_host": {
+      "message": "The Traefik URL has no host to check certificates at. Correct the URL via Reconfigure."
     }
   },
   "device": {

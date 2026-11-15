@@ -52,6 +52,7 @@ from .const import (
     CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
+    DOMAIN,
     MAX_CERT_HOSTS,
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
@@ -303,8 +304,12 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             # Traefik < 3.7 has no certificate list: probe every host.
             return await self._async_probe_states(hosts, snapshot, now)
         except TraefikProxyApiError as err:
-            # The message is "<path>: <detail>" and never carries a URL or credential.
-            raise UpdateFailed(f"Reading certificates failed: {err}") from err
+            # Path and detail never carry a URL or credential (client message contract).
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="certificates_failed",
+                translation_placeholders={"path": err.path, "detail": err.detail},
+            ) from err
         return self._api_states(hosts, certificates, now)
 
     @staticmethod
@@ -351,7 +356,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         url: str = self.config_entry.data[CONF_URL]
         host = urlsplit(url).hostname
         if host is None:
-            raise UpdateFailed("The Traefik URL has no host to probe certificates at")
+            raise UpdateFailed(translation_domain=DOMAIN, translation_key="no_probe_host")
         return host
 
     def _get_trust_store(self) -> Store | None:

@@ -119,8 +119,20 @@ async def test_request_construction_error_stops_setup_without_traceback(hass, ai
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.error_reason_translation_key == "invalid_url"
     assert "Unexpected error fetching" not in caplog.text
-    # Nothing above DEBUG may carry a traceback.
-    assert [record for record in caplog.records if record.exc_info and record.levelno > logging.DEBUG] == []
+    # Home Assistant logs a ConfigEntryError from setup with its traceback at
+    # ERROR. That record is the only one above DEBUG with a traceback, and its
+    # exception chain stops at the translated error: aiohttp's cause (its text
+    # can be the URL) never reaches the log.
+    tracebacks = [record for record in caplog.records if record.exc_info and record.levelno > logging.DEBUG]
+    assert [record.name for record in tracebacks] == ["homeassistant.config_entries"]
+    exc_info = tracebacks[0].exc_info
+    assert exc_info is not None
+    logged = exc_info[1]
+    assert getattr(logged, "translation_key", None) == "invalid_url"
+    assert logged is not None
+    assert logged.__cause__ is None
+    assert logged.__suppress_context__ is True
+    assert "Cannot combine" not in caplog.text
 
 
 async def test_invalid_credentials_start_reauth_without_request(hass, aioclient_mock, caplog) -> None:

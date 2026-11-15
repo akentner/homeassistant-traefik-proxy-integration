@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
@@ -23,6 +23,7 @@ from .api import (
     TraefikProxyApiClient,
     TraefikProxyApiError,
     TraefikProxyAuthError,
+    TraefikProxyInvalidUrlError,
     TraefikProxyRedirectError,
 )
 from .const import (
@@ -71,11 +72,21 @@ def auth_from_entry_data(data: Mapping[str, Any]) -> Auth:
 
 
 def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:
-    """Build the runtime API client from the entry and the shared HA session."""
+    """Build the runtime API client from the entry and the shared HA session.
+
+    Stored credentials ``Auth`` rejects can never be sent, so retrying is
+    pointless: the entry asks for new credentials through reauth instead.
+    """
+    try:
+        auth = auth_from_entry_data(entry.data)
+    except ValueError:
+        # The ValueError names a field, never its value; the chain is dropped
+        # anyway so no credential detail reaches a traceback.
+        raise ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key="invalid_credentials") from None
     return TraefikProxyApiClient(
         session=aiohttp_client.async_get_clientsession(hass),
         base_url=entry.data[CONF_URL],
-        auth=auth_from_entry_data(entry.data),
+        auth=auth,
         verify_ssl=effective_verify_ssl(entry),
     )
 
@@ -85,8 +96,12 @@ def _translated_update_error(err: TraefikProxyApiError) -> HomeAssistantError:
 
     Placeholders carry only the request path, the HTTP status and the
     client's non-secret detail, never ``str(err)``. Subclasses are checked
-    before their bases: a redirect is also a connection error.
+    before their bases: an invalid URL and a redirect are also connection
+    errors. A stored URL aiohttp refuses can never work, so it stops the
+    setup instead of retrying.
     """
+    if isinstance(err, TraefikProxyInvalidUrlError):
+        return ConfigEntryError(translation_domain=DOMAIN, translation_key="invalid_url")
     if isinstance(err, TraefikProxyAuthError):
         return ConfigEntryAuthFailed(
             translation_domain=DOMAIN,
@@ -104,6 +119,16 @@ def _translated_update_error(err: TraefikProxyApiError) -> HomeAssistantError:
         translation_key="api_error",
         translation_placeholders={"path": err.path, "detail": err.detail},
     )
+
+
+def _logged_cause(err: TraefikProxyApiError) -> TraefikProxyApiError | None:
+    """Return the cause to chain to the translated exception of ``err``.
+
+    Home Assistant logs a ``ConfigEntryError`` from setup with its full
+    traceback at ERROR. Below an invalid-URL error sits aiohttp's error,
+    whose text can be the URL including userinfo, so that chain is dropped.
+    """
+    return None if isinstance(err, TraefikProxyInvalidUrlError) else err
 
 
 def _interval_elapsed(since: datetime | None) -> bool:
@@ -161,7 +186,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
             self._version_checked_at = self._probe_armed_at = dt_util.utcnow()
             self._entrypoints = await self.client.async_get_entrypoints()
         except TraefikProxyApiError as err:
-            raise _translated_update_error(err) from err
+            raise _translated_update_error(err) from _logged_cause(err)
 
     def _version_due(self) -> bool:
         """Return whether this cycle re-reads /api/version.
@@ -188,7 +213,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
             ):
                 self._entrypoints = await self.client.async_get_entrypoints()
         except TraefikProxyApiError as err:
-            raise _translated_update_error(err) from err
+            raise _translated_update_error(err) from _logged_cause(err)
         self._version = version
         self._version_checked_at = dt_util.utcnow()
 
@@ -206,7 +231,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         try:
             state = await self.client.async_get_state()
         except TraefikProxyApiError as err:
-            raise _translated_update_error(err) from err
+            raise _translated_update_error(err) from _logged_cause(err)
         if self._version is None:
-            raise UpdateFailed("Traefik version not available")
+            raise UpdateFailed(translation_domain=DOMAIN, translation_key="version_unavailable")
         return TraefikSnapshot.build(version=self._version, entrypoints=self._entrypoints, state=state)
