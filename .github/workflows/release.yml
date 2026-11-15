@@ -1,0 +1,22 @@
+name: Release check
+
+on:
+  release:
+    types: [published]
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  tag-matches-manifest:
+    name: Tag equals manifest version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compare tag with manifest.json version
+        env:
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: python3 scripts/check_release_tag.py "$TAG"
