@@ -50,7 +50,7 @@ from .entity_manager import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Repair issue raised once when the 1.2 migration removed replaced entities (D-19).
+# Repair issue raised once when the 1.2 migration removed replaced entities.
 ISSUE_ENTITIES_MIGRATED: Final = "entities_migrated"
 # Repair issue raised while a loaded entry sends credentials over plain HTTP.
 ISSUE_INSECURE_CREDENTIALS: Final = "insecure_credentials"

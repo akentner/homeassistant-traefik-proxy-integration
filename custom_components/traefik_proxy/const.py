@@ -32,7 +32,7 @@ MAX_MISSING_GRACE_HOURS: Final = 168
 
 # Defaults
 DEFAULT_VERIFY_SSL: Final = True
-DEFAULT_SCAN_INTERVAL: Final = 15  # seconds (CONTEXT.md D-12)
+DEFAULT_SCAN_INTERVAL: Final = 15  # seconds
 DEFAULT_NAME: Final = "Traefik Proxy"
 
 # Per-item entity states: the Traefik item status plus ``missing`` for an item
@@ -55,25 +55,23 @@ UID_MIDDLEWARES_PROBLEM: Final = "diagnostics_any_middleware_failing"
 # Unique_id suffix of the certificate problem aggregate (new in 1.0, no historical form).
 UID_CERTIFICATES_PROBLEM: Final = "certificates_problem"
 
-# Clamps for Options Flow (Phase 2 — Plan 02-02 fills these in).
-# MIN_SCAN_INTERVAL/MAX_SCAN_INTERVAL bound the scan-interval knob
-# (CONTEXT.md D-09 — 15s lower bound keeps the API polite; 300s upper bound
-# keeps entity states fresh enough to be useful). MIN_TLS_WARN_DAYS /
-# MAX_TLS_WARN_DAYS bound the cert-expiry warning threshold placeholder
-# (CONTEXT.md D-09 — Phase 3 picks the value up).
+# Bounds of the options form. MIN_SCAN_INTERVAL / MAX_SCAN_INTERVAL bound the
+# scan interval: the 15 s lower bound keeps the API polite, the 300 s upper
+# bound keeps entity states fresh enough to be useful. MIN_TLS_WARN_DAYS /
+# MAX_TLS_WARN_DAYS bound the certificate expiry warning threshold.
 MIN_SCAN_INTERVAL: Final = 15
 MAX_SCAN_INTERVAL: Final = 300
 MIN_TLS_WARN_DAYS: Final = 1
 MAX_TLS_WARN_DAYS: Final = 90
 DEFAULT_TLS_WARN_DAYS: Final = 14
 
-# Phase 3 cert-cycle knobs (CONTEXT.md D-05). ``TLS_HANDSHAKE_TIMEOUT`` caps
-# the per-host TLS handshake at 5s — a hanging host cannot stall the cycle
-# indefinitely. ``TLS_SEMAPHORE`` bounds concurrent handshakes to 4 (a
-# hostile config with 10k routers would otherwise fan out a thundering
-# herd). ``DEFAULT_TLS_CERT_COOLDOWN`` is the 6h cadence (21600s) — the
-# spike's 6h default; a 14d warning threshold with 6h probes means a
-# user is alerted within ±6h of a cert entering the warning window.
+# Cert-cycle knobs. ``TLS_HANDSHAKE_TIMEOUT`` caps the per-host TLS handshake
+# at 5 s, so a hanging host cannot stall the cycle indefinitely.
+# ``TLS_SEMAPHORE`` bounds concurrent handshakes to 4 (a config with thousands
+# of routers would otherwise fan out a thundering herd).
+# ``DEFAULT_TLS_CERT_COOLDOWN`` is the 6 h cadence (21600 s): with a 14-day
+# warning threshold, a user is alerted within about 6 h of a certificate
+# entering the warning window.
 TLS_HANDSHAKE_TIMEOUT: Final = 5.0
 TLS_SEMAPHORE: Final = 4
 DEFAULT_TLS_CERT_COOLDOWN: Final = 21600
@@ -82,6 +80,7 @@ CERT_RETRY_INTERVAL: Final = 300
 # Upper bound of hosts probed per cert cycle (a constant, not an option).
 MAX_CERT_HOSTS: Final = 200
 
-# Platforms forwarded in async_setup_entry.
-# Phase 2 adds sensor (entrypoint/service/aggregate) and button (refresh).
+# Platforms forwarded in async_setup_entry: binary_sensor (problem aggregates,
+# certificate expiring), sensor (per-item, snapshot and certificate expiry
+# sensors) and button (refresh).
 PLATFORMS: Final = ["binary_sensor", "sensor", "button"]
