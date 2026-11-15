@@ -821,6 +821,8 @@ async def test_cancelled_refresh_closes_connection_and_keeps_data(hass: Any, soc
         assert set(c.data) == set(hosts)
         assert c.data is not before
     finally:
+        # The entry is a mock, so no unload cancels the day-boundary timer.
+        await c.async_shutdown()
         server.close()
         server.close_clients()
         await server.wait_closed()
@@ -840,6 +842,7 @@ async def test_overlapping_refreshes_both_complete(hass: Any) -> None:
         await asyncio.gather(c.async_refresh(), c.async_refresh())
     assert c.last_update_success is True
     assert set(c.data) == set(hosts)
+    await c.async_shutdown()
 
 
 async def test_probe_concurrency_is_bounded_by_semaphore(hass: Any) -> None:
@@ -871,6 +874,7 @@ async def test_probe_concurrency_is_bounded_by_semaphore(hass: Any) -> None:
     assert peak == TLS_SEMAPHORE == 4
     assert c.last_update_success is True
     assert set(c.data) == set(hosts)
+    await c.async_shutdown()
 
 
 # ---------------------------------------------------------------------------

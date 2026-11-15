@@ -19,8 +19,11 @@ Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
 
 The result is one :class:`HostCertState` per host of the current host set.
 Days until expiry are never stored; entities compute them from the clock at
-read time. A cycle never fails because a probe failed; a failed probe is
-part of the host's state.
+read time. One timer fires at the earliest moment a host's whole-day count
+changes and notifies the listeners, so threshold crossings, expiry and the
+daily countdown reach the entities when they happen, without a new cycle.
+A cycle never fails because a probe failed; a failed probe is part of the
+host's state.
 """
 
 from __future__ import annotations
@@ -35,7 +38,8 @@ from typing import TYPE_CHECKING, Final
 from urllib.parse import urlsplit
 
 from cryptography.x509.verification import Store
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from homeassistant.util import ssl as ha_ssl
@@ -65,6 +69,8 @@ CERT_FAILURES_FOR_PROBLEM: Final = 2
 # ``error`` of a host the Traefik API reports no certificate for.
 NOT_FOUND: Final = "not_found"
 DAY: Final = timedelta(days=1)
+# How long after a whole-day boundary the day-boundary timer fires.
+DAY_CHANGE_DELAY: Final = timedelta(seconds=1)
 
 
 class CertSource(StrEnum):
@@ -156,6 +162,17 @@ class HostCertState:
             return None
         return (self.certificate.not_after - now) // DAY
 
+    def next_day_change(self, now: datetime) -> datetime | None:
+        """Return the first instant after ``now`` with a lower :meth:`days_left`, or None without a certificate.
+
+        That is one second after the floor-day count drops, so a timer firing
+        then always computes the new value.
+        """
+        days = self.days_left(now)
+        if self.certificate is None or days is None:
+            return None
+        return self.certificate.not_after - days * DAY + DAY_CHANGE_DELAY
+
     def problem(self, threshold_days: int, now: datetime) -> CertProblem | None:
         """Return the host's problem by precedence, or None when it has none."""
         days = self.days_left(now)
@@ -192,7 +209,11 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
 
     Threshold changes (``tls_warn_days`` in the options) go through
     :meth:`async_set_threshold`, which notifies the listeners so the
-    expiring sensors re-evaluate without a new probe.
+    expiring sensors re-evaluate without a new probe. After every
+    successful cycle one day-boundary timer is scheduled at the earliest
+    :meth:`HostCertState.next_day_change` of the hosts; it notifies the
+    listeners the same way and schedules the next one. Shutdown (entry
+    unload) cancels it.
     """
 
     config_entry: TraefikProxyConfigEntry
@@ -231,8 +252,15 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         self._trust_store = trust_store
         # False until the default store was built; the built store may be None.
         self._trust_store_ready = trust_store is not None
+        self._unsub_day_boundary: CALLBACK_TYPE | None = None
 
     async def _async_update_data(self) -> dict[str, HostCertState]:
+        """Run one cert cycle and schedule the day-boundary timer for its states."""
+        states = await self._async_cycle()
+        self._async_schedule_day_boundary(states)
+        return states
+
+    async def _async_cycle(self) -> dict[str, HostCertState]:
         """Run one cert cycle over the current host set."""
         hosts = self._collect_hosts()
         now = dt_util.utcnow()
@@ -395,6 +423,36 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             failures=previous.failures + 1 if previous is not None else 1,
             fetched_at=previous.fetched_at if previous is not None else None,
         )
+
+    @callback
+    def _async_schedule_day_boundary(self, states: dict[str, HostCertState]) -> None:
+        """Replace the day-boundary timer with one at the earliest day change of ``states``.
+
+        No timer is scheduled when no host has a certificate.
+        """
+        if self._unsub_day_boundary is not None:
+            self._unsub_day_boundary()
+            self._unsub_day_boundary = None
+        now = dt_util.utcnow()
+        changes = [when for state in states.values() if (when := state.next_day_change(now)) is not None]
+        if changes:
+            self._unsub_day_boundary = async_track_point_in_utc_time(
+                self.hass, self._async_handle_day_boundary, min(changes)
+            )
+
+    @callback
+    def _async_handle_day_boundary(self, _now: datetime) -> None:
+        """Let the listeners re-evaluate at a day boundary, then schedule the next one."""
+        self._unsub_day_boundary = None
+        self.async_update_listeners()
+        self._async_schedule_day_boundary(self.data or {})
+
+    async def async_shutdown(self) -> None:
+        """Cancel the day-boundary timer, then shut the coordinator down."""
+        if self._unsub_day_boundary is not None:
+            self._unsub_day_boundary()
+            self._unsub_day_boundary = None
+        await super().async_shutdown()
 
     async def async_set_threshold(self, threshold_days: int) -> None:
         """Update the warning threshold live and notify the listeners (no new probe)."""
