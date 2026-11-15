@@ -19,6 +19,7 @@ from homeassistant.helpers import device_registry as dr
 from custom_components.traefik_proxy import binary_sensor, button, sensor
 from custom_components.traefik_proxy.binary_sensor import PROBLEM_SENSORS, TraefikCertExpiringBinarySensor
 from custom_components.traefik_proxy.button import TraefikRefreshButton
+from custom_components.traefik_proxy.cert_coordinator import CertProblem
 from custom_components.traefik_proxy.const import ITEM_STATE_OPTIONS
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from custom_components.traefik_proxy.sensor import (
@@ -130,6 +131,17 @@ def test_item_state_keys_equal_options() -> None:
         sensors = _load(path)["entity"]["sensor"]
         for key in ("router", "service"):
             assert set(sensors[key]["state"]) == set(ITEM_STATE_OPTIONS), f"{path.name}: {key}"
+
+
+def test_reason_state_keys_equal_cert_problems() -> None:
+    """The reason attribute of certificate_expiring has a name and one text per CertProblem in en and de."""
+    for path in (EN, DE):
+        expiring = _load(path)["entity"]["binary_sensor"]["certificate_expiring"]
+        reason = expiring.get("state_attributes", {}).get("reason")
+        assert reason is not None, f"{path.name}: certificate_expiring.state_attributes.reason missing"
+        assert reason["name"].strip(), path.name
+        assert set(reason["state"]) == {member.value for member in CertProblem}, path.name
+        assert all(text.strip() for text in reason["state"].values()), path.name
 
 
 def test_every_code_key_has_texts() -> None:
