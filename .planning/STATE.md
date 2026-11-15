@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
-status: executing
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-11-15T09:11:26.603Z"
+status: verifying
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-11-15T09:19:24.968Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 06 execution started
-state_head: 87a0ad3926d777bf956a520a39583c766519d3a7
+state_head: 626dbe54295aedddaec500b7305e7214beb600a4
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 34
+  completed_plans: 35
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 06 (Certificates) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-15 — Phase 06 execution started
 
 Progress: [██████░░░░] 63% (3 of 8 phases)
@@ -99,6 +99,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 06 P04 | 11min | 2 tasks | 10 files |
 | Phase 06 P05 | 14min | 3 tasks | 8 files |
 | Phase 06 P06 | 8min | 2 tasks | 7 files |
+| Phase 06 P07 | 13min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -196,6 +197,8 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-06: Setup awaits cert_coordinator.async_refresh(); a failed first cert cycle stays failed (no empty fake success)
 - [Phase 06]: 06-06: After a failed cycle, async_add_kind adopts registry orphans without a stored missing time as present; stored times are kept
 - [Phase 06]: 06-06: Any failed cert cycle retries after CERT_RETRY_INTERVAL = 300 s (except Exception wrapper); success restores 6 h
+- [Phase 06]: 06-07: certificates_problem aggregate is a fixed per-entry entity on a TraefikCertCoordinatorEntity base (main device, cert coordinator), not a PROBLEM_SENSORS description; it uses HostCertState.problem like the per-host sensor, reasons only for the 50 listed hosts
+- [Phase 06]: 06-07: aggregate tests reference the class as a binary_sensor module attribute so RED fails in the test body, not at collection
 
 ### Pending Todos
 
@@ -237,7 +240,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T09:11:26.447Z
-Stopped at: Completed 06-06-PLAN.md
+Last session: 2026-11-15T09:19:24.831Z
+Stopped at: Completed 06-07-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

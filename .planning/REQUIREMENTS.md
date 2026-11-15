@@ -267,7 +267,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       P-08, S-07)
 - [x] **CERT-04**: Wildcard SAN matching accepts exactly one label
       (RFC 6125 §6.4.3). (S-04)
-- [ ] **CERT-05**: `days_left` is computed from `not_after` at read time; an
+- [x] **CERT-05**: `days_left` is computed from `not_after` at read time; an
       expired or repeatedly unprobeable certificate turns `certificate_expiring`
       and the `certificates_problem` aggregate (enabled by default) on with a
       `reason`, while the timestamp sensor keeps its last value. (U-09, U-10)
@@ -460,7 +460,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CERT-02 | Phase 6 | Complete |
 | CERT-03 | Phase 6 | Complete |
 | CERT-04 | Phase 6 | Complete |
-| CERT-05 | Phase 6 | Pending |
+| CERT-05 | Phase 6 | Complete |
 | FLOW-01 | Phase 7 | Pending |
 | FLOW-02 | Phase 7 | Pending |
 | FLOW-03 | Phase 7 | Pending |

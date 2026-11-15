@@ -408,7 +408,7 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 6/7 plans executed in 6 waves
+**Plans**: 7/7 plans executed in 6 waves
 
 Plans:
 **Wave 1**
@@ -428,7 +428,7 @@ Plans:
 - [x] 06-06-PLAN.md — Day-boundary timer (threshold/expiry/daily change without a probe); honest failed first cert cycle, restored hosts not stamped missing, 5-minute retry (CERT-05)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 06-07-PLAN.md — `certificates_problem` aggregate (enabled by default, hosts + reasons) and en/de `reason` texts (CERT-05)
+- [x] 06-07-PLAN.md — `certificates_problem` aggregate (enabled by default, hosts + reasons) and en/de `reason` texts (CERT-05)
 
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task (D-19)
@@ -539,7 +539,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
-| 6. Certificates | 6/7 | In Progress | - |
+| 6. Certificates | 7/7 | In Progress | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
