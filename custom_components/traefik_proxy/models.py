@@ -125,6 +125,24 @@ class TraefikVersion:
 
 
 @dataclass(frozen=True, slots=True)
+class TraefikCertificate:
+    """A certificate Traefik serves.
+
+    ``not_after`` and ``not_before`` are timezone-aware UTC datetimes.
+    ``status`` is the API's expiry status (``enabled`` / ``warning`` /
+    ``expired``); it is None when the certificate was read by the TLS probe.
+    """
+
+    common_name: str
+    sans: tuple[str, ...]
+    not_after: datetime
+    not_before: datetime
+    issuer_cn: str | None
+    status: str | None
+    serial_number: str
+
+
+@dataclass(frozen=True, slots=True)
 class StatusCounts:
     """Number of items per status."""
 
@@ -397,3 +415,36 @@ def parse_rawdata(payload: object) -> TraefikState:
         services=parse_services(services),
         middlewares=parse_middlewares(middlewares),
     )
+
+
+def _utc_timestamp(item: Mapping[str, Any], key: str) -> datetime:
+    """Parse a required ISO 8601 timestamp; a naive value is rejected, not guessed."""
+    value = datetime.fromisoformat(_required_str(item, key))
+    if value.tzinfo is None:
+        raise ValueError(f"{key!r} has no timezone")
+    return value.astimezone(UTC)
+
+
+def parse_certificates(payload: object) -> tuple[TraefikCertificate, ...]:
+    """Parse the ``/api/certificates`` list in payload order (Traefik >= 3.7).
+
+    Items are not de-duplicated: the API reports every stored certificate.
+    """
+    if not isinstance(payload, list):
+        raise TypeError(f"expected a list, got {type(payload).__name__}")
+    certificates: list[TraefikCertificate] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            raise TypeError(f"certificate must be an object, got {type(item).__name__}")
+        certificates.append(
+            TraefikCertificate(
+                common_name=_str(item, "commonName"),
+                sans=_str_tuple(item, "sans"),
+                not_after=_utc_timestamp(item, "notAfter"),
+                not_before=_utc_timestamp(item, "notBefore"),
+                issuer_cn=_str(item, "issuerCN") or None,
+                status=_str(item, "status") or None,
+                serial_number=_str(item, "serialNumber"),
+            )
+        )
+    return tuple(certificates)

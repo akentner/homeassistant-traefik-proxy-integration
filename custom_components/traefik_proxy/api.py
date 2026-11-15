@@ -14,8 +14,10 @@ import aiohttp
 
 from .models import (
     Entrypoint,
+    TraefikCertificate,
     TraefikState,
     TraefikVersion,
+    parse_certificates,
     parse_entrypoints,
     parse_middlewares,
     parse_rawdata,
@@ -255,6 +257,18 @@ class TraefikProxyApiClient:
         payload, _ = await self._request(path)
         try:
             return parse_entrypoints(payload)
+        except (ValueError, TypeError, KeyError) as err:
+            raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
+
+    async def async_get_certificates(self) -> tuple[TraefikCertificate, ...]:
+        """GET every page of /api/certificates (Traefik >= 3.7) as parsed models.
+
+        Older Traefik versions answer 404, raised as TraefikProxyNotFoundError.
+        """
+        path = "/api/certificates"
+        items = await self._get_paginated(path)
+        try:
+            return parse_certificates(items)
         except (ValueError, TypeError, KeyError) as err:
             raise TraefikProxyPayloadError(path, "unexpected payload shape") from err
 
