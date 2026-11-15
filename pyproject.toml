@@ -1,5 +1,5 @@
 [project]
-name = "homeassistant-traefik-integration"
+name = "homeassistant-traefik-proxy-integration"
 version = "1.0.0"
 description = "Home Assistant custom integration that exposes Traefik reverse-proxy state as entities"
 requires-python = ">=3.14.2"
@@ -21,7 +21,14 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-addopts = "-p no:respx --cov=custom_components.traefik --cov-report term-missing"
+addopts = "-p no:respx --cov=custom_components.traefik_proxy --cov-report term-missing"
+# A SyntaxWarning (e.g. an invalid escape sequence) is a bug: fail collection on it.
+filterwarnings = ["error::SyntaxWarning"]
+
+[tool.coverage.report]
+# Floor of the measured total line coverage of custom_components.traefik_proxy
+# (2123 statements, 15 missed = 99.29 % at 1.0.0). Every coverage run is gated.
+fail_under = 99
 
 [tool.mypy]
 python_version = "3.14"

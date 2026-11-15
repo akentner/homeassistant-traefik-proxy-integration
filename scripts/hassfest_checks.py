@@ -14,9 +14,10 @@ caused in this repo:
 
 1. manifest.json key order — hassfest requires `domain`, then `name`,
    then alphabetical. Manual JSON editing drops the ordering invariant.
-2. translations/*.json shape — hassfest schema rejects
-   unknown top-level keys (`reauth`, `reconfigure`, `entity`) and
-   any string containing a literal URL.
+2. translations/*.json shape — hassfest schema rejects the top-level
+   keys `reauth` and `reconfigure` (they belong under `config.step.*`)
+   and any string containing a literal URL. Top-level `entity`,
+   `exceptions`, `issues`, `options` etc. are valid and allowed.
 3. strict JSON parse — if a comma is missing, every subsequent check
    fails with a confusing error. Validate parses first.
 
@@ -72,7 +73,8 @@ def _check_strings_shape(path: Path) -> list[str]:
     obj = _load_json(path)
     if not isinstance(obj, dict):
         return [f"{path}: expected object at root"]
-    forbidden_top = {"entity", "reauth", "reconfigure"}
+    # Only keys hassfest genuinely rejects; `entity` is a valid top-level key.
+    forbidden_top = {"reauth", "reconfigure"}
     bad_top = forbidden_top & obj.keys()
     if bad_top:
         errors.append(f"{path}: top-level keys {sorted(bad_top)!r} not allowed (HA derives these from config.step.* automatically)")

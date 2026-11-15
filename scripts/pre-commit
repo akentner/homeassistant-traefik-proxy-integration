@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Standalone pre-commit hook for users without the pre-commit framework.
-# Mirrors the GH Actions validate.yml gates locally before each commit.
+# Mirrors the CI lint job (validate.yml) locally before each commit: same
+# `uv run` ruff/mypy commands, scoped to custom_components/traefik_proxy.
 #
 # Install via:  make install-hooks  OR  cp scripts/pre-commit .git/hooks/pre-commit
 #
@@ -34,8 +35,8 @@ run() {
 run "JSON parse + hassfest sanity" \
     uv run python scripts/hassfest_checks.py all
 
-# --- Ruff lint ---
-STAGED_PY="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.py$' || true)"
+# --- Ruff lint (staged files under the integration or tests only) ---
+STAGED_PY="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(custom_components/traefik_proxy|tests)/.*\.py$' || true)"
 if [ -n "${STAGED_PY:-}" ]; then
     run "ruff check" \
         uv run ruff check $STAGED_PY
@@ -45,6 +46,6 @@ fi
 
 # --- Mypy strict (full module, fast enough on every commit) ---
 run "mypy --strict" \
-    uv run mypy --strict custom_components
+    uv run mypy --strict custom_components/traefik_proxy
 
 green "All pre-commit checks passed."

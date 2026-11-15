@@ -1,4 +1,4 @@
-.PHONY: install-hooks install-pre-commit test test-cov test-min-ha min-ha-lock lint format typecheck hassfest-sanity clean help
+.PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity clean help
 
 help:  ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -8,18 +8,18 @@ install-hooks:  ## Install the standalone pre-commit hook into .git/hooks/pre-co
 	@chmod +x .git/hooks/pre-commit
 	@echo "✓ Installed scripts/pre-commit → .git/hooks/pre-commit"
 	@echo "  Now runs on every 'git commit'. Bypass with --no-verify if needed."
-	@echo "  (Or use the pre-commit framework: pip install pre-commit && pre-commit install)"
+	@echo "  (Or use the pre-commit framework: make install-pre-commit)"
 
 install-pre-commit:  ## Install pre-commit (the framework) and run pre-commit install.
-	@uv tool install pre-commit || pip install --user pre-commit
+	@uv tool install pre-commit
 	@pre-commit install
 	@echo "✓ pre-commit framework installed and hooks wired."
 
-test:  ## Run pytest.
-	uv run pytest tests/ -q
+pre-commit:  ## Run all pre-commit hooks on all files (ephemeral pre-commit, nothing installed).
+	uvx pre-commit run --all-files
 
-test-cov:  ## Run pytest with coverage.
-	uv run pytest tests/ -v --cov
+test:  ## Run pytest with the coverage gate (fail_under in pyproject.toml).
+	uv run pytest -q tests
 
 min-ha-lock:  ## Regenerate the hashed minimum-HA test lock (.github/requirements-min-ha.txt).
 	UV_HTTP_TIMEOUT=300 uv pip compile .github/requirements-min-ha.in --python-version 3.14.2 --python-platform x86_64-manylinux_2_28 --generate-hashes -o .github/requirements-min-ha.txt
@@ -38,7 +38,7 @@ format:  ## Run ruff format (apply).
 	uv run ruff check --fix custom_components tests
 
 typecheck:  ## Run mypy --strict.
-	uv run mypy --strict custom_components
+	uv run mypy --strict custom_components/traefik_proxy
 
 hassfest-sanity:  ## Run local hassfest-style sanity checks (no docker).
 	uv run python scripts/hassfest_checks.py all

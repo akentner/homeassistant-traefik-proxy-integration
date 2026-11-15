@@ -1,19 +1,26 @@
-# Pre-commit hooks for homeassistant-traefik-integration.
+# Pre-commit hooks for homeassistant-traefik-proxy-integration.
 #
 # Mirrors the GH Actions validate.yml locally so common issues (ruff, format,
-# mypy, manifest key order, JSON parse) surface before pushing.
+# mypy, manifest key order, JSON parse) surface before pushing. ruff and mypy
+# run through `uv run`, i.e. the same tool versions as CI and the Makefile.
 #
-# Install ONE of:
+# Run without installing anything permanently:
+#   make pre-commit                   # = uvx pre-commit run --all-files
+# Or install ONE of:
 #   uv tool install pre-commit  &&  pre-commit install
 #   make install-hooks                # copies scripts/pre-commit into .git/hooks/
 
 default_language_version:
-  python: python3.13
+  python: python3.14
+
+# Planning docs are not shipped (and are rewritten by GSD tooling); captured
+# fixtures must stay byte-identical.
+exclude: ^(\.planning/|tests/fixtures/)
 
 repos:
   # General repo hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -27,24 +34,31 @@ repos:
       - id: mixed-line-ending
         args: ["--fix=lf"]
 
-  # Ruff (lint + format)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.15
+  # Ruff (lint + format) — same version as CI via uv run
+  - repo: local
     hooks:
       - id: ruff-check
-        args: ["--fix"]
-        files: ^(custom_components/traefik|tests)/.*\.py$
+        name: ruff check --fix
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        files: ^(custom_components/traefik_proxy|tests)/
+
       - id: ruff-format
-        files: ^(custom_components/traefik|tests)/.*\.py$
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        files: ^(custom_components/traefik_proxy|tests)/
 
   # Mypy (strict)
   - repo: local
     hooks:
       - id: mypy
-        name: mypy --strict (custom_components)
-        entry: uv run mypy --strict custom_components
+        name: mypy --strict (custom_components/traefik_proxy)
+        entry: uv run mypy --strict custom_components/traefik_proxy
         language: system
-        files: ^custom_components/traefik/.*\.py$
+        files: ^custom_components/traefik_proxy/.*\.py$
         pass_filenames: false
         types: [python]
 
@@ -53,14 +67,14 @@ repos:
     hooks:
       - id: hassfest-manifest-order
         name: hassfest manifest key order (domain, name, alphabetical)
-        entry: python scripts/hassfest_checks.py manifest-order
+        entry: uv run python scripts/hassfest_checks.py manifest-order
         language: system
-        files: ^custom_components/traefik/manifest\.json$
+        files: ^custom_components/traefik_proxy/manifest\.json$
         pass_filenames: false
 
       - id: hassfest-strings-shape
-        name: hassfest translations/*.json shape (no top-level reauth/reconfigure/entity, no URLs in labels)
-        entry: python scripts/hassfest_checks.py strings-shape
+        name: hassfest translations/*.json shape (no top-level reauth/reconfigure, no URLs in labels)
+        entry: uv run python scripts/hassfest_checks.py strings-shape
         language: system
-        files: ^custom_components/traefik/translations/.*\.json$
+        files: ^custom_components/traefik_proxy/translations/.*\.json$
         pass_filenames: false
