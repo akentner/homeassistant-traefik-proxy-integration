@@ -32,3 +32,6 @@ uv.lock
 
 # Capture harness (tests/traefik/capture.py): generated throwaway TLS cert + key
 tests/traefik/certs/
+
+# Minimum-HA test venv (make test-min-ha)
+.venv-min-ha/

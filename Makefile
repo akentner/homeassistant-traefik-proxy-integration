@@ -1,4 +1,4 @@
-.PHONY: install-hooks install-pre-commit test test-cov lint format typecheck hassfest-sanity clean help
+.PHONY: install-hooks install-pre-commit test test-cov test-min-ha min-ha-lock lint format typecheck hassfest-sanity clean help
 
 help:  ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -20,6 +20,14 @@ test:  ## Run pytest.
 
 test-cov:  ## Run pytest with coverage.
 	uv run pytest tests/ -v --cov
+
+min-ha-lock:  ## Regenerate the hashed minimum-HA test lock (.github/requirements-min-ha.txt).
+	UV_HTTP_TIMEOUT=300 uv pip compile .github/requirements-min-ha.in --python-version 3.14.2 --python-platform x86_64-manylinux_2_28 --generate-hashes -o .github/requirements-min-ha.txt
+
+test-min-ha:  ## Run the suite on the locked minimum HA (same commands as the CI test-min-ha job).
+	uv venv --clear --python 3.14 .venv-min-ha
+	uv pip sync --python .venv-min-ha/bin/python --require-hashes .github/requirements-min-ha.txt
+	.venv-min-ha/bin/python -m pytest -q tests
 
 lint:  ## Run ruff check + format check.
 	uv run ruff check custom_components tests
