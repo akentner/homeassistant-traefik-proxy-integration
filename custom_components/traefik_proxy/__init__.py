@@ -280,8 +280,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     if entry.minor_version < 3:
         new_data, dropped_url_credentials = _migrated_entry_data(entry.data)
         if dropped_url_credentials:
-            # Names the entry only, never a credential. aiohttp refused such
-            # URLs, so the entry did not work before either.
+            # Names the entry only, never a credential. A token next to URL
+            # credentials was refused by aiohttp; incomplete URL credentials
+            # (e.g. a username without a password, which aiohttp sent as
+            # basic auth with an empty password) cannot be mapped to basic auth.
             _LOGGER.warning(
                 "Traefik entry %s (%s): removed the credentials from its URL; "
                 "if Traefik answers 401, re-authentication asks for them",
