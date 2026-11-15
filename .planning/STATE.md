@@ -22,12 +22,12 @@ milestone_name: milestone
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-05)
+See: .planning/PROJECT.md (updated 2026-11-15)
 
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 06 — Certificates
+**Current focus:** Phase 07 — Config flow, HA 2026.12 compatibility, observability
 
 ## Current Position
 
@@ -36,7 +36,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-11-15 — Phase 06 complete, transitioned to Phase 07
 
-Progress: [████████░░] 75% (3 of 8 phases)
+Progress: [████████░░] 75% (6 of 8 phases)
 
 ## Performance Metrics
 
@@ -208,11 +208,14 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 3 is strongly flagged in `research/SUMMARY.md` for a `gsd-spike`
-  before planning: TLS handshake has subtle edge cases (SNI, multi-cert
-  chains, wildcard certs, IPv6). Spike should validate 3+ real Traefik
-  deployments and confirm format-string loop covers observed `notAfter`
-  shapes.
+- [Phase 6 → 7] The WR-02 review fix reads the private HA attribute
+  `DataUpdateCoordinator._shutdown_requested` (works on 2026.3 and 2026.10,
+  covered by tests); re-check it when Phase 7 raises the minimum HA to 2026.11.
+- [Phase 6 → 8] User-visible certificate changes for the CHANGELOG: single-label
+  wildcard matching (`san_mismatch` for `a.b.example.com` vs `*.example.com`),
+  uncovered hosts (default certificate) report `not_found` in probe mode too,
+  cert entities/aggregate stay unavailable until the first background cert
+  cycle finishes, a failed cert cycle logs one ERROR. Review IN-01..IN-04 open.
 
 - `requirementS.md` footer says `46 total` but the traceability table
   contains 49 rows (CFG:6 + API:6 + COORD:4 + ROUTER:4 + ENTRY:3 +

@@ -46,6 +46,18 @@ and which TLS certificates are expiring soon.
       to trigger a hot reload after route changes. _(Validated in Phase 2 —
       `traefik.reload_routers` registered at module level.)_
 
+- [x] **TLS-01**: For every router terminating TLS, the integration exposes
+      a sensor with the certificate's `notAfter` date and a calculated
+      "days until expiry" attribute. _(Validated in Phase 3; refined in
+      Phase 6 by CERT-01/05 — `/api/certificates` on Traefik ≥ 3.7, threadless
+      probe otherwise, live `days_until_expiry`.)_
+- [x] **TLS-02**: The integration creates a dedicated `binary_sensor` per
+      certificate that turns `on` when the certificate is within a
+      user-configurable expiry threshold (default: 14 days). _(Validated in
+      Phase 3; refined in Phase 6 by CERT-05 — on with a `reason` for
+      expiring / expired / probe_failed / not_found, plus the
+      `certificates_problem` aggregate.)_
+
 ### Active
 
 <!-- Current scope. Building toward these. Hypotheses until shipped. -->
@@ -58,12 +70,6 @@ and which TLS certificates are expiring soon.
 - [ ] **CORE-03**: The integration connects to the Traefik API over HTTP using
       the `/api/entrypoints`, `/api/http/routers`, `/api/http/services`, and
       `/api/http/middlewares` endpoints.
-- [ ] **TLS-01**: For every router terminating TLS, the integration exposes
-      a sensor with the certificate's `notAfter` date and a calculated
-      "days until expiry" attribute.
-- [ ] **TLS-02**: The integration creates a dedicated `binary_sensor` per
-      certificate that turns `on` when the certificate is within a
-      user-configurable expiry threshold (default: 14 days).
 - [ ] **CFG-01**: User can override the API base URL, TLS verification, scan
       interval, and certificate warning threshold from integration options.
 - [ ] **DOCS-01**: A `README.md` documents install via HACS and manual,
@@ -135,6 +141,7 @@ read-only access to operational state and one mutate endpoint
 | Config flow + YAML | Config flow is the modern HA path, YAML still needed for power users | — Pending |
 | Per-router / per-cert entities | Maps cleanly to HA entity model; users can build dashboards on top | — Pending |
 | `aiohttp` over `requests` | Async, matches HA Core's loop, no thread-pool | — Pending |
+| Certificate not covering its host = problem (`not_found`) in both sources | Traefik serves its ~1-year default certificate to uncovered hosts; reporting it as healthy would hide the failure (D-03/R-1, review CR-01) | ✓ Phase 6 |
 
 ## Evolution
 
@@ -154,4 +161,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 2 completion — 6 v1 requirements validated (CORE-04/05/06, DIAG-01/02/03), 8 remain in Active.*
+*Last updated: 2026-11-15 after Phase 6 completion — TLS-01/02 validated (refined by CERT-01..05); certificate source is `/api/certificates` (Traefik ≥ 3.7) or a threadless SNI probe.*
