@@ -13,8 +13,9 @@ Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
   TLS handshake to the Traefik host of the entry URL, on the TLS entrypoint
   port of the host's routers, with the router host as SNI name, at most
   ``TLS_SEMAPHORE`` handshakes at a time. The Traefik host is resolved
-  once per cycle and every probe connects to that address; when the lookup
-  fails, every host gets that failure and no connection is opened. Router
+  once per cycle; every probe tries its addresses in resolver order until
+  one connects, as a connection to the name would. When the lookup fails,
+  every host gets that failure and no connection is opened. Router
   hostnames are never resolved through DNS. The presented chain is verified against Home
   Assistant's own trust anchors (read from memory, never from disk). A
   presented certificate that does not cover the host (Traefik's default
@@ -79,6 +80,9 @@ if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# Probe failures after which the next address of the Traefik host is tried.
+_CONNECT_FAILURES: Final = frozenset({ProbeError.REFUSED, ProbeError.TIMEOUT, ProbeError.OSERROR})
 
 # Port probed when no TLS entrypoint port of a host's routers resolves.
 DEFAULT_PROBE_PORT: Final = 443
@@ -373,12 +377,13 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             raise UpdateFailed(translation_domain=DOMAIN, translation_key="no_probe_host")
         return host
 
-    async def _async_resolve_connect_host(self, host: str) -> str | ProbeFailure:
-        """Return the address every probe of this cycle connects to, or the lookup failure.
+    async def _async_resolve_connect_addresses(self, host: str) -> list[str] | ProbeFailure:
+        """Return the addresses the probes of this cycle connect to, or the lookup failure.
 
-        An IP literal is returned unchanged. A name is resolved once through
-        the event loop's resolver, bounded by the handshake timeout, and the
-        first address is used. The result is never cached: the next cycle
+        An IP literal is the only address. A name is resolved once through
+        the event loop's resolver, bounded by the handshake timeout; its
+        addresses keep the resolver's order (RFC 6724, usually IPv6 first)
+        without duplicates. The result is never cached: the next cycle
         resolves again.
         """
         try:
@@ -386,7 +391,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         except ValueError:
             pass
         else:
-            return host
+            return [host]
         try:
             async with asyncio.timeout(self._timeout):
                 infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
@@ -398,7 +403,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             return ProbeFailure(ProbeError.OSERROR, f"{type(err).__name__}: {err}")
         if not infos:
             return ProbeFailure(ProbeError.DNS, "no address")
-        return str(infos[0][4][0])
+        return list(dict.fromkeys(str(info[4][0]) for info in infos))
 
     def _get_trust_store(self) -> Store | None:
         """Return the store probed chains are verified against.
@@ -445,16 +450,16 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         """
         if not hosts:
             return {}
-        connect_host = await self._async_resolve_connect_host(self._connect_host())
+        addresses = await self._async_resolve_connect_addresses(self._connect_host())
         ports = self._probe_ports(hosts, snapshot)
         results: Sequence[ProbeResult]
-        if isinstance(connect_host, ProbeFailure):
-            _LOGGER.debug("Resolving the Traefik host for the certificate probes failed: %s", connect_host.detail)
-            results = [connect_host] * len(hosts)
+        if isinstance(addresses, ProbeFailure):
+            _LOGGER.debug("Resolving the Traefik host for the certificate probes failed: %s", addresses.detail)
+            results = [addresses] * len(hosts)
         else:
             trust_store = self._get_trust_store()
             results = await asyncio.gather(
-                *(self._async_probe_host(host, ports[host], connect_host, trust_store, now) for host in hosts)
+                *(self._async_probe_host(host, ports[host], addresses, trust_store, now) for host in hosts)
             )
         # Only hosts of this cycle's host set are kept; history comes from the last data.
         previous = self.data or {}
@@ -464,18 +469,35 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         }
 
     async def _async_probe_host(
-        self, host: str, port: int, connect_host: str, trust_store: Store | None, now: datetime
+        self, host: str, port: int, addresses: list[str], trust_store: Store | None, now: datetime
     ) -> ProbeResult:
-        """Probe ``host`` (as SNI) at ``connect_host:port`` under the semaphore."""
+        """Probe ``host`` (as SNI) on ``port`` of the Traefik host under the semaphore.
+
+        The ``addresses`` are tried in order until one connects: a refused,
+        timed-out or other socket failure moves on to the next address, and
+        the last failure is the result when none connects. Any other result
+        ends the probe. An address that connects after an earlier one failed
+        moves to the front of the cycle's shared ``addresses``, so the later
+        probes try it first.
+        """
         async with self._sem:
-            return await async_probe_certificate(
-                connect_host,
-                port,
-                host,
-                handshake_timeout=self._timeout,
-                trust_store=trust_store,
-                now=now,
-            )
+            result: ProbeResult = ProbeFailure(ProbeError.DNS, "no address")
+            for address in tuple(addresses):
+                result = await async_probe_certificate(
+                    address,
+                    port,
+                    host,
+                    handshake_timeout=self._timeout,
+                    trust_store=trust_store,
+                    now=now,
+                )
+                if isinstance(result, ProbeFailure) and result.error in _CONNECT_FAILURES:
+                    continue
+                if address != addresses[0]:
+                    addresses.remove(address)
+                    addresses.insert(0, address)
+                return result
+            return result
 
     @staticmethod
     def _probe_state(

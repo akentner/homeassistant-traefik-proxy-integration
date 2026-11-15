@@ -537,6 +537,98 @@ async def test_probe_cycle_resolve_without_address_is_dns(monkeypatch: pytest.Mo
     assert data["a.example.com"].error == ProbeError.DNS.value
 
 
+V6_ADDRESS = "2001:db8::80"
+V4_ADDRESS = "192.0.2.80"
+
+
+def _two_address_resolver(monkeypatch: pytest.MonkeyPatch, *addresses: str) -> list[str]:
+    """Answer every lookup with ``addresses`` in order (IPv6 first, as RFC 6724 sorts); return the looked-up names."""
+    calls: list[str] = []
+
+    async def _getaddrinfo(host: str, port: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        calls.append(host)
+        infos: list[tuple[Any, ...]] = []
+        for address in addresses:
+            if ":" in address:
+                infos.append((socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 0, 0, 0)))
+            else:
+                infos.append((socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, 0)))
+        return infos
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", _getaddrinfo)
+    return calls
+
+
+def _per_address_probe(failures: dict[str, ProbeFailure]) -> AsyncMock:
+    """Fail on the addresses in ``failures``; succeed with the SNI host's certificate elsewhere."""
+    return AsyncMock(side_effect=lambda connect, _port, sni, **_kw: failures.get(connect) or _probed(sni))
+
+
+async def test_probe_falls_back_to_the_next_resolved_address(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An IPv6-first name whose Traefik listens on IPv4 only: the refused IPv6 address falls back to IPv4.
+
+    The address that connected is tried first by the later probes of the
+    cycle; the next cycle resolves again and starts in resolver order.
+    """
+    hosts = ("a.example.com", "b.example.com", "c.example.com")
+    calls = _two_address_resolver(monkeypatch, V6_ADDRESS, V4_ADDRESS)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts(*hosts))
+    probe = _per_address_probe({V6_ADDRESS: ProbeFailure(ProbeError.REFUSED, "ConnectionRefusedError")})
+
+    for cycle in (1, 2):
+        probe.reset_mock()
+        data = await _cycle(c, probe)
+        assert calls == [CONNECT_HOST] * cycle
+        assert all(state.error is None and state.certificate is not None for state in data.values())
+        assert [call.args for call in probe.await_args_list] == [
+            (V6_ADDRESS, 443, "a.example.com"),
+            (V4_ADDRESS, 443, "a.example.com"),
+            (V4_ADDRESS, 443, "b.example.com"),
+            (V4_ADDRESS, 443, "c.example.com"),
+        ]
+
+
+@pytest.mark.parametrize("error", [ProbeError.REFUSED, ProbeError.TIMEOUT, ProbeError.OSERROR])
+async def test_probe_tries_every_address_and_reports_the_last_failure(
+    monkeypatch: pytest.MonkeyPatch, error: ProbeError
+) -> None:
+    """When no address connects, every address is tried per host and the last failure is the result."""
+    _two_address_resolver(monkeypatch, V6_ADDRESS, V4_ADDRESS)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probe = _per_address_probe(
+        {V6_ADDRESS: ProbeFailure(error, "first"), V4_ADDRESS: ProbeFailure(ProbeError.TIMEOUT, "last")}
+    )
+
+    data = await _cycle(c, probe)
+
+    assert [call.args[0] for call in probe.await_args_list] == [V6_ADDRESS, V4_ADDRESS]
+    assert data["a.example.com"].error == ProbeError.TIMEOUT.value
+
+
+async def test_probe_does_not_fall_back_after_a_tls_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failure after the connection (here a TLS error) is the host's result; no other address is tried."""
+    _two_address_resolver(monkeypatch, V6_ADDRESS, V4_ADDRESS)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probe = _per_address_probe({V6_ADDRESS: ProbeFailure(ProbeError.SSL, "SSLError")})
+
+    data = await _cycle(c, probe)
+
+    assert [call.args[0] for call in probe.await_args_list] == [V6_ADDRESS]
+    assert data["a.example.com"].error == ProbeError.SSL.value
+
+
+async def test_probe_tries_a_duplicate_address_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Duplicate resolver answers are de-duplicated in order."""
+    _two_address_resolver(monkeypatch, V4_ADDRESS, V4_ADDRESS)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probe = _per_address_probe({V4_ADDRESS: ProbeFailure(ProbeError.REFUSED, "ConnectionRefusedError")})
+
+    data = await _cycle(c, probe)
+
+    assert [call.args[0] for call in probe.await_args_list] == [V4_ADDRESS]
+    assert data["a.example.com"].error == ProbeError.REFUSED.value
+
+
 async def test_certificates_invalid_url_error_chains_no_cause() -> None:
     """An invalid-URL error (aiohttp's text may carry userinfo) is not chained to ``certificates_failed``."""
     error = TraefikProxyInvalidUrlError("/api/certificates", "InvalidUrlClientError")

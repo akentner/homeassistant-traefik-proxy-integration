@@ -142,8 +142,9 @@ Every release tag gets an entry, also when it has no user-visible change.
 - Probes (Traefik before 3.7) connect to the Traefik host of the integration
   URL with the router host as SNI name, on the TLS entrypoint port of the
   host's routers, so routers on ports other than 443 work. The Traefik host is
-  resolved once per cycle; router host names are never resolved through DNS.
-  No worker threads are used.
+  resolved once per cycle and its addresses are tried in order until one
+  connects (an IPv6-first name with Traefik on IPv4 only still works); router
+  host names are never resolved through DNS. No worker threads are used.
 - Certificate hosts are collected from every host of multi-host rules
   (``Host(`a`, `b`)`` and `||` rules) and the TLS domains. `HostRegexp`,
   `HostSNI`, `HostHeader`, wildcard, template and negated names are skipped;
