@@ -408,7 +408,7 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 2/7 plans executed in 6 waves
+**Plans**: 3/7 plans executed in 6 waves
 
 Plans:
 **Wave 1**
@@ -416,7 +416,7 @@ Plans:
 - [x] 06-02-PLAN.md — `/api/certificates` client + `TraefikCertificate` model + strict parser; test stubs serve the endpoint (clock-rebased v3.7 capture, v2.11 404); fixed capture dates only under frozen time (CERT-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 06-03-PLAN.md — Threadless CERT_NONE probe (`asyncio.open_connection`, SNI, DER via cryptography), offline `verified`, closed error set, single-label wildcard + API host mapping (CERT-02, CERT-04)
+- [x] 06-03-PLAN.md — Threadless CERT_NONE probe (`asyncio.open_connection`, SNI, DER via cryptography), offline `verified`, closed error set, single-label wildcard + API host mapping (CERT-02, CERT-04)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [ ] 06-04-PLAN.md — Atomic switch: per-host `HostCertState` from the threadless probe (connect host = Traefik host, SNI = router host), problem-on instead of unavailable with `reason`/`verified`/`source`, failure history, live days (CERT-02, CERT-05)
@@ -539,7 +539,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
-| 6. Certificates | 2/7 | In Progress | - |
+| 6. Certificates | 3/7 | In Progress | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 

@@ -265,7 +265,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       `Host()` and v3 `||` rules and skips regex and wildcard hosts; at most 200
       hosts are probed; no module-level cache grows without bound. (A-12, P-07,
       P-08, S-07)
-- [ ] **CERT-04**: Wildcard SAN matching accepts exactly one label
+- [x] **CERT-04**: Wildcard SAN matching accepts exactly one label
       (RFC 6125 §6.4.3). (S-04)
 - [ ] **CERT-05**: `days_left` is computed from `not_after` at read time; an
       expired or repeatedly unprobeable certificate turns `certificate_expiring`
@@ -459,7 +459,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CERT-01 | Phase 6 | Pending |
 | CERT-02 | Phase 6 | Pending |
 | CERT-03 | Phase 6 | Pending |
-| CERT-04 | Phase 6 | Pending |
+| CERT-04 | Phase 6 | Complete |
 | CERT-05 | Phase 6 | Pending |
 | FLOW-01 | Phase 7 | Pending |
 | FLOW-02 | Phase 7 | Pending |

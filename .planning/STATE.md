@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
 status: executing
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-11-15T08:11:50.785Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-11-15T08:30:18.113Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 06 execution started
-state_head: 7f5552d21d104f0b9dd6ea0203ec2f6b2046a445
+state_head: 1a9624660fd1c8cf6dfef2f57963281d024fecba
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 30
+  completed_plans: 31
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 06 (Certificates) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 06 execution started
 
@@ -95,6 +95,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 05 P08 | 8min | 3 tasks | 6 files |
 | Phase 06 P01 | 10min | 2 tasks | 5 files |
 | Phase 06 P02 | 5 min | 2 tasks | 5 files |
+| Phase 06 P03 | 16min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -176,6 +177,10 @@ Recent decisions affecting current work:
 - [Phase 06]: TraefikCertificate.status is str | None so probe-read certificates (06-03) share the model
 - [Phase 06]: Default v3.7 test stub serves /api/certificates re-based on the clock (notAfter now+3650d); fixed capture dates only via frozen_v37_certificates(freezer)
 - [Phase 06]: parse_certificates rejects timezone-less or unparsable notAfter/notBefore as payload errors (no guessed expiry)
+- [Phase 06]: 06-03: probe returns models.TraefikCertificate inside ProbedCertificate; san_mismatch uses SANs + CN; verified = offline cryptography verification at the given now
+- [Phase 06]: 06-03: _close_writer aborts the transport on any wait_closed exception and on CancelledError (never-raises contract, no open socket)
+- [Phase 06]: 06-03: wildcards cover exactly one label; IP-literal hosts only match by equality; ASCII lowercase + one trailing dot, no Unicode normalization
+- [Phase 06]: 06-03: conftest warms cryptography's cached datetime class before any freezer test (order-dependent TypeError otherwise)
 
 ### Pending Todos
 
@@ -217,7 +222,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T08:11:50.662Z
-Stopped at: Completed 06-02-PLAN.md
+Last session: 2026-11-15T08:30:17.978Z
+Stopped at: Completed 06-03-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
