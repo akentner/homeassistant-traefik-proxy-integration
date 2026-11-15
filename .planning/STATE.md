@@ -1,19 +1,20 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 06
-current_phase_name: Certificates
-status: verifying
-stopped_at: Completed 06-07-PLAN.md
-last_updated: "2026-11-15T09:19:24.968Z"
+current_phase: 07
+current_phase_name: Config flow, HA 2026.12 compatibility, observability
+status: planning
+stopped_at: Phase 06 complete, ready to plan Phase 07
+last_updated: "2026-11-15T09:51:12.217Z"
 last_activity: 2026-11-15
-last_activity_desc: Phase 06 execution started
-state_head: 626dbe54295aedddaec500b7305e7214beb600a4
+last_activity_desc: Phase 06 complete, transitioned to Phase 07
+state_head: 1270ba9c8227a4b166c68ee459648a1479bd6ed4
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 35
   completed_plans: 35
+  percent: 75
 milestone_name: milestone
 ---
 
@@ -30,18 +31,18 @@ failing, and which TLS certificates are expiring soon.
 
 ## Current Position
 
-Phase: 06 (Certificates) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-11-15 — Phase 06 execution started
+Phase: 07 — Config flow, HA 2026.12 compatibility, observability
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-11-15 — Phase 06 complete, transitioned to Phase 07
 
-Progress: [██████░░░░] 63% (3 of 8 phases)
+Progress: [████████░░] 75% (3 of 8 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 26
+- Total plans completed: 33
 - Average duration: 13m
 - Total execution time: 1.7 hours
 
@@ -55,6 +56,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | 4. Data layer (correct + lean) | 0 | — | — |
 | 04 | 9 | - | - |
 | 05 | 8 | - | - |
+| 06 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -241,6 +243,6 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-11-15T09:19:24.831Z
-Stopped at: Completed 06-07-PLAN.md
+Stopped at: Phase 06 complete, ready to plan Phase 07
 Resume file: None
 Next: /gsd-plan-phase 6

@@ -39,7 +39,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Entity model + lifecycle** — entity manager (add / missing / 24 h (completed 2026-11-15)
       grace / re-add), main device + sub-devices, router/service ENUM sensors,
       problem aggregates on by default, "Refresh now" button, translations + icons
-- [ ] **Phase 6: Certificates** — `/api/certificates` on Traefik ≥ 3.7, async
+- [x] **Phase 6: Certificates** — `/api/certificates` on Traefik ≥ 3.7, async (completed 2026-11-15)
       threadless probe (CERT_NONE + DER parse) via the Traefik host with SNI,
       `rules.py`, live `days_left`, problem-on instead of unavailable
 - [ ] **Phase 7: Config flow, HA 2026.12 compatibility, observability** — auth
@@ -408,7 +408,7 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 7/7 plans executed in 6 waves
+**Plans**: 7/7 plans complete in 6 waves
 
 Plans:
 **Wave 1**
@@ -539,7 +539,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
-| 6. Certificates | 7/7 | In Progress | - |
+| 6. Certificates | 7/7 | Complete    | 2026-11-15 |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
