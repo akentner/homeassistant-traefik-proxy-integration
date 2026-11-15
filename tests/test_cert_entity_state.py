@@ -55,6 +55,7 @@ from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
 from tests.conftest import (
     CERT_FIXTURE_NOW,
+    MOCK_TRAEFIK_ADDRESS,
     MOCK_URL,
     entity_id_for,
     frozen_v37_certificates,
@@ -70,8 +71,6 @@ VERSION = "v2.11"
 # TLS hosts of the capture (tls.domains and Host(...) rules).
 HOST = "secure.example.com"
 OTHER_HOST = "www.secure.example.com"
-CONNECT_HOST = "traefik.example.com"
-
 # Fixed reference instant so not_after values are deterministic.
 REFERENCE = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
 PROBE_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate"
@@ -481,10 +480,10 @@ async def test_cert_entities_on_certificates_sub_device(
 async def test_probe_driven_setup_publishes_probe_state(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
 ) -> None:
-    """Each cert cycle probes both hosts at the Traefik host; the entities show the probed certificate."""
+    """Each cert cycle probes both hosts at the resolved Traefik host; the entities show the probed certificate."""
     entry = await _setup(hass, aioclient_mock)
     assert cert_probe_ok.await_count == 2
-    expected_calls = {(CONNECT_HOST, 443, HOST), (CONNECT_HOST, 443, OTHER_HOST)}
+    expected_calls = {(MOCK_TRAEFIK_ADDRESS, 443, HOST), (MOCK_TRAEFIK_ADDRESS, 443, OTHER_HOST)}
     assert {call.args for call in cert_probe_ok.await_args_list} == expected_calls
     for call in cert_probe_ok.await_args_list:
         assert call.kwargs["handshake_timeout"] == TLS_HANDSHAKE_TIMEOUT

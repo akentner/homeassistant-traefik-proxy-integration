@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+import socket
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -39,6 +40,7 @@ from custom_components.traefik_proxy.api import (
     TraefikProxyApiError,
     TraefikProxyAuthError,
     TraefikProxyConnectionError,
+    TraefikProxyInvalidUrlError,
     TraefikProxyNotFoundError,
     TraefikProxyPayloadError,
 )
@@ -65,6 +67,7 @@ from custom_components.traefik_proxy.models import TraefikCertificate, parse_cer
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
 from tests.certgen import make_ca, make_intermediate, make_leaf, make_self_signed, write_pem
 from tests.conftest import (
+    MOCK_TRAEFIK_ADDRESS,
     TlsServerStarter,
     entity_id_for,
     frozen_v37_certificates,
@@ -324,7 +327,7 @@ def test_config_entry_wired_via_super_init() -> None:
 
 
 async def test_probe_connects_to_traefik_host_with_router_host_as_sni(freezer: Any) -> None:
-    """One probe per host: connect host = entry URL host, port 443, SNI = router host."""
+    """One probe per host: connect host = resolved entry URL host, port 443, SNI = router host."""
     freezer.move_to(NOW)
     c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", "b.example.com"))
     probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
@@ -334,8 +337,8 @@ async def test_probe_connects_to_traefik_host_with_router_host_as_sni(freezer: A
 
     assert probe.await_count == 2
     assert [call.args for call in probe.await_args_list] == [
-        (CONNECT_HOST, 443, "a.example.com"),
-        (CONNECT_HOST, 443, "b.example.com"),
+        (MOCK_TRAEFIK_ADDRESS, 443, "a.example.com"),
+        (MOCK_TRAEFIK_ADDRESS, 443, "b.example.com"),
     ]
     for call in probe.await_args_list:
         assert call.kwargs["handshake_timeout"] == TLS_HANDSHAKE_TIMEOUT
@@ -401,6 +404,142 @@ async def test_entry_url_without_host_fails_the_cycle() -> None:
             await c._async_update_data()
     probe.assert_not_awaited()
     assert excinfo.value.translation_key == "no_probe_host"
+
+
+RESOLVED_ADDRESS = "192.0.2.53"
+
+
+def _spy_resolver(monkeypatch: pytest.MonkeyPatch, *, error: BaseException | None = None) -> list[str]:
+    """Replace the running loop's ``getaddrinfo``; return the list of resolved names.
+
+    Every call is recorded; it raises ``error`` when given, else answers
+    ``RESOLVED_ADDRESS``.
+    """
+    calls: list[str] = []
+
+    async def _getaddrinfo(host: str, port: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        calls.append(host)
+        if error is not None:
+            raise error
+        return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (RESOLVED_ADDRESS, port or 0))]
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", _getaddrinfo)
+    return calls
+
+
+async def test_probe_cycle_resolves_traefik_host_once_per_cycle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three router hosts: one getaddrinfo call per cycle; every probe gets the address, SNI stays the router host."""
+    hosts = ("a.example.com", "b.example.com", "c.example.com")
+    calls = _spy_resolver(monkeypatch)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts(*hosts))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+
+    await _cycle(c, probe)
+    assert calls == [CONNECT_HOST]
+    await _cycle(c, probe)
+    assert calls == [CONNECT_HOST, CONNECT_HOST]
+
+    assert [call.args for call in probe.await_args_list] == [(RESOLVED_ADDRESS, 443, host) for host in hosts] * 2
+
+
+@pytest.mark.parametrize(
+    ("url", "literal"),
+    [("https://192.0.2.10:8080", "192.0.2.10"), ("https://[2001:db8::1]:8080", "2001:db8::1")],
+    ids=["ipv4", "ipv6"],
+)
+async def test_probe_cycle_ip_literal_skips_getaddrinfo(
+    monkeypatch: pytest.MonkeyPatch, url: str, literal: str
+) -> None:
+    """An IP-literal entry URL host is passed to every probe unchanged; nothing is resolved."""
+    calls = _spy_resolver(monkeypatch)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", "b.example.com", url=url))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+
+    await _cycle(c, probe)
+
+    assert calls == []
+    assert [call.args for call in probe.await_args_list] == [
+        (literal, 443, "a.example.com"),
+        (literal, 443, "b.example.com"),
+    ]
+
+
+async def test_probe_cycle_resolve_failure_is_dns_for_every_host_without_connecting(
+    monkeypatch: pytest.MonkeyPatch, freezer: Any
+) -> None:
+    """``socket.gaierror``: no probe runs, every host keeps its certificate and counts a dns failure; no caching."""
+    freezer.move_to(NOW)
+    hosts = ("a.example.com", "b.example.com")
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts(*hosts))
+    ok_probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+    _spy_resolver(monkeypatch)
+    first = await _cycle(c, ok_probe)
+
+    calls = _spy_resolver(monkeypatch, error=socket.gaierror(-2, "Name or service not known (test stub)"))
+    failing_probe = AsyncMock(return_value=_probed("unused"))
+    for failures in range(1, CERT_FAILURES_FOR_PROBLEM + 1):
+        data = await _cycle(c, failing_probe)
+        assert calls == [CONNECT_HOST] * failures
+        for host in hosts:
+            state = data[host]
+            assert state.error == ProbeError.DNS.value
+            assert state.failures == failures
+            assert state.certificate == first[host].certificate
+            assert state.fetched_at == NOW
+    failing_probe.assert_not_awaited()
+    assert all(state.problem(DEFAULT_TLS_WARN_DAYS, NOW) is CertProblem.PROBE_FAILED for state in data.values())
+
+    # The next cycle resolves again and recovers.
+    recovered_calls = _spy_resolver(monkeypatch)
+    data = await _cycle(c, ok_probe)
+    assert recovered_calls == [CONNECT_HOST]
+    assert all(state.error is None and state.failures == 0 for state in data.values())
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (socket.gaierror(-2, "Name or service not known"), ProbeError.DNS),
+        (TimeoutError(), ProbeError.TIMEOUT),
+        (OSError(101, "Network is unreachable"), ProbeError.OSERROR),
+    ],
+    ids=["gaierror", "timeout", "oserror"],
+)
+async def test_probe_cycle_resolve_error_maps_to_probe_error(
+    monkeypatch: pytest.MonkeyPatch, error: BaseException, expected: ProbeError
+) -> None:
+    """A failed resolution becomes the matching probe failure of every host; no probe connects."""
+    calls = _spy_resolver(monkeypatch, error=error)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", "b.example.com"))
+    probe = AsyncMock(return_value=_probed("unused"))
+
+    data = await _cycle(c, probe)
+
+    assert calls == [CONNECT_HOST]
+    probe.assert_not_awaited()
+    assert {state.error for state in data.values()} == {expected.value}
+    assert {state.failures for state in data.values()} == {1}
+
+
+async def test_certificates_invalid_url_error_chains_no_cause() -> None:
+    """An invalid-URL error (aiohttp's text may carry userinfo) is not chained to ``certificates_failed``."""
+    error = TraefikProxyInvalidUrlError("/api/certificates", "InvalidUrlClientError")
+    error.__cause__ = ValueError("https://user:secret@traefik.example.com")
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=error))
+    with pytest.raises(UpdateFailed) as excinfo:
+        await c._async_update_data()
+    assert excinfo.value.translation_key == "certificates_failed"
+    assert excinfo.value.__cause__ is None
+
+
+async def test_certificates_api_error_is_the_chained_cause() -> None:
+    """Any other API error stays the cause of ``certificates_failed``, as in the main coordinator."""
+    error = TraefikProxyApiError("/api/certificates", "HTTP 500", status=500)
+    c = CertCoordinator(MagicMock(), _api_entry(*API_HOSTS, certificates=error))
+    with pytest.raises(UpdateFailed) as excinfo:
+        await c._async_update_data()
+    assert excinfo.value.translation_key == "certificates_failed"
+    assert excinfo.value.__cause__ is error
 
 
 async def test_trust_store_reaches_the_probe() -> None:
@@ -731,8 +870,8 @@ async def test_probe_ports_host_of_several_routers_probed_once(freezer: Any) -> 
         data = await c._async_update_data()
 
     assert sorted(call.args for call in probe.await_args_list) == [
-        (CONNECT_HOST, 443, "h.example.com"),
-        (CONNECT_HOST, 9443, "other.example.com"),
+        (MOCK_TRAEFIK_ADDRESS, 443, "h.example.com"),
+        (MOCK_TRAEFIK_ADDRESS, 9443, "other.example.com"),
     ]
     assert data["h.example.com"].port == 443
     assert data["other.example.com"].port == 9443
@@ -1362,7 +1501,7 @@ async def test_full_setup_registers_cert_entities_for_alt_host(
     entry = await setup_traefik_entry(hass, aioclient_mock, version="v2.11", rawdata=rawdata)
 
     probed = {call.args[2] for call in mock_tls_probe.call_args_list}
-    assert {call.args[0] for call in mock_tls_probe.call_args_list} == {CONNECT_HOST}
+    assert {call.args[0] for call in mock_tls_probe.call_args_list} == {MOCK_TRAEFIK_ADDRESS}
     assert "alt.example.com" in probed
     entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, "alt.example.com"))
     entity_id_for(hass, CERT_EXPIRING.domain, CERT_EXPIRING.unique_id(entry.entry_id, "alt.example.com"))

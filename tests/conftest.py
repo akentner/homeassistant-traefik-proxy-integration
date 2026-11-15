@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import copy
 import json
+import socket
 import ssl
 import sys
 import threading
@@ -51,6 +52,8 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Base URL of the Traefik API in config entries built by the tests.
 MOCK_URL = "https://traefik.example.com:8080"
+# Address the test resolver (``traefik_test_dns``) returns for the host of MOCK_URL (TEST-NET-1).
+MOCK_TRAEFIK_ADDRESS = "192.0.2.80"
 
 # Real Traefik captures (tests/traefik/capture.py), one directory per generation.
 FIXTURE_VERSIONS = ("v2.11", "v3.7")
@@ -279,6 +282,28 @@ def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str:
     entity_id = er.async_get(hass).async_get_entity_id(domain, DOMAIN, unique_id)
     assert entity_id is not None, f"no {domain} entity with unique_id {unique_id}"
     return entity_id
+
+
+@pytest.fixture(autouse=True)
+def traefik_test_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Resolve the host of ``MOCK_URL`` to ``MOCK_TRAEFIK_ADDRESS`` in every event loop.
+
+    The Home Assistant test plugin disables DNS, and a probe-mode cert cycle
+    resolves the Traefik host of the entry URL once per cycle. Any other
+    name goes to the loop's own resolver. A test that patches ``getaddrinfo``
+    on the running loop instance overrides this class-level stub.
+    """
+    real_getaddrinfo = asyncio.base_events.BaseEventLoop.getaddrinfo
+    mock_host = MOCK_URL.removeprefix("https://").partition(":")[0]
+
+    async def _getaddrinfo(
+        loop: asyncio.base_events.BaseEventLoop, host: Any, port: Any, **kwargs: Any
+    ) -> list[tuple[Any, ...]]:
+        if host == mock_host:
+            return [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (MOCK_TRAEFIK_ADDRESS, port or 0))]
+        return await real_getaddrinfo(loop, host, port, **kwargs)
+
+    monkeypatch.setattr(asyncio.base_events.BaseEventLoop, "getaddrinfo", _getaddrinfo)
 
 
 @pytest.fixture
