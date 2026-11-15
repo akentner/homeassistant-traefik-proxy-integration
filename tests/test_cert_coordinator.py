@@ -521,6 +521,22 @@ async def test_probe_cycle_resolve_error_maps_to_probe_error(
     assert {state.failures for state in data.values()} == {1}
 
 
+async def test_probe_cycle_resolve_without_address_is_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A resolver answer without any address is a dns failure of every host."""
+
+    async def _no_address(*_args: Any, **_kwargs: Any) -> list[tuple[Any, ...]]:
+        return []
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", _no_address)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probe = AsyncMock(return_value=_probed("unused"))
+
+    data = await _cycle(c, probe)
+
+    probe.assert_not_awaited()
+    assert data["a.example.com"].error == ProbeError.DNS.value
+
+
 async def test_certificates_invalid_url_error_chains_no_cause() -> None:
     """An invalid-URL error (aiohttp's text may carry userinfo) is not chained to ``certificates_failed``."""
     error = TraefikProxyInvalidUrlError("/api/certificates", "InvalidUrlClientError")

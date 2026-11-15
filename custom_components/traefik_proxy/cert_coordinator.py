@@ -12,8 +12,10 @@ Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
 - When Traefik answers 404 (older versions), each host is probed once: a
   TLS handshake to the Traefik host of the entry URL, on the TLS entrypoint
   port of the host's routers, with the router host as SNI name, at most
-  ``TLS_SEMAPHORE`` handshakes at a time. Router hostnames are never
-  resolved through DNS. The presented chain is verified against Home
+  ``TLS_SEMAPHORE`` handshakes at a time. The Traefik host is resolved
+  once per cycle and every probe connects to that address; when the lookup
+  fails, every host gets that failure and no connection is opened. Router
+  hostnames are never resolved through DNS. The presented chain is verified against Home
   Assistant's own trust anchors (read from memory, never from disk). A
   presented certificate that does not cover the host (Traefik's default
   certificate for a host it has none for) is reported as ``not_found`` too.
@@ -31,7 +33,9 @@ host's state.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import socket
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -58,9 +62,18 @@ from .const import (
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
+from .coordinator import _logged_cause
 from .models import Router, TraefikCertificate, TraefikSnapshot
 from .rules import extract_hosts, normalize_host
-from .tls import ProbedCertificate, ProbeResult, async_probe_certificate, build_trust_store, match_certificate
+from .tls import (
+    ProbedCertificate,
+    ProbeError,
+    ProbeFailure,
+    ProbeResult,
+    async_probe_certificate,
+    build_trust_store,
+    match_certificate,
+)
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
@@ -310,7 +323,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
                 translation_domain=DOMAIN,
                 translation_key="certificates_failed",
                 translation_placeholders={"path": err.path, "detail": err.detail},
-            ) from err
+            ) from _logged_cause(err)
         return self._api_states(hosts, certificates, now)
 
     @staticmethod
@@ -360,6 +373,33 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             raise UpdateFailed(translation_domain=DOMAIN, translation_key="no_probe_host")
         return host
 
+    async def _async_resolve_connect_host(self, host: str) -> str | ProbeFailure:
+        """Return the address every probe of this cycle connects to, or the lookup failure.
+
+        An IP literal is returned unchanged. A name is resolved once through
+        the event loop's resolver, bounded by the handshake timeout, and the
+        first address is used. The result is never cached: the next cycle
+        resolves again.
+        """
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            pass
+        else:
+            return host
+        try:
+            async with asyncio.timeout(self._timeout):
+                infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except socket.gaierror as err:
+            return ProbeFailure(ProbeError.DNS, f"{type(err).__name__}: {err}")
+        except TimeoutError as err:
+            return ProbeFailure(ProbeError.TIMEOUT, f"{type(err).__name__}: {err}")
+        except OSError as err:
+            return ProbeFailure(ProbeError.OSERROR, f"{type(err).__name__}: {err}")
+        if not infos:
+            return ProbeFailure(ProbeError.DNS, "no address")
+        return str(infos[0][4][0])
+
     def _get_trust_store(self) -> Store | None:
         """Return the store probed chains are verified against.
 
@@ -399,17 +439,23 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     ) -> dict[str, HostCertState]:
         """Probe every host once on its port and return their states in host order.
 
-        The dict is built only after every probe returned, so a cancelled
-        cycle leaves ``data`` untouched.
+        The Traefik host is resolved first; when that fails, its failure is
+        every host's probe result. The dict is built only after every probe
+        returned, so a cancelled cycle leaves ``data`` untouched.
         """
         if not hosts:
             return {}
-        connect_host = self._connect_host()
+        connect_host = await self._async_resolve_connect_host(self._connect_host())
         ports = self._probe_ports(hosts, snapshot)
-        trust_store = self._get_trust_store()
-        results = await asyncio.gather(
-            *(self._async_probe_host(host, ports[host], connect_host, trust_store, now) for host in hosts)
-        )
+        results: Sequence[ProbeResult]
+        if isinstance(connect_host, ProbeFailure):
+            _LOGGER.debug("Resolving the Traefik host for the certificate probes failed: %s", connect_host.detail)
+            results = [connect_host] * len(hosts)
+        else:
+            trust_store = self._get_trust_store()
+            results = await asyncio.gather(
+                *(self._async_probe_host(host, ports[host], connect_host, trust_store, now) for host in hosts)
+            )
         # Only hosts of this cycle's host set are kept; history comes from the last data.
         previous = self.data or {}
         return {
