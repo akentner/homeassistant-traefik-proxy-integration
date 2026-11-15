@@ -42,7 +42,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Certificates** — `/api/certificates` on Traefik ≥ 3.7, async (completed 2026-11-15)
       threadless probe (CERT_NONE + DER parse) via the Traefik host with SNI,
       `rules.py`, live `days_left`, problem-on instead of unavailable
-- [ ] **Phase 7: Config flow, HA 2026.11 baseline, observability** — auth
+- [x] **Phase 7: Config flow, HA 2026.11 baseline, observability** — auth (completed 2026-11-15)
       selector + entry migration, minimum HA 2026.11.0 + 2026.11 APIs, grace-period option, `OptionsFlowWithReload`, reauth/reconfigure
       helpers, `host:port` unique_id, diagnostics, repairs, en/de translations
 - [ ] **Phase 8: Marketplace + release readiness** — manifest categories, brand
@@ -485,7 +485,7 @@ the 2026.3 workarounds).
      listed in audit A-18 are removed; `translations/en.json` is the single
      source and `translations/de.json` covers every key in it (key-parity test);
      hassfest translation validation passes. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 9/9 plans executed in 8 waves (07-02 and 07-03 run in parallel)
+**Plans**: 9/9 plans complete in 8 waves (07-02 and 07-03 run in parallel)
 
 Plans:
 **Wave 1**
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
-| 7. Config flow, HA 2026.11 baseline, observability | 9/9 | In Progress | - |
+| 7. Config flow, HA 2026.11 baseline, observability | 9/9 | Complete    | 2026-11-15 |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
 **Coverage:**
