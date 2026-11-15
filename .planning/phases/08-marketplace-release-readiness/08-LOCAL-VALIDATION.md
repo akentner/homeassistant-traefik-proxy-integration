@@ -61,15 +61,22 @@ Offline sanity check: `uv run python scripts/hassfest_checks.py all` -> `hassfes
 | Exit status | not run |
 
 ```make
-INPUT_GITHUB_TOKEN="$(gh auth token)" docker run --rm --pull always \
+INPUT_GITHUB_TOKEN="$$HACS_ACTION_TOKEN" docker run --rm \
   -e INPUT_GITHUB_TOKEN -e INPUT_CATEGORY=integration -e REPOSITORY_REF=local-tree \
   -e INPUT_REPOSITORY=$(REPO) -e REPOSITORY=$(REPO) -e GITHUB_REPOSITORY=$(REPO) \
   -v "$(CURDIR)":/repo:ro -v <harness>:/harness:ro \
-  --entrypoint python3 ghcr.io/hacs/action:main /harness/hacs_action_local.py
+  --entrypoint python3 $(HACS_IMG) /harness/hacs_action_local.py
 ```
 
-The token is passed only by variable name (`-e INPUT_GITHUB_TOKEN`). It never
-appears in argv, in the recipe echo (`@`), in a log or in this file.
+**Token (changed by the 08 review fix CR-01):** the target no longer reads
+`gh auth token`. It needs `HACS_ACTION_TOKEN`, a fine-grained token with
+read-only access to public repositories, and exits 2 with a hint when the
+variable is unset. `HACS_IMG` is pinned by digest
+(`ghcr.io/hacs/action@sha256:187499a0…`, the `:main` digest listed above), so
+the token only reaches that exact image. The token is passed only by variable
+name (`-e INPUT_GITHUB_TOKEN`). It never appears in argv, in the recipe echo
+(`@`), in a log or in this file. The harness directory is removed by an `EXIT`
+trap, also when a step fails.
 
 ### Why blocked
 
@@ -81,8 +88,8 @@ container. The executor did not work around the denial. It did not use a dummy
 token, an unauthenticated client patch or another credential source. A dummy
 token would have produced failed GitHub API calls, not a real result.
 
-**To unblock:** the user runs `make hacs-action` once from the repository root,
-or allows this command for the agent. Expected output: the `LOCAL OVERLAY` lines,
+**To unblock:** the user exports `HACS_ACTION_TOKEN` (fine-grained, read-only,
+public repositories) and runs `make hacs-action` once from the repository root. Expected output: the `LOCAL OVERLAY` lines,
 then the result line for 10 checks with no failures and no categories warning.
 A report of only 5 checks is a failure (P2). The negative control below has to
 be repeated with the same token. 08-13 re-runs both validators before the push
@@ -167,7 +174,7 @@ order; each output was redirected to a log and the exit status checked directly.
 | 4 | `~/.cache/traefik-proxy-integration/ha2611-venv/bin/python -m pytest -q -o addopts="-p no:respx" tests` (HA 2026.11.0) | 0 | `1152 passed, 5 warnings` |
 | 5 | `uvx pre-commit run --all-files` | 0 | all 13 hooks `Passed` (incl. ruff, mypy --strict, hassfest key order, translations shape) |
 | 6 | `make hassfest` (`ghcr.io/home-assistant/hassfest@sha256:da6522993280166fe072704989a2b4c33e639e8ceb69c8ab6ad7ec5045c1a1e3`, same digest as 08-08) | 0 | `Integrations: 1` / `Invalid integrations: 0`; no `[ERROR]`, no `[WARNING]` |
-| 7 | `make hacs-action` | **not run** | **REL-07 pending — proven by the first PR run of validate.yml (HACS job).** User decision 2026-11-15: the target needs the user's `gh auth token`; agents never read or pass that credential. No result line exists locally. |
+| 7 | `make hacs-action` | **not run** | **REL-07 pending — proven by the first PR run of validate.yml (HACS job).** User decision 2026-11-15: the target needs a user credential (at that time `gh auth token`; since review fix CR-01 `HACS_ACTION_TOKEN`); agents never read or pass any credential. No result line exists locally. |
 | 8 | README consistency check (08-10 Task 1 verify: entity keys/names, states, option keys; private-host grep; reload/YAML grep) | 0 / 0 / 0 | `missing: []` |
 | 9 | Planning-reference grep over `custom_components/` (`*.py`, `*.json`; 08-03 Task 3) + `pytest tests/test_baseline_guards.py -k "planning_references or doc_links or syntax_warning or multi_second_sleep" --no-cov` | 0 / 0 | no match; `4 passed` |
 

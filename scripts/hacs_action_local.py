@@ -1,7 +1,8 @@
 """Run the official hacs/action validators against the LOCAL working tree.
 
-Runs only inside the ``ghcr.io/hacs/action:main`` image (``make hacs-action``);
-it imports HACS from ``/hacs`` and is never run on the host.
+Runs only inside the digest-pinned ``ghcr.io/hacs/action`` image (``HACS_IMG``
+in the Makefile, ``make hacs-action``); it imports HACS from ``/hacs`` and is
+never run on the host.
 
 The stock action never reads the checkout: it takes the file tree from the
 GitHub API and file contents from raw.githubusercontent.com at a ref. This
@@ -13,7 +14,8 @@ check. Everything else is the unmodified ``/hacs/action.py``.
 
 Repository metadata (description, topics, issues, license, archived) still
 comes from the live GitHub API for ``REPOSITORY``; the token is read by the
-action from ``INPUT_GITHUB_TOKEN`` and is never printed here.
+action from ``INPUT_GITHUB_TOKEN`` (set from ``HACS_ACTION_TOKEN``, a
+fine-grained read-only token for public repositories) and is never printed here.
 
 If the image no longer defines one of the patched methods, assigning it would
 silently create a new attribute and the run would validate GitHub's default

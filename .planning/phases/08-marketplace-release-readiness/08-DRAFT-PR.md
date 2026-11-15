@@ -130,7 +130,8 @@ Maintenance notes (no action needed for this PR):
 6. Manual follow-up (optional, deferred): run the hacs/action negative control
    locally (manifest category `computers_network.bogus` in a temporary copy ->
    failing `integration_categories` check) with `make hacs-action` yourself;
-   it needs your token and was not run by an agent.
+   it needs `HACS_ACTION_TOKEN` (a fine-grained, read-only token for public
+   repositories, not your `gh` login token) and was not run by an agent.
 
 ## Decision for the user
 
