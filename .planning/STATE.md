@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
 status: executing
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-11-15T09:00:08.293Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-11-15T09:11:26.603Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 06 execution started
-state_head: bfe1f11fc66abed5c5545ac3f66a693cc29f8016
+state_head: 87a0ad3926d777bf956a520a39583c766519d3a7
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 33
+  completed_plans: 34
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 06 (Certificates) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 06 execution started
 
@@ -98,6 +98,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 06 P03 | 16min | 3 tasks | 5 files |
 | Phase 06 P04 | 11min | 2 tasks | 10 files |
 | Phase 06 P05 | 14min | 3 tasks | 8 files |
+| Phase 06 P06 | 8min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -191,6 +192,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-05: Probe-mode trust store built once per coordinator from HA's client_context().get_ca_certs(binary_form=True); trust_store kwarg replaces it
 - [Phase 06]: 06-05: Probe port per host = 443 if any of its routers offers it, else the lowest TLS entrypoint port, else 443; one probe per host
 - [Phase 06]: 06-05: Blocking probe path deleted; suite gates pin tls.py definitions, forbid threads/executors/blocking connect/CA loading and module-level dicts
+- [Phase 06]: 06-06: One cert-coordinator day-boundary timer at the earliest floor-day change + 1 s, scheduled after each successful cycle, cancelled before reschedule and in async_shutdown
+- [Phase 06]: 06-06: Setup awaits cert_coordinator.async_refresh(); a failed first cert cycle stays failed (no empty fake success)
+- [Phase 06]: 06-06: After a failed cycle, async_add_kind adopts registry orphans without a stored missing time as present; stored times are kept
+- [Phase 06]: 06-06: Any failed cert cycle retries after CERT_RETRY_INTERVAL = 300 s (except Exception wrapper); success restores 6 h
 
 ### Pending Todos
 
@@ -232,7 +237,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T09:00:08.156Z
-Stopped at: Completed 06-05-PLAN.md
+Last session: 2026-11-15T09:11:26.447Z
+Stopped at: Completed 06-06-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

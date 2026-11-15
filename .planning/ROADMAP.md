@@ -408,7 +408,7 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 5/7 plans executed in 6 waves
+**Plans**: 6/7 plans executed in 6 waves
 
 Plans:
 **Wave 1**
@@ -425,7 +425,7 @@ Plans:
 - [x] 06-05-PLAN.md — API-first cert cycle (`/api/certificates`, `not_found`, 404 probe fallback), HA trust anchors, TLS entrypoint port per host, real-handshake end-to-end, cancellation/overlap safety; blocking probe path and throttle dict deleted with grep gates (CERT-01, CERT-02, CERT-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
-- [ ] 06-06-PLAN.md — Day-boundary timer (threshold/expiry/daily change without a probe); honest failed first cert cycle, restored hosts not stamped missing, 5-minute retry (CERT-05)
+- [x] 06-06-PLAN.md — Day-boundary timer (threshold/expiry/daily change without a probe); honest failed first cert cycle, restored hosts not stamped missing, 5-minute retry (CERT-05)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 - [ ] 06-07-PLAN.md — `certificates_problem` aggregate (enabled by default, hosts + reasons) and en/de `reason` texts (CERT-05)
@@ -539,7 +539,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
-| 6. Certificates | 5/7 | In Progress | - |
+| 6. Certificates | 6/7 | In Progress | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
