@@ -8,12 +8,17 @@ cert entity only listens to the main coordinator.
 
 The entry's entity manager adds each certificate host once, keeps a host
 that leaves the cert data registered (unavailable) for the grace period and
-the entities write their state only when it changed.
+the entities write their state only when it changed. A failed probe never
+makes a cert entity unavailable.
+
+Setups use the v2.11 capture (certificates come from the probe) with the
+clock frozen at ``REFERENCE``.
 """
 
 from __future__ import annotations
 
 import copy
+import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,26 +30,43 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.traefik_proxy.cert_coordinator import HostCertState
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
     DOMAIN,
+    TLS_HANDSHAKE_TIMEOUT,
 )
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY, ROUTERS
-from custom_components.traefik_proxy.tls import CertError, CertInfo
-from tests.conftest import MOCK_URL, entity_id_for, load_fixture, rawdata_copy, restub_traefik, stub_traefik
+from custom_components.traefik_proxy.models import TraefikCertificate
+from custom_components.traefik_proxy.tls import ProbedCertificate
+from tests.conftest import (
+    MOCK_URL,
+    entity_id_for,
+    load_fixture,
+    make_cert_state,
+    rawdata_copy,
+    restub_traefik,
+    stub_traefik,
+)
 
-# TLS hosts of the v3.7 capture (tls.domains and Host(...) rules).
+# The probe-driven capture: Traefik < 3.7 has no /api/certificates.
+VERSION = "v2.11"
+# TLS hosts of the capture (tls.domains and Host(...) rules).
 HOST = "secure.example.com"
 OTHER_HOST = "www.secure.example.com"
+CONNECT_HOST = "traefik.example.com"
 
 # Fixed reference instant so not_after values are deterministic.
 REFERENCE = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+PROBE_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate"
+SECRET_TOKEN = "secret-token-6f1e"
 
 DUPLICATE_ID_MESSAGE = "does not generate unique IDs"
 # The spec values, independent of the constants they are checked against.
@@ -52,41 +74,47 @@ GRACE = timedelta(hours=24)
 CHECK_INTERVAL = timedelta(minutes=5)
 
 
-def _cert(host: str, days: int, *, port: int = 443) -> CertInfo:
-    """Return a successful probe result for ``host`` with ``days`` left."""
-    return CertInfo(
-        host=host,
-        port=port,
-        not_after=REFERENCE + timedelta(days=days),
-        days_until_expiry=days,
-        subject=f"CN={host}",
-        issuer="CN=Test CA",
-        san=(host,),
-        fetched_at=REFERENCE,
+def _cert(host: str, days: int) -> HostCertState:
+    """Return a probe state for ``host`` whose certificate has ``days`` left at ``REFERENCE``."""
+    return make_cert_state(host, days=days, now=REFERENCE, verified=True)
+
+
+def _probed(sni: str, days: int = 30) -> ProbedCertificate:
+    """Return a verified probe result for ``sni`` expiring ``days`` after ``REFERENCE``."""
+    return ProbedCertificate(
+        certificate=TraefikCertificate(
+            common_name=sni,
+            sans=(sni,),
+            not_after=REFERENCE + timedelta(days=days),
+            not_before=REFERENCE - timedelta(days=60),
+            issuer_cn="Test CA",
+            status=None,
+            serial_number="1",
+        ),
+        verified=True,
+        san_mismatch=False,
     )
 
 
 @pytest.fixture
-def cert_probe_ok() -> Iterator[AsyncMock]:
-    """Answer every TLS probe with a certificate that expires in 30 days."""
+def cert_probe_ok(freezer: Any) -> Iterator[AsyncMock]:
+    """Freeze the clock at ``REFERENCE`` and answer every probe with a certificate for 30 days."""
+    freezer.move_to(REFERENCE)
 
-    async def _ok(host: str, port: int, **_kwargs: Any) -> CertInfo:
-        return _cert(host, 30, port=port)
+    async def _ok(_connect_host: str, _port: int, sni: str, **_kwargs: Any) -> ProbedCertificate:
+        return _probed(sni)
 
-    with patch(
-        "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-        AsyncMock(side_effect=_ok),
-    ) as probe:
+    with patch(PROBE_TARGET, AsyncMock(side_effect=_ok)) as probe:
         yield probe
 
 
-async def _setup(hass: HomeAssistant, aioclient_mock: Any) -> MockConfigEntry:
-    """Set up one entry served by the v3.7 capture and return it loaded."""
-    stub_traefik(aioclient_mock, version="v3.7")
+async def _setup(hass: HomeAssistant, aioclient_mock: Any, *, api_key: str = "k") -> MockConfigEntry:
+    """Set up one entry served by the v2.11 capture and return it loaded."""
+    stub_traefik(aioclient_mock, version=VERSION)
     entry = MockConfigEntry(
         domain=DOMAIN,
         title="Traefik",
-        data={CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+        data={CONF_URL: MOCK_URL, CONF_API_KEY: api_key, CONF_VERIFY_SSL: True},
         unique_id="traefik.example.com",
     )
     entry.add_to_hass(hass)
@@ -107,7 +135,7 @@ def _expiry(hass: HomeAssistant, entry: MockConfigEntry, host: str = HOST) -> st
 
 
 def _all_cert_ids(hass: HomeAssistant, entry: MockConfigEntry) -> tuple[str, ...]:
-    """Return the four cert entity_ids of the v3.7 capture."""
+    """Return the four cert entity_ids of the capture."""
     return (
         _expiring(hass, entry),
         _expiry(hass, entry),
@@ -169,7 +197,7 @@ async def test_cert_cycle_updates_timestamp_sensor_state(
 
     state = _state(hass, expiry)
     assert dt_util.parse_datetime(state.state) == renewed.not_after
-    # The entity layer adds no rounding: the attribute is the cache integer.
+    # Days are computed from the frozen clock at read time.
     assert state.attributes["days_until_expiry"] == 3
     other = _state(hass, other_expiry)
     assert dt_util.parse_datetime(other.state) == REFERENCE + timedelta(days=30)
@@ -214,7 +242,7 @@ async def test_tls_warn_days_option_reaches_state(
 async def test_cert_availability_follows_cert_coordinator_only(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
 ) -> None:
-    """A Traefik API failure never blanks a cert entity; a cert failure does."""
+    """A Traefik API failure or a failed probe never blanks a cert entity; a failed cert cycle does."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
     expiring, expiry, other_expiring, other_expiry = _all_cert_ids(hass, entry)
@@ -226,7 +254,7 @@ async def test_cert_availability_follows_cert_coordinator_only(
     # Main cycle fails: router entity goes unavailable, cert entities stay as they were.
     aioclient_mock.clear_requests()
     aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=500)
-    stub_traefik(aioclient_mock)
+    stub_traefik(aioclient_mock, version=VERSION)
     await entry.runtime_data.coordinator.async_refresh()
     await hass.async_block_till_done()
     assert not entry.runtime_data.coordinator.last_update_success
@@ -244,12 +272,13 @@ async def test_cert_availability_follows_cert_coordinator_only(
     await hass.async_block_till_done()
     assert {eid: _state(hass, eid).state for eid in before} == before
 
-    # A CertError row makes only that host's entities unavailable.
-    error: CertError = {"host": HOST, "port": 443, "error": "timeout", "detail": "test stub"}
-    cert_coordinator.async_set_updated_data({HOST: error, OTHER_HOST: _cert(OTHER_HOST, 30)})
+    # A failed probe without a certificate keeps that host's entities available (unknown).
+    failed = make_cert_state(HOST, now=REFERENCE, error="timeout", failures=1)
+    cert_coordinator.async_set_updated_data({HOST: failed, OTHER_HOST: _cert(OTHER_HOST, 30)})
     await hass.async_block_till_done()
-    assert _state(hass, expiring).state == "unavailable"
-    assert _state(hass, expiry).state == "unavailable"
+    assert _state(hass, expiring).state == "unknown"
+    assert _state(hass, expiry).state == "unknown"
+    assert _state(hass, expiry).attributes["last_error"] == "timeout"
     assert _state(hass, other_expiring).state == before[other_expiring]
     assert _state(hass, other_expiry).state == before[other_expiry]
 
@@ -265,13 +294,13 @@ async def test_main_cycles_never_probe_certificates(
 
     await coordinator.async_refresh()
     await coordinator.async_refresh()
-    rawdata = copy.deepcopy(load_fixture("v3.7", "rawdata.json"))
+    rawdata = copy.deepcopy(load_fixture(VERSION, "rawdata.json"))
     extra = copy.deepcopy(rawdata["routers"]["secure@file"])
     extra["rule"] = "Host(`extra.example.com`)"
     extra["tls"] = {}
     rawdata["routers"]["extra@file"] = extra
     aioclient_mock.clear_requests()
-    stub_traefik(aioclient_mock, rawdata=rawdata)
+    stub_traefik(aioclient_mock, version=VERSION, rawdata=rawdata)
     await coordinator.async_refresh()
     await hass.async_block_till_done()
 
@@ -328,9 +357,9 @@ async def test_vanished_cert_host_unavailable_then_removed_after_grace(
     other_expiring = _expiring(hass, entry, OTHER_HOST)
     other_expiry = _expiry(hass, entry, OTHER_HOST)
 
-    rawdata = rawdata_copy()
+    rawdata = rawdata_copy(VERSION)
     rawdata["routers"]["secure@file"]["tls"]["domains"][0]["sans"] = []
-    restub_traefik(aioclient_mock, rawdata=rawdata)
+    restub_traefik(aioclient_mock, version=VERSION, rawdata=rawdata)
     await entry.runtime_data.coordinator.async_refresh()
     await entry.runtime_data.cert_coordinator.async_refresh()
     await hass.async_block_till_done()
@@ -402,3 +431,85 @@ async def test_cert_entities_on_certificates_sub_device(
         f"{entry.entry_id}_tls_expiring_{OTHER_HOST}",
         f"{entry.entry_id}_tls_cert_{OTHER_HOST}",
     }
+
+
+async def test_probe_driven_setup_publishes_probe_state(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
+) -> None:
+    """Each cert cycle probes both hosts at the Traefik host; the entities show the probed certificate."""
+    entry = await _setup(hass, aioclient_mock)
+    assert cert_probe_ok.await_count == 2
+    expected_calls = {(CONNECT_HOST, 443, HOST), (CONNECT_HOST, 443, OTHER_HOST)}
+    assert {call.args for call in cert_probe_ok.await_args_list} == expected_calls
+    for call in cert_probe_ok.await_args_list:
+        assert call.kwargs == {"handshake_timeout": TLS_HANDSHAKE_TIMEOUT, "trust_store": None, "now": REFERENCE}
+
+    expiry = _state(hass, _expiry(hass, entry))
+    assert dt_util.parse_datetime(expiry.state) == REFERENCE + timedelta(days=30)
+    assert expiry.attributes["source"] == "probe"
+    assert expiry.attributes["verified"] is True
+    assert expiry.attributes["subject"] == HOST
+    assert expiry.attributes["issuer"] == "Test CA"
+    assert expiry.attributes["port"] == 443
+    assert expiry.attributes["fetched_at"] == REFERENCE.isoformat()
+    assert expiry.attributes["last_error"] is None
+    expiring = _state(hass, _expiring(hass, entry))
+    assert expiring.state == "off"
+    assert expiring.attributes["reason"] is None
+    assert expiring.attributes["source"] == "probe"
+
+    await entry.runtime_data.cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+    assert cert_probe_ok.await_count == 4
+    assert {call.args for call in cert_probe_ok.await_args_list[2:]} == expected_calls
+
+
+async def test_failing_probe_keeps_cert_entities_available(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """A probe that fails from the start shows unknown values on available entities."""
+    entry = await _setup(hass, aioclient_mock)
+    assert entry.runtime_data.cert_coordinator.last_update_success
+    for host in (HOST, OTHER_HOST):
+        expiry = _state(hass, _expiry(hass, entry, host))
+        assert expiry.state == "unknown"
+        assert expiry.attributes["last_error"] == "unknown"
+        assert expiry.attributes["days_until_expiry"] is None
+        expiring = _state(hass, _expiring(hass, entry, host))
+        assert expiring.state == "unknown"
+        assert expiring.attributes["reason"] is None
+        assert expiring.attributes["last_error"] == "unknown"
+
+
+async def test_secret_token_never_in_cert_attributes_or_log(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The API token appears in no cert attribute value and no DEBUG log line of setup plus two cert cycles."""
+    caplog.set_level(logging.DEBUG)
+    entry = await _setup(hass, aioclient_mock, api_key=SECRET_TOKEN)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    for _ in range(2):
+        await cert_coordinator.async_refresh()
+        await hass.async_block_till_done()
+    assert mock_tls_probe.await_count == 6
+
+    for entity_id in _all_cert_ids(hass, entry):
+        state = _state(hass, entity_id)
+        for value in state.attributes.values():
+            assert SECRET_TOKEN not in str(value), entity_id
+    assert "probe disabled in tests" in caplog.text
+    assert SECRET_TOKEN not in caplog.text
+
+
+async def test_update_entity_action_refreshes_cert_coordinator(
+    hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
+) -> None:
+    """``homeassistant.update_entity`` on a certificate_expiry entity requests one cert refresh."""
+    assert await async_setup_component(hass, "homeassistant", {})
+    entry = await _setup(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    with patch.object(cert_coordinator, "async_request_refresh", AsyncMock()) as refresh:
+        await hass.services.async_call(
+            "homeassistant", "update_entity", {"entity_id": _expiry(hass, entry)}, blocking=True
+        )
+    refresh.assert_awaited_once()

@@ -1,20 +1,18 @@
-"""CertCoordinator tests — Phase 3 lifecycle invariants (TEST-04 + D-05/D-08/D-10).
+"""CertCoordinator tests: per-host certificate state, probe cycle and host collection.
 
-Covers the data-path invariants of ``custom_components.traefik_proxy.cert_coordinator.CertCoordinator``:
+Covers ``custom_components.traefik_proxy.cert_coordinator``:
 
-- Semaphore-bounded concurrent probes (CONTEXT.md D-05).
-- Per-host ``asyncio.timeout(5)`` graceful error path (D-10 — never raises).
-- ``async_set_threshold`` mutates ``threshold_days`` AND fires
-  ``async_update_listeners()`` (D-08 live re-eval).
-- ``_collect_hosts`` union extraction from ``tls.domains[].main`` +
-  ``tls.domains[].sans[]`` + literal ``Host()`` rule names (config_entry
-  wiring), sorted and normalized.
+- ``HostCertState``: live floor-day arithmetic and the problem precedence.
+- The probe cycle: one probe per host under the semaphore, connecting to the
+  Traefik host with the router host as SNI; results become ``HostCertState``.
+- ``async_set_threshold`` mutates ``threshold_days`` and notifies listeners.
+- ``_collect_hosts``: union of ``tls.domains[].main`` + ``sans[]`` + literal
+  ``Host()`` names, sorted, normalized and capped.
 
-All async tests run under ``pytest-homeassistant-custom-component``;
-``MagicMock`` powers the entry / main-coordinator state. Network
-operations are mocked at the ``fetch_cert_info_async`` boundary so the
-test stays hermetic — the real TLS handshake surface is exercised by
-``tests/test_tls.py``.
+``MagicMock`` powers the entry / main-coordinator state. The probe is mocked
+at the ``async_probe_certificate`` boundary except in the trust-store test,
+which runs the real probe against a local TLS server; the probe itself is
+covered by ``tests/test_tls.py``.
 """
 
 from __future__ import annotations
@@ -22,13 +20,27 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.verification import Store
+from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
-from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
+from custom_components.traefik_proxy import tls
+from custom_components.traefik_proxy.cert_coordinator import (
+    CERT_FAILURES_FOR_PROBLEM,
+    NOT_FOUND,
+    CertCoordinator,
+    CertProblem,
+    CertSource,
+    HostCertState,
+)
 from custom_components.traefik_proxy.const import (
+    CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
     MAX_CERT_HOSTS,
@@ -36,8 +48,22 @@ from custom_components.traefik_proxy.const import (
     TLS_SEMAPHORE,
 )
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
-from custom_components.traefik_proxy.tls import CertError, CertInfo, is_error
-from tests.conftest import entity_id_for, make_snapshot, rawdata_copy, setup_traefik_entry
+from custom_components.traefik_proxy.models import TraefikCertificate
+from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
+from tests.certgen import make_ca, make_leaf, write_pem
+from tests.conftest import (
+    TlsServerStarter,
+    entity_id_for,
+    make_cert_state,
+    make_snapshot,
+    rawdata_copy,
+    setup_traefik_entry,
+)
+
+PROBE_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate"
+CONNECT_HOST = "traefik.example.com"
+NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+_CERT_LOGGER = "custom_components.traefik_proxy.cert_coordinator"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,6 +74,7 @@ def _make_entry(
     *,
     tls_warn_days: int | None = DEFAULT_TLS_WARN_DAYS,
     title: str = "Traefik",
+    url: str = f"https://{CONNECT_HOST}:8080",
 ) -> MagicMock:
     """Build a ``MagicMock`` entry suitable for ``CertCoordinator.__init__``.
 
@@ -58,6 +85,7 @@ def _make_entry(
     entry: MagicMock = MagicMock()
     entry.entry_id = "test-entry"
     entry.title = title
+    entry.data = {CONF_URL: url}
     options: dict[str, Any] = {}
     if tls_warn_days is not None:
         options["tls_warn_days"] = tls_warn_days
@@ -70,40 +98,134 @@ def _make_entry(
     return entry
 
 
-def _make_main_coord(
-    *,
-    entry_options: dict[str, Any] | None = None,
-) -> Any:
-    """Build a mock main coordinator wired to the entry's runtime_data.
-
-    The cert coordinator reads ``self.config_entry.runtime_data.coordinator.data.routers``
-    (BLOCKER #1 fix path). Tests populate ``runtime_data.coordinator.data`` directly
-    rather than going through ``aioclient_mock`` — these are pure
-    unit tests, not integration tests.
-    """
-    return _make_entry(tls_warn_days=(entry_options or {}).get("tls_warn_days"))
+def _entry_with_tls_hosts(*hosts: str, url: str = f"https://{CONNECT_HOST}:8080") -> MagicMock:
+    """Entry whose snapshot has one TLS router per host."""
+    entry = _make_entry(url=url)
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[{"name": f"r{i}", "tls": {}, "rule": f"Host(`{host}`)"} for i, host in enumerate(hosts)],
+    )
+    return entry
 
 
-def _cert_info(
-    *,
-    host: str = "h1.example.com",
-    port: int = 443,
-    days_until_expiry: int = 30,
-) -> CertInfo:
-    """Build a frozen ``CertInfo`` with sensible defaults for assertions."""
-    return CertInfo(
-        host=host,
-        port=port,
-        not_after=datetime.now(UTC) + timedelta(days=days_until_expiry),
-        days_until_expiry=days_until_expiry,
-        subject=f"CN={host}",
-        issuer="CN=Test CA",
-        san=(host,),
+def _certificate(host: str, days: int, *, now: datetime = NOW) -> TraefikCertificate:
+    return TraefikCertificate(
+        common_name=host,
+        sans=(host,),
+        not_after=now + timedelta(days=days),
+        not_before=now - timedelta(days=1),
+        issuer_cn="Test CA",
+        status=None,
+        serial_number="1",
     )
 
 
-def _cert_error(host: str = "h1.example.com", *, code: str = "timeout") -> CertError:
-    return CertError(host=host, port=443, error=code, detail="test stub")
+def _probed(host: str, days: int = 30, *, verified: bool = True, san_mismatch: bool = False) -> ProbedCertificate:
+    return ProbedCertificate(certificate=_certificate(host, days), verified=verified, san_mismatch=san_mismatch)
+
+
+def _state(
+    *,
+    days: int | None = None,
+    not_after: datetime | None = None,
+    error: str | None = None,
+    failures: int = 0,
+) -> HostCertState:
+    """Build a ``HostCertState`` with an exact ``not_after`` or ``days`` from ``NOW``."""
+    certificate = None
+    if not_after is not None:
+        certificate = TraefikCertificate("h", ("h",), not_after, not_after - timedelta(days=90), None, None, "1")
+    elif days is not None:
+        certificate = _certificate("h", days)
+    return HostCertState(
+        host="h",
+        source=CertSource.PROBE,
+        certificate=certificate,
+        verified=None,
+        san_mismatch=None,
+        port=443,
+        error=error,
+        failures=failures,
+        fetched_at=None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# HostCertState
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("not_after", "expected"),
+    [
+        (NOW + timedelta(days=10), 10),
+        (NOW + timedelta(days=10) - timedelta(microseconds=1), 9),
+        (NOW, 0),
+        (NOW - timedelta(microseconds=1), -1),
+        (NOW - timedelta(days=1), -1),
+        (NOW - timedelta(days=1, microseconds=1), -2),
+    ],
+)
+def test_days_left_is_signed_floor_days(not_after: datetime, expected: int) -> None:
+    """Integer timedelta floor division, never rounded."""
+    assert _state(not_after=not_after).days_left(NOW) == expected
+
+
+def test_days_left_without_certificate_is_none() -> None:
+    assert _state(error="timeout", failures=1).days_left(NOW) is None
+
+
+def test_cert_failures_for_problem_is_2() -> None:
+    assert CERT_FAILURES_FOR_PROBLEM == 2
+    assert NOT_FOUND == "not_found"
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (_state(days=-1, error="timeout", failures=2), CertProblem.EXPIRED),
+        (_state(days=40, error="ssl", failures=2), CertProblem.PROBE_FAILED),
+        (_state(error="timeout", failures=2), CertProblem.PROBE_FAILED),
+        (_state(error=NOT_FOUND), CertProblem.NOT_FOUND),
+        (_state(days=5, error=NOT_FOUND), CertProblem.NOT_FOUND),
+        (_state(days=14), CertProblem.EXPIRING),
+        (_state(days=14, error="timeout", failures=1), CertProblem.EXPIRING),
+        (_state(days=15), None),
+        (_state(days=40, error="timeout", failures=1), None),
+        (_state(error="timeout", failures=1), None),
+    ],
+)
+def test_problem_precedence(state: HostCertState, expected: CertProblem | None) -> None:
+    """expired > probe_failed > not_found > expiring; threshold 14."""
+    assert state.problem(14, NOW) is expected
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        (_state(error="timeout", failures=1), None),
+        (_state(), None),
+        (_state(days=15), False),
+        (_state(days=14), True),
+        (_state(error="timeout", failures=2), True),
+        (_state(error=NOT_FOUND), True),
+    ],
+)
+def test_is_problem(state: HostCertState, expected: bool | None) -> None:
+    """Unknown only without a certificate and below the failure limit."""
+    assert state.is_problem(14, NOW) is expected
+
+
+def test_make_cert_state_helper() -> None:
+    """The conftest builder yields a probe state with a certificate ``days`` ahead."""
+    state = make_cert_state("a.example.com", days=30, now=NOW)
+    assert state.source is CertSource.PROBE
+    assert state.certificate is not None
+    assert state.days_left(NOW) == 30
+    assert state.failures == 0
+    assert state.error is None
+    empty = make_cert_state("a.example.com", now=NOW, error="timeout", failures=1)
+    assert empty.certificate is None
+    assert empty.fetched_at is None
 
 
 # ---------------------------------------------------------------------------
@@ -165,52 +287,129 @@ def test_config_entry_wired_via_super_init() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Probe — graceful error paths
+# Probe cycle
 # ---------------------------------------------------------------------------
 
 
-async def test_probe_returns_certerror_on_timeout() -> None:
-    """Per-host ``asyncio.timeout(5)`` → ``CertError(error="timeout")``.
-
-    Mirrors the production contract: the blocking ``fetch_cert_info_async``
-    is wrapped in ``asyncio.timeout(self._timeout)``. A ``TimeoutError``
-    escaping that wrapper must be classified as ``timeout`` — not as
-    ``unreachable`` (the catch-all).
-    """
-    c = CertCoordinator(MagicMock(), _make_entry())
+async def test_probe_connects_to_traefik_host_with_router_host_as_sni(freezer: Any) -> None:
+    """One probe per host: connect host = entry URL host, port 443, SNI = router host."""
+    freezer.move_to(NOW)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", "b.example.com"))
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-            AsyncMock(side_effect=TimeoutError()),
-        )
-        result = await c._probe("example.com")
+        mp.setattr(PROBE_TARGET, probe)
+        await c._async_update_data()
 
-    assert is_error(result)
-    err: Any = result
-    assert err["error"] == "timeout"
-    assert err["host"] == "example.com"
-    assert err["port"] == 443
+    assert probe.await_count == 2
+    assert [call.args for call in probe.await_args_list] == [
+        (CONNECT_HOST, 443, "a.example.com"),
+        (CONNECT_HOST, 443, "b.example.com"),
+    ]
+    for call in probe.await_args_list:
+        assert call.kwargs == {"handshake_timeout": TLS_HANDSHAKE_TIMEOUT, "trust_store": None, "now": NOW}
 
 
-async def test_probe_catches_generic_exception() -> None:
-    """Defense in depth — ``Exception`` → ``CertError(error="unreachable")``.
-
-    The catch-all classification must be deterministic so dashboards can
-    group failing hosts by category even when an unusual exception
-    (e.g. ``MemoryError``, custom integration error) bubbles up.
-    """
-    c = CertCoordinator(MagicMock(), _make_entry())
+async def test_probed_certificate_becomes_probe_state(freezer: Any) -> None:
+    """A probed certificate is published with its trust flags, port 443 and the cycle time."""
+    freezer.move_to(NOW)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    probed = _probed("a.example.com", 30, verified=False, san_mismatch=True)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-            AsyncMock(side_effect=RuntimeError("boom")),
-        )
-        result = await c._probe("example.com")
+        mp.setattr(PROBE_TARGET, AsyncMock(return_value=probed))
+        data = await c._async_update_data()
 
-    assert is_error(result)
-    err: Any = result
-    assert err["error"] == "unreachable"
-    assert "RuntimeError" in err["detail"]
+    assert data == {
+        "a.example.com": HostCertState(
+            host="a.example.com",
+            source=CertSource.PROBE,
+            certificate=probed.certificate,
+            verified=False,
+            san_mismatch=True,
+            port=443,
+            error=None,
+            failures=0,
+            fetched_at=NOW,
+        )
+    }
+
+
+async def test_probe_failure_becomes_state_without_certificate(freezer: Any, caplog: pytest.LogCaptureFixture) -> None:
+    """A failed first probe: no certificate, the closed-set code, one failure, debug log."""
+    freezer.move_to(NOW)
+    caplog.set_level(logging.DEBUG, logger=_CERT_LOGGER)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"))
+    failure = ProbeFailure(ProbeError.TIMEOUT, "TimeoutError: ")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, AsyncMock(return_value=failure))
+        data = await c._async_update_data()
+
+    state = data["a.example.com"]
+    assert state.certificate is None
+    assert state.verified is None
+    assert state.san_mismatch is None
+    assert state.error == "timeout"
+    assert state.failures == 1
+    assert state.fetched_at is None
+    assert state.source is CertSource.PROBE
+    assert state.port == 443
+    debug = [r.getMessage() for r in caplog.records if r.name == _CERT_LOGGER and r.levelno == logging.DEBUG]
+    assert any("a.example.com" in message and "timeout" in message for message in debug)
+
+
+async def test_entry_url_without_host_fails_the_cycle() -> None:
+    """Without a Traefik host there is nothing to connect to: the cycle fails."""
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com", url="traefik"))
+    probe = AsyncMock(return_value=_probed("a.example.com"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        with pytest.raises(UpdateFailed):
+            await c._async_update_data()
+    probe.assert_not_awaited()
+
+
+async def test_trust_store_reaches_the_probe() -> None:
+    """The coordinator passes its trust store object to every probe unchanged."""
+    store = MagicMock(spec=Store)
+    c = CertCoordinator(MagicMock(), _entry_with_tls_hosts("a.example.com"), trust_store=store)
+    probe = AsyncMock(return_value=_probed("a.example.com"))
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, probe)
+        await c._async_update_data()
+    assert probe.await_args is not None
+    assert probe.await_args.kwargs["trust_store"] is store
+
+
+async def test_trust_store_verifies_chain_through_real_probe(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """A coordinator store holding the test root makes a real probe report verified True."""
+    now = dt_util.utcnow()
+    root = make_ca("Coordinator Root", not_before=now - timedelta(days=30), not_after=now + timedelta(days=3650))
+    leaf, key = make_leaf(
+        ["a.example.com"], root, not_before=now - timedelta(days=1), not_after=now + timedelta(days=90)
+    )
+    server = await tls_server({"a.example.com": write_pem(tmp_path, "leaf", [leaf], key)}, default="a.example.com")
+    store = tls.build_trust_store([root[0].public_bytes(Encoding.DER)])
+    assert store is not None
+    c = CertCoordinator(
+        MagicMock(), _entry_with_tls_hosts("a.example.com", url="https://127.0.0.1:8080"), trust_store=store
+    )
+    real_probe = tls.async_probe_certificate
+
+    async def _to_local_server(connect_host: str, port: int, sni: str, **kwargs: Any) -> tls.ProbeResult:
+        assert (connect_host, port) == ("127.0.0.1", 443)
+        assert kwargs["trust_store"] is store
+        return await real_probe(connect_host, server.port, sni, **kwargs)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, _to_local_server)
+        data = await c._async_update_data()
+
+    state = data["a.example.com"]
+    assert state.verified is True
+    assert state.san_mismatch is False
+    assert state.certificate is not None
+    assert state.certificate.not_after == leaf.not_valid_after_utc
 
 
 # ---------------------------------------------------------------------------
@@ -252,13 +451,7 @@ async def test_get_threshold_returns_current_value() -> None:
 
 
 async def test_async_update_data_fans_out_via_gather() -> None:
-    """All hosts in the cache get probed; success + error rows merge.
-
-    Two TLS-enabled routers expose three unique hostnames (one with a
-    SAN). ``fetch_cert_info_async`` is mocked to return a CertInfo per
-    host; the coordinator must fan out via ``asyncio.gather`` and the
-    resulting data dict must have one row per host.
-    """
+    """Every host of the host set gets one state; success and failure rows merge."""
     entry = _make_entry()
     entry.runtime_data.coordinator.data = make_snapshot(
         routers=[
@@ -282,73 +475,20 @@ async def test_async_update_data_fans_out_via_gather() -> None:
     )
     c = CertCoordinator(MagicMock(), entry)
 
-    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertInfo:
-        return _cert_info(host=host, days_until_expiry=30, port=port)
+    async def fake_probe(_connect: str, _port: int, sni: str, **_kwargs: object) -> tls.ProbeResult:
+        if sni == "h2.example.com":
+            return ProbeFailure(ProbeError.REFUSED, "ConnectionRefusedError: ")
+        return _probed(sni)
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-            AsyncMock(side_effect=fake_probe),
-        )
+        mp.setattr(PROBE_TARGET, AsyncMock(side_effect=fake_probe))
         data = await c._async_update_data()
 
-    assert set(data.keys()) == {
-        "h1.example.com",
-        "h1-alt.example.com",
-        "h2.example.com",
-    }
-    for value in data.values():
-        assert not is_error(value)
-
-
-async def test_async_update_data_handles_error_rows_mixing_in_success() -> None:
-    """Mixed success / error rows both surface in the cache (D-06)."""
-    entry = _make_entry()
-    entry.runtime_data.coordinator.data = make_snapshot(
-        routers=[
-            {
-                "name": "r1",
-                "tls": {"domains": [{"main": "ok-a.example.com"}]},
-                "rule": "Host(`ok-a.example.com`)",
-            },
-            {
-                "name": "r2",
-                "tls": {"domains": [{"main": "ok-b.example.com"}]},
-                "rule": "Host(`ok-b.example.com`)",
-            },
-            {
-                "name": "r3",
-                "tls": {"domains": [{"main": "ok-c.example.com"}]},
-                "rule": "Host(`ok-c.example.com`)",
-            },
-            {
-                "name": "r4",
-                "tls": {"domains": [{"main": "timeout.example.com"}]},
-                "rule": "Host(`timeout.example.com`)",
-            },
-        ],
-    )
-    c = CertCoordinator(MagicMock(), entry)
-
-    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertInfo | CertError:
-        if host == "timeout.example.com":
-            return _cert_error(host=host, code="timeout")
-        return _cert_info(host=host, port=port)
-
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-            AsyncMock(side_effect=fake_probe),
-        )
-        data = await c._async_update_data()
-
-    successes = [host for host, value in data.items() if not is_error(value)]
-    failures = [host for host, value in data.items() if is_error(value)]
-    assert len(successes) == 3
-    assert len(failures) == 1
-    assert "timeout.example.com" in failures
-    failed_value: Any = data["timeout.example.com"]
-    assert failed_value["error"] == "timeout"
+    assert list(data) == ["h1-alt.example.com", "h1.example.com", "h2.example.com"]
+    assert data["h1.example.com"].certificate is not None
+    assert data["h1-alt.example.com"].certificate is not None
+    assert data["h2.example.com"].certificate is None
+    assert data["h2.example.com"].error == "refused"
 
 
 async def test_async_update_data_returns_empty_when_no_routers() -> None:
@@ -585,7 +725,8 @@ async def test_full_setup_registers_cert_entities_for_alt_host(
     rawdata["routers"]["secure@file"]["rule"] = "Host(`secure.example.com`, `alt.example.com`)"
     entry = await setup_traefik_entry(hass, aioclient_mock, rawdata=rawdata)
 
-    probed = {call.args[0] for call in mock_tls_probe.call_args_list}
+    probed = {call.args[2] for call in mock_tls_probe.call_args_list}
+    assert {call.args[0] for call in mock_tls_probe.call_args_list} == {CONNECT_HOST}
     assert "alt.example.com" in probed
     entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, "alt.example.com"))
     entity_id_for(hass, CERT_EXPIRING.domain, CERT_EXPIRING.unique_id(entry.entry_id, "alt.example.com"))
@@ -594,8 +735,6 @@ async def test_full_setup_registers_cert_entities_for_alt_host(
 # ---------------------------------------------------------------------------
 # Host limit (MAX_CERT_HOSTS)
 # ---------------------------------------------------------------------------
-
-_CERT_LOGGER = "custom_components.traefik_proxy.cert_coordinator"
 
 
 def _entry_with_hosts(count: int) -> MagicMock:
@@ -646,12 +785,12 @@ async def test_cert_cycle_cap_250_probes_200(caplog: pytest.LogCaptureFixture) -
     caplog.set_level(logging.DEBUG, logger=_CERT_LOGGER)
     c = CertCoordinator(MagicMock(), _entry_with_hosts(250))
 
-    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertError:
-        return _cert_error(host=host)
+    async def fake_probe(_connect: str, _port: int, sni: str, **_kwargs: object) -> ProbedCertificate:
+        return _probed(sni)
 
     probe = AsyncMock(side_effect=fake_probe)
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr("custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async", probe)
+        mp.setattr(PROBE_TARGET, probe)
         data = await c._async_update_data()
 
     assert probe.call_count == 200
@@ -669,14 +808,11 @@ async def test_cert_cycle_cap_warns_once_per_cycle(caplog: pytest.LogCaptureFixt
     caplog.set_level(logging.WARNING, logger=_CERT_LOGGER)
     c = CertCoordinator(MagicMock(), _entry_with_hosts(250))
 
-    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertError:
-        return _cert_error(host=host)
+    async def fake_probe(_connect: str, _port: int, sni: str, **_kwargs: object) -> ProbedCertificate:
+        return _probed(sni)
 
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(
-            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-            AsyncMock(side_effect=fake_probe),
-        )
+        mp.setattr(PROBE_TARGET, AsyncMock(side_effect=fake_probe))
         await c._async_update_data()
         await c._async_update_data()
 

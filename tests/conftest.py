@@ -37,8 +37,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # to the real production module rather than the testing_config stub
 # that ships with ``pytest_homeassistant_custom_component``.
 from custom_components.traefik_proxy import tls as _tls_module  # pre-import for in-fixture patching
+from custom_components.traefik_proxy.cert_coordinator import CertSource, HostCertState
 from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_URL, CONF_VERIFY_SSL, DOMAIN
 from custom_components.traefik_proxy.models import (
+    TraefikCertificate,
     TraefikSnapshot,
     TraefikState,
     parse_entrypoints,
@@ -48,6 +50,7 @@ from custom_components.traefik_proxy.models import (
     parse_services,
     parse_version,
 )
+from custom_components.traefik_proxy.tls import ProbeError, ProbeFailure
 from tests.certgen import warm_up_datetime_types
 
 # Resolve cryptography's cached datetime class before any test freezes time.
@@ -269,16 +272,57 @@ def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str:
 
 @pytest.fixture
 def mock_tls_probe() -> Iterator[AsyncMock]:
-    """Replace the cert coordinator's TLS probe so no DNS lookup or socket is opened."""
+    """Replace the cert coordinator's TLS probe so no DNS lookup or socket is opened.
 
-    async def _unreachable(host: str, port: int, **_kwargs: Any) -> dict[str, Any]:
-        return {"host": host, "port": port, "error": "unreachable", "detail": "probe disabled in tests"}
-
+    Every probe fails with ``ProbeError.UNKNOWN``.
+    """
     with patch(
-        "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
-        AsyncMock(side_effect=_unreachable),
+        "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate",
+        AsyncMock(return_value=ProbeFailure(ProbeError.UNKNOWN, "probe disabled in tests")),
     ) as probe:
         yield probe
+
+
+def make_cert_state(
+    host: str,
+    *,
+    days: int | None = None,
+    now: datetime,
+    source: CertSource = CertSource.PROBE,
+    error: str | None = None,
+    failures: int = 0,
+    verified: bool | None = None,
+    port: int | None = 443,
+) -> HostCertState:
+    """Build a ``HostCertState`` for ``host``; with ``days`` it carries a certificate expiring ``days`` after ``now``.
+
+    The certificate covers ``host`` (CN and SAN); ``fetched_at`` is ``now``
+    with a certificate and None without one.
+    """
+    certificate = (
+        None
+        if days is None
+        else TraefikCertificate(
+            common_name=host,
+            sans=(host,),
+            not_after=now + timedelta(days=days),
+            not_before=now - timedelta(days=1),
+            issuer_cn="Test CA",
+            status=None,
+            serial_number="1",
+        )
+    )
+    return HostCertState(
+        host=host,
+        source=source,
+        certificate=certificate,
+        verified=verified,
+        san_mismatch=None if certificate is None else False,
+        port=port,
+        error=error,
+        failures=failures,
+        fetched_at=None if certificate is None else now,
+    )
 
 
 pytest_plugins = ["pytest_homeassistant_custom_component"]
