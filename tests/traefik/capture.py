@@ -6,6 +6,12 @@ to ``tests/fixtures/<version>/``. The stack is torn down afterwards.
 
     uv run python tests/traefik/capture.py [--only v3.7] [--keep-up]
 
+Re-captured fixtures are byte-stable only while the throwaway certificate in
+``tests/traefik/certs/`` is kept: it is generated on the first run and reused
+afterwards, but it is git-ignored, so a fresh checkout or a deleted
+``certs/`` directory generates a new one and changes the certificate
+fixtures (serial number and validity dates) on the next capture.
+
 This file is a script, not a test module: pytest never collects or runs it.
 Importing it has no side effects (tests load it to reuse the constants and the
 ``Redactor``).

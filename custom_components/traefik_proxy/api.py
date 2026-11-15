@@ -348,6 +348,10 @@ class TraefikProxyApiClient:
                 # (e.g. Traefik restarting), the next call tries rawdata again.
                 state = await self._get_state_paginated()
                 self._paginated = True
+                _LOGGER.debug(
+                    "path=%s not found and the list endpoints answered, switched to the paginated list endpoints",
+                    _RAWDATA_PATH,
+                )
                 return state
             try:
                 return parse_rawdata(payload)

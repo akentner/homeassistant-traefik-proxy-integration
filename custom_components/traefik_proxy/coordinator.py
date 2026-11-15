@@ -51,6 +51,9 @@ _DEFAULT_PORTS = {"http": 80, "https": 443}
 # restart or upgrade (/api/rawdata carries no start date).
 VERSION_RECHECK_INTERVAL = timedelta(hours=1)
 
+# How often a client on the paginated list endpoints retries /api/rawdata.
+RAWDATA_PROBE_INTERVAL = timedelta(hours=1)
+
 
 def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
     """Return the verify_ssl value the user set last.
@@ -179,9 +182,9 @@ def _logged_cause(err: TraefikProxyApiError) -> TraefikProxyApiError | None:
     return None if isinstance(err, TraefikProxyInvalidUrlError) else err
 
 
-def _interval_elapsed(since: datetime | None) -> bool:
-    """Return whether ``VERSION_RECHECK_INTERVAL`` has passed since ``since`` (False when unset)."""
-    return since is not None and dt_util.utcnow() - since >= VERSION_RECHECK_INTERVAL
+def _interval_elapsed(since: datetime | None, interval: timedelta) -> bool:
+    """Return whether ``interval`` has passed since ``since`` (False when unset)."""
+    return since is not None and dt_util.utcnow() - since >= interval
 
 
 class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
@@ -197,7 +200,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
     per ``VERSION_RECHECK_INTERVAL`` and on the first cycle after a failed
     one; the entrypoints are re-read only when the version or start date
     changed (Traefik restarted or was upgraded). While the client is
-    paginated, /api/rawdata is retried once per ``VERSION_RECHECK_INTERVAL``
+    paginated, /api/rawdata is retried once per ``RAWDATA_PROBE_INTERVAL``
     on a clock of its own, so failed cycles cannot postpone it. Listeners
     are only notified when the snapshot differs from the previous one.
     """
@@ -217,9 +220,10 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         )
         self._version: TraefikVersion | None = None
         self._version_checked_at: datetime | None = None
-        # Last cycle that reached the rawdata probe arming; a post-failure
-        # version re-check does not move it.
-        self._probe_armed_at: datetime | None = None
+        # Last tick of the rawdata probe grid. It moves in rawdata mode as
+        # well, where arming the probe is a no-op; a cycle that fails before
+        # the arming does not move it.
+        self._probe_clock: datetime | None = None
         self._entrypoints: dict[str, Entrypoint] = {}
 
     @property
@@ -231,7 +235,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """Fetch the Traefik version and entrypoints once per setup."""
         try:
             self._version = await self.client.async_get_version()
-            self._version_checked_at = self._probe_armed_at = dt_util.utcnow()
+            self._version_checked_at = self._probe_clock = dt_util.utcnow()
             self._entrypoints = await self.client.async_get_entrypoints()
         except TraefikProxyApiError as err:
             raise _translated_update_error(err) from _logged_cause(err)
@@ -244,7 +248,7 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """
         if self._version is None or self._version_checked_at is None or not self.last_update_success:
             return True
-        return _interval_elapsed(self._version_checked_at)
+        return _interval_elapsed(self._version_checked_at, VERSION_RECHECK_INTERVAL)
 
     async def _async_refresh_version(self) -> None:
         """Re-read the version; re-read the entrypoints when Traefik restarted.
@@ -269,13 +273,13 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
         """Fetch the HTTP state and build the snapshot for this cycle."""
         if self._version_due():
             await self._async_refresh_version()
-        if _interval_elapsed(self._probe_armed_at):
+        if _interval_elapsed(self._probe_clock, RAWDATA_PROBE_INTERVAL):
             # The probe has its own clock: a post-failure version re-check
             # neither arms it nor postpones it, so probes stay at least
-            # VERSION_RECHECK_INTERVAL apart and recurring failures cannot
+            # RAWDATA_PROBE_INTERVAL apart and recurring failures cannot
             # starve them. In rawdata mode the arming is a no-op.
             self.client.request_rawdata_probe()
-            self._probe_armed_at = dt_util.utcnow()
+            self._probe_clock = dt_util.utcnow()
         try:
             state = await self.client.async_get_state()
         except TraefikProxyApiError as err:
