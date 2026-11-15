@@ -485,11 +485,38 @@ the 2026.3 workarounds).
      listed in audit A-18 are removed; `translations/en.json` is the single
      source and `translations/de.json` covers every key in it (key-parity test);
      hassfest translation validation passes. Tests, `ruff`, `mypy --strict` green.
-**Plans**: TBD
+**Plans**: 9 plans in 8 waves (07-02 and 07-03 run in parallel)
 
 Plans:
+**Wave 1**
+- [ ] 07-01-PLAN.md — Tracer: toolchain on HA 2026.11 — `pytest-homeassistant` switch with the mechanical test-import rename, 2026.3 import shims removed, `ha2611-venv`; `hacs.json` 2026.11.0 and CI `test-min-ha` (FLOW-08)
 
-- [ ] TBD (run /gsd-plan-phase 7 to break down)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 07-02-PLAN.md — Tracer: 2026.11 APIs — sub-devices via `via_device_id=`, entry-bound migration repair, `async_unload_platforms_or_raise`, `-> None` setup/unload, own `_stopping` flag (FLOW-08)
+- [ ] 07-03-PLAN.md — Tracer: baseline cleanup — `strings.json` gone (test + hassfest script), `const.VERSION` gone, `api.py` comment, REQUIREMENTS/ROADMAP 2026.11 leftovers after verifying d18f96a (FLOW-07, FLOW-08)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 07-04-PLAN.md — Tracer: redirect never followed and translated; every coordinator/cert/setup exception translated; invalid stored URL stops, rejected credentials start reauth (FLOW-05, FLOW-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 07-05-PLAN.md — Tracer: entry data 1.3 with auth selector (none/basic/bearer, conditional fields) in user/reauth/reconfigure; 1.2 → 1.3 migration incl. URL userinfo; unique_id `host:port`, title = host (FLOW-01, FLOW-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 07-06-PLAN.md — Tracer: `OptionsFlowWithReload` without update listener; NumberSelectors for interval and TLS threshold; listener-only threshold setter/getter removed (FLOW-02)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 07-07-PLAN.md — Tracer: missing-entity grace period (1–168 h) honoured by the entity manager; per-item toggle in the options form; all options texts en + de (FLOW-02)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+- [ ] 07-08-PLAN.md — Tracer: `redirect` flow error; `url_has_credentials`, `unknown`, full error matrix, `config_flow.py` 100 % line coverage, final en/de error texts (FLOW-04, FLOW-07)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+- [ ] 07-09-PLAN.md — Tracer: redacted diagnostics download; `insecure_credentials` repair with `config_entry_id` and whole-file en ↔ de parity test; read-only phase checks incl. no new planning references in shipped code (DIAG-04, FLOW-06, FLOW-07)
+
+**Cross-cutting constraints:** <!-- gsd:generated -->
+- pytest (dev env), ruff check, ruff format --check, mypy --strict and the HA 2026.11.0 venv suite are green after every task (D-02)
+
+- pytest (dev env 2026.11.x), ruff check, ruff format --check, mypy --strict and the HA 2026.11.0 venv suite are green after every task (D-02); a failure confined to `tests/test_cert_entity_state.py` is rerun once before it counts (D-33)
 
 ### Phase 8: Marketplace + release readiness
 
@@ -554,7 +581,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
-| 7. Config flow, HA 2026.11 baseline, observability | 0/TBD | Not started | - |
+| 7. Config flow, HA 2026.11 baseline, observability | 0/9 | Planned | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
 **Coverage:**
@@ -567,7 +594,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4 | DATA-01..07 | 7 |
 | 5 | ENT-01..10 | 10 |
 | 6 | CERT-01..05 | 5 |
-| 7 | FLOW-01..07 / DIAG-04 | 8 |
+| 7 | FLOW-01..08 / DIAG-04 | 9 |
 | 8 | REL-01..08 / DIST-04 / DOCS-02,04 | 11 |
 | Superseded | API-02, API-05, ROUTER-01, DIAG-02, DIAG-03, CFG-02, TLS-04, DIST-05, DOCS-03 (see REQUIREMENTS.md) | 9 |
-| **Total active** | 36 complete (Phases 1–3) + 41 pending (Phases 4–8) | **77 / 77** ✓ |
+| **Total active** | 36 complete (Phases 1–3) + 42 (Phases 4–8) | **78 / 78** ✓ |

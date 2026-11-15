@@ -769,19 +769,26 @@ assert "Detected that custom integration 'traefik_proxy'" not in caplog.text
 | A2 | The frontend at 2026.11.0 renders `visible` (the blog states it; not checked in a real UI, and M35's visual check is Phase 8) | R-6 | Medium. If the frontend ignored it, all credential fields would show, but the server-side stripping still keeps data correct |
 | A3 | hassfest via Docker accepts the new translations. Not run locally: the Docker daemon is not running and running hassfest from source was not permitted in this session; only the 2026.11.0 schema source was read | R-5, FLOW-07 | Low. CI `hassfest` job runs on the PR |
 
-## Open Questions (decision conflicts the planner must surface)
+## Open Questions (RESOLVED)
+
+All five were resolved on 2026-11-15; the decisions are recorded in `07-CONTEXT.md`.
 
 1. **D-01/D-02/D-03 name phcc, which cannot satisfy them.**
    - What we know: no phcc release supports HA 2026.11; phcc itself declares it is broken; the official successor works with a mechanical rename (851/851).
    - Recommendation: implement D-01..D-03 with `pytest-homeassistant` (floor `>=2026.11.0`, venv/CI pinned `==2026.11.0`), record it as a deviation, and confirm with the user at the `checkpoint:human-verify` the SUS verdict already requires.
+   - **RESOLVED:** manager decision 2026-11-15, CONTEXT D-01/D-02/D-03 (`pytest-homeassistant`, no human checkpoint; plan 07-01 runs an automated provenance assertion instead).
 2. **D-04 names `ChildDeviceInfo` but requires `via_device_id == main.id` assertions.**
    - What we know: these exclude each other (child entries have no `via_device_id`). The `via_device_id=` keyword is the 2026.11 replacement for the registry workaround and keeps every other D-04 constraint.
    - Recommendation: `via_device_id=` (Pattern 4). If the user insists on child devices, that is a larger plan: entity `device_info` → `ChildDeviceInfo(parent_device_id=…)`, removal via child APIs, test helpers via `async_child_entries_for_config_entry`, loss of `manufacturer`/`entry_type` on sub-devices.
+   - **RESOLVED:** manager decision 2026-11-15, CONTEXT D-04 (`via_device_id=`).
 3. **D-13 says reauth finishes with `data_updates=…`.**
    - What we know: `data_updates` cannot remove keys, so D-10's "keys of an unused mode are absent" fails on an auth-type change.
    - Recommendation: `data=` (Pattern 3). The intent of D-13 is unchanged.
+   - **RESOLVED:** CONTEXT D-13 (`data=`).
 4. **D-12 needs a `required` error key that D-22's list lacks.** Recommendation: add `config.error.required` (en/de).
+   - **RESOLVED:** CONTEXT D-12/D-22.
 5. **`async_migrate_entry` downgrade branch.** It is unreachable (HA rejects newer versions first). Recommendation: with `-> None`, delete it or raise `ConfigEntryError`. Planner's call; the existing downgrade test exercises the HA path either way.
+   - **RESOLVED:** CONTEXT D-06 (migration keeps returning `bool`; the `False` downgrade branch stays and stays tested).
 
 ## Environment Availability
 
