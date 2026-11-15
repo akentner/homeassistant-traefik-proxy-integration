@@ -594,7 +594,9 @@ Plans:
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 08-13-PLAN.md — Tracer: drafts (release notes, hacs/default PR, Draft PR), deferred items closed, final pre-push gates; push + Draft PR are the manager's action after verification (REL-07, REL-08; D-08, D-23, D-26, D-27)
 
-**Cross-cutting constraints:**
+**Cross-cutting constraints:** <!-- gsd:generated -->
+- pytest (dev env), ruff check, ruff format --check, mypy --strict and the HA 2026.11.0 venv suite are green after every task; tests change in the same task as the code
+
 - pytest (dev env, coverage gate from 08-06 on), ruff check, ruff format --check, mypy --strict and the HA 2026.11.0 venv suite are green after every task; tests change in the same task as the code
 - No push, tag, GitHub release, Draft PR or hacs/default PR by the assistant (U1, M8, M41); drafts only in the phase directory (D-26)
 - Deviation from the ROADMAP wording: SC5 / REL-07 say the drafts go "in `.planning/`" — they go into the phase directory, which is inside `.planning/`
