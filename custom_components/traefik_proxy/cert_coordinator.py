@@ -2,10 +2,18 @@
 
 The cert coordinator is stored next to the main coordinator on
 ``entry.runtime_data`` and runs on its own slow cadence. Every cycle reads
-the TLS hosts of the main coordinator's latest snapshot (no extra Traefik
-API call) and probes each host once: a TLS handshake to the Traefik host of
-the entry URL with the router host as SNI name, at most ``TLS_SEMAPHORE``
-handshakes at a time. Router hostnames are never resolved through DNS.
+the TLS hosts of the main coordinator's latest snapshot and then asks
+Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
+
+- When Traefik answers, every host maps to the certificate that covers it.
+  No TLS connection is opened. A host no certificate covers is reported as
+  ``not_found`` and is never probed: a probe would read Traefik's default
+  certificate and make a broken host look healthy.
+- When Traefik answers 404 (older versions), each host is probed once: a
+  TLS handshake to the Traefik host of the entry URL with the router host
+  as SNI name, at most ``TLS_SEMAPHORE`` handshakes at a time. Router
+  hostnames are never resolved through DNS.
+- Any other API error fails the cycle.
 
 The result is one :class:`HostCertState` per host of the current host set.
 Days until expiry are never stored; entities compute them from the clock at
@@ -29,6 +37,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
+from .api import TraefikProxyApiError, TraefikProxyNotFoundError
 from .const import (
     CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
@@ -39,7 +48,7 @@ from .const import (
 )
 from .models import TraefikCertificate
 from .rules import extract_hosts, normalize_host
-from .tls import ProbedCertificate, ProbeResult, async_probe_certificate
+from .tls import ProbedCertificate, ProbeResult, async_probe_certificate, match_certificate
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
@@ -124,9 +133,11 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     """Certificate cycle keyed by hostname.
 
     Every cycle collects the sorted, normalized, capped TLS hosts of the
-    main snapshot (:meth:`_collect_hosts`) and probes each one concurrently
-    under the semaphore; ``data`` maps each host to its
-    :class:`HostCertState`.
+    main snapshot (:meth:`_collect_hosts`) and reads Traefik's certificate
+    list. With the list, each host is mapped to its certificate
+    (:meth:`_api_states`); on a 404 each host is probed concurrently under
+    the semaphore (:meth:`_async_probe_states`). ``data`` maps each host to
+    its :class:`HostCertState`.
 
     Threshold changes (``tls_warn_days`` in the options) go through
     :meth:`async_set_threshold`, which notifies the listeners so the
@@ -171,7 +182,54 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         """Run one cert cycle over the current host set."""
         hosts = self._collect_hosts()
         now = dt_util.utcnow()
-        return await self._async_probe_states(hosts, now)
+        try:
+            certificates = await self.config_entry.runtime_data.client.async_get_certificates()
+        except TraefikProxyNotFoundError:
+            # Traefik < 3.7 has no certificate list: probe every host.
+            return await self._async_probe_states(hosts, now)
+        except TraefikProxyApiError as err:
+            # The message is "<path>: <detail>" and never carries a URL or credential.
+            raise UpdateFailed(f"Reading certificates failed: {err}") from err
+        return self._api_states(hosts, certificates, now)
+
+    @staticmethod
+    def _api_states(
+        hosts: Sequence[str], certificates: Sequence[TraefikCertificate], now: datetime
+    ) -> dict[str, HostCertState]:
+        """Map every host to the API certificate that covers it, in host order.
+
+        A host without a covering certificate gets no certificate and the
+        ``not_found`` error; it is never probed. The certificate's own
+        ``status`` field is kept on the certificate and never read here.
+        """
+        states: dict[str, HostCertState] = {}
+        for host in hosts:
+            certificate = match_certificate(host, certificates)
+            if certificate is None:
+                states[host] = HostCertState(
+                    host=host,
+                    source=CertSource.API,
+                    certificate=None,
+                    verified=None,
+                    san_mismatch=None,
+                    port=None,
+                    error=NOT_FOUND,
+                    failures=0,
+                    fetched_at=None,
+                )
+                continue
+            states[host] = HostCertState(
+                host=host,
+                source=CertSource.API,
+                certificate=certificate,
+                verified=None,
+                san_mismatch=False,
+                port=None,
+                error=None,
+                failures=0,
+                fetched_at=now,
+            )
+        return states
 
     def _connect_host(self) -> str:
         """Return the Traefik host of the entry URL; every probe connects there."""

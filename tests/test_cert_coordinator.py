@@ -927,10 +927,10 @@ def test_collect_hosts_skips_regex_sni_and_negated_names() -> None:
 async def test_full_setup_registers_cert_entities_for_alt_host(
     hass: Any, aioclient_mock: Any, mock_tls_probe: AsyncMock
 ) -> None:
-    """A v2 multi-argument rule in the v3.7 capture yields cert entities for every host."""
-    rawdata = rawdata_copy("v3.7")
+    """A v2 multi-argument rule yields cert entities for every host (probe mode, v2.11 capture)."""
+    rawdata = rawdata_copy("v2.11")
     rawdata["routers"]["secure@file"]["rule"] = "Host(`secure.example.com`, `alt.example.com`)"
-    entry = await setup_traefik_entry(hass, aioclient_mock, rawdata=rawdata)
+    entry = await setup_traefik_entry(hass, aioclient_mock, version="v2.11", rawdata=rawdata)
 
     probed = {call.args[2] for call in mock_tls_probe.call_args_list}
     assert {call.args[0] for call in mock_tls_probe.call_args_list} == {CONNECT_HOST}

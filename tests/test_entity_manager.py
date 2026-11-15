@@ -40,10 +40,10 @@ from custom_components.traefik_proxy.entity_manager import (
     TraefikEntityManager,
 )
 from tests.conftest import (
-    CERT_FIXTURE_NOW,
     FIXTURE_VERSIONS,
     MOCK_URL,
     entity_id_for,
+    frozen_v37_certificates,
     load_fixture,
     make_traefik_entry,
     rawdata_copy,
@@ -796,7 +796,8 @@ async def test_per_item_default_keeps_router_and_service_entities(hass, aioclien
 
 async def test_unchanged_notifications_write_no_state(hass, aioclient_mock, freezer, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
     """With every entity enabled, forced and unchanged notifications write no state anywhere (ROADMAP SC3)."""
-    freezer.move_to(CERT_FIXTURE_NOW)
+    # The capture's certificate dates (88.5 days left): one tick later the live day count is unchanged.
+    aioclient_mock.get(f"{MOCK_URL}/api/certificates", json=frozen_v37_certificates(freezer))
     entry = make_traefik_entry()
     entry.add_to_hass(hass)
     registry = er.async_get(hass)

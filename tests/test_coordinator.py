@@ -329,11 +329,15 @@ def _version_started_later(hours: int) -> dict[str, str]:
 
 
 async def _refresh_paths(hass, aioclient_mock, coordinator: TraefikProxyCoordinator) -> list[str]:  # type: ignore[no-untyped-def]
-    """Run one coordinator cycle and return the paths it requested."""
+    """Run one coordinator cycle and return the paths it requested.
+
+    ``/api/certificates`` is left out: it belongs to the cert coordinator,
+    whose own 6 h timer fires while long freezer ticks pass.
+    """
     aioclient_mock.mock_calls.clear()
     await coordinator.async_refresh()
     await hass.async_block_till_done()
-    return _requested_paths(aioclient_mock)
+    return [path for path in _requested_paths(aioclient_mock) if path != "/api/certificates"]
 
 
 async def test_request_budget_matrix(
