@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
-status: executing
-stopped_at: Completed 08-12-PLAN.md
-last_updated: "2026-11-15T21:24:39.961Z"
+status: verifying
+stopped_at: Completed 08-13-PLAN.md
+last_updated: "2026-11-15T21:34:05.667Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: 892e04ef1c6ecb4954898179ec1aca2724a10df7
+state_head: cfa2871211a6f773adf159b109b13151efb65847
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 56
+  completed_plans: 57
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-15 — Phase 08 execution started
 
 Progress: [█████████░] 88% (6 of 8 phases)
@@ -123,6 +123,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P10 | 8min | 2 tasks | 2 files |
 | Phase 08 P11 | 25min | 2 tasks | 7 files |
 | Phase 08 P12 | 15min | 2 tasks | 5 files |
+| Phase 08 P13 | 30min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -269,6 +270,7 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-11: research/STACK.md rewritten to the shipped 1.0.0 state (no code blocks with #/- lines, generator leaks them); CLAUDE.md only via generate-claude-md --output CLAUDE.md
 - [Phase 08]: 08-11: project skill renamed to spike-findings-homeassistant-traefik-proxy-integration; tls.py is authoritative over the spike
 - [Phase 08]: 08-12: Phase 4 WR-06/WR-07/IN-03/IN-06 skipped (accepted for 1.0.0, no runtime effect); every other open Phase 4-6 finding closed with a commit pointer; REL-07 traceability stays Pending (first PR CI run, M43)
+- [Phase 08]: 08-13: REL-07 hacs/action stays pending the first PR CI run; drafts state it, hacs/default data read anonymously
 
 ### Pending Todos
 
@@ -314,7 +316,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T21:24:39.739Z
-Stopped at: Completed 08-12-PLAN.md
+Last session: 2026-11-15T21:34:05.431Z
+Stopped at: Completed 08-13-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
