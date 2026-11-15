@@ -820,3 +820,17 @@ async def test_userinfo_migration_is_idempotent(hass: HomeAssistant, caplog: Any
     assert (dict(entry.data), entry.unique_id, entry.title) == after_first
     assert entry.minor_version == 3
     assert len(_warnings(caplog)) == 1
+
+
+async def test_unparsable_url_is_kept_as_stored(hass: HomeAssistant) -> None:
+    """A URL urlsplit cannot parse stays as stored (setup reports it); the auth type comes from the token."""
+    entry = _legacy_entry(hass, "http://u:p@[::1", **{CONF_API_KEY: "k"})
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert dict(entry.data) == {
+        CONF_URL: "http://u:p@[::1",
+        CONF_VERIFY_SSL: True,
+        AUTH_TYPE: "bearer",
+        CONF_TOKEN: "k",
+    }

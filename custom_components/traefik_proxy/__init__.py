@@ -29,7 +29,7 @@ from .const import (
     UID_ROUTERS_PROBLEM,
     UID_SERVICES_PROBLEM,
 )
-from .coordinator import TraefikProxyCoordinator, build_api_client
+from .coordinator import TraefikProxyCoordinator, build_api_client, split_url_userinfo
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
 from .entity import (
     async_legacy_devices,
@@ -71,26 +71,43 @@ def _issue_id(entry_id: str) -> str:
     return f"{ISSUE_ENTITIES_MIGRATED}_{entry_id}"
 
 
-def _migrated_entry_data(data: Mapping[str, Any]) -> dict[str, Any]:
-    """Return entry data 1.3 for the data of an older entry.
+def _migrated_entry_data(data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
+    """Return entry data 1.3 for the data of an older entry, and whether URL credentials were dropped.
 
     The 0.3.0 bearer token (``api_key``) becomes auth type bearer when it is
-    non-empty and auth type none otherwise. Data that already names an auth
-    type keeps its auth keys. Only known keys are carried over.
+    non-empty. Credentials in the URL (userinfo) are cut from it: without a
+    token, a complete username and password become basic auth; next to a
+    token, or when incomplete, they are dropped. Otherwise the auth type is
+    none. Data that already names an auth type keeps its auth keys. Only
+    known keys are carried over.
     """
     new_data: dict[str, Any] = {key: data[key] for key in (CONF_URL, CONF_VERIFY_SSL) if key in data}
     if CONF_AUTH_TYPE in data:
         new_data.update(
             {key: data[key] for key in (CONF_AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN) if key in data}
         )
-        return new_data
+        return new_data, False
+    username = password = None
+    had_userinfo = False
+    url = data.get(CONF_URL)
+    if isinstance(url, str):
+        try:
+            new_url, username, password = split_url_userinfo(url)
+        except ValueError:
+            # Unparsable: kept as stored; setup reports the invalid URL.
+            new_url = url
+        had_userinfo = new_url != url
+        new_data[CONF_URL] = new_url
     token = data.get(CONF_API_KEY)
     if isinstance(token, str) and token:
         new_data[CONF_AUTH_TYPE] = AuthMode.bearer.value
         new_data[CONF_TOKEN] = token
-    else:
-        new_data[CONF_AUTH_TYPE] = AuthMode.none.value
-    return new_data
+        return new_data, had_userinfo
+    if username and password:
+        new_data.update({CONF_AUTH_TYPE: AuthMode.basic.value, CONF_USERNAME: username, CONF_PASSWORD: password})
+        return new_data, False
+    new_data[CONF_AUTH_TYPE] = AuthMode.none.value
+    return new_data, had_userinfo
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
@@ -197,7 +214,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
         )
 
     if entry.minor_version < 3:
-        new_data = _migrated_entry_data(entry.data)
+        new_data, dropped_url_credentials = _migrated_entry_data(entry.data)
+        if dropped_url_credentials:
+            # Names the entry only, never a credential. aiohttp refused such
+            # URLs, so the entry did not work before either.
+            _LOGGER.warning(
+                "Traefik entry %s (%s): removed the credentials from its URL; "
+                "if Traefik answers 401, re-authentication asks for them",
+                entry.entry_id,
+                entry.title,
+            )
         hass.config_entries.async_update_entry(entry, data=new_data, minor_version=3)
         _LOGGER.debug("Migrated Traefik entry %s to 1.3: auth type %s", entry.entry_id, new_data[CONF_AUTH_TYPE])
 

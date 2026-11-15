@@ -6,6 +6,7 @@ import logging
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from urllib.parse import unquote, urlsplit
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
@@ -72,6 +73,22 @@ def auth_from_entry_data(data: Mapping[str, Any]) -> Auth:
         password=data.get(CONF_PASSWORD),
         token=data.get(CONF_TOKEN),
     )
+
+
+def split_url_userinfo(url: str) -> tuple[str, str | None, str | None]:
+    """Return ``url`` without userinfo plus the percent-decoded username and password.
+
+    Only the userinfo is cut from the URL; scheme, host spelling, IPv6
+    brackets, port, path, query and fragment stay as given. An absent or
+    empty username or password is ``None``. Raises ``ValueError`` for a URL
+    ``urlsplit`` cannot parse.
+    """
+    netloc = urlsplit(url).netloc
+    if "@" not in netloc:
+        return url, None, None
+    userinfo, _, hostport = netloc.rpartition("@")
+    username, _, password = userinfo.partition(":")
+    return url.replace(netloc, hostport, 1), unquote(username) or None, unquote(password) or None
 
 
 def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:
