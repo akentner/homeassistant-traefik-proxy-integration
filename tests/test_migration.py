@@ -87,16 +87,33 @@ def _create(
     return reg_entry.entity_id
 
 
-def _disabled_legacy_device(hass: HomeAssistant, entry: Any, suffix: str = "http_routers") -> str:
-    """Pre-create one of the entry's 0.3.0 per-category devices, disabled by the user; return its id."""
+def _legacy_device(hass: HomeAssistant, entry: Any, suffix: str = "http_routers", *, disabled: bool = True) -> str:
+    """Pre-create one of the entry's 0.3.0 per-category devices (disabled by the user unless ``disabled`` is False).
+
+    Return its id.
+    """
     device_registry = dr.async_get(hass)
     device = device_registry.async_get_or_create(
         config_entry_id=entry.entry_id,
         identifiers={(DOMAIN, f"{entry.entry_id}_{suffix}")},
         name=f"traefik.example.com Traefik Proxy - {suffix}",
     )
-    device_registry.async_update_device(device.id, disabled_by=dr.DeviceEntryDisabler.USER)
+    if disabled:
+        device_registry.async_update_device(device.id, disabled_by=dr.DeviceEntryDisabler.USER)
     return device.id
+
+
+def _stale_device_disabler(hass: HomeAssistant, entity_id: str) -> None:
+    """Give ``entity_id`` a DEVICE disabler although its device is enabled.
+
+    Home Assistant derives DEVICE from the device state on every public write and
+    when it loads the registry, so only the private updater can store this stale
+    state. It stands for a registry that the user or a crash left inconsistent.
+    """
+    er.async_get(hass)._async_update_entity(entity_id, disabled_by=er.RegistryEntryDisabler.DEVICE)
+    reg_entry = er.async_get(hass).async_get(entity_id)
+    assert reg_entry is not None
+    assert reg_entry.disabled_by is er.RegistryEntryDisabler.DEVICE
 
 
 def _entries(registry: er.EntityRegistry, *entry_ids: str) -> dict[str, er.RegistryEntry]:
@@ -372,28 +389,36 @@ async def test_user_disabled_router_stays_disabled(hass: HomeAssistant, aioclien
 
 
 @pytest.mark.parametrize(
-    ("old_disabled_by", "expected"),
+    ("old_disabled_by", "device_disabled", "expected"),
     [
-        pytest.param(er.RegistryEntryDisabler.USER, er.RegistryEntryDisabler.USER, id="user"),
-        pytest.param(er.RegistryEntryDisabler.DEVICE, er.RegistryEntryDisabler.USER, id="device"),
+        pytest.param(er.RegistryEntryDisabler.USER, False, er.RegistryEntryDisabler.USER, id="user"),
+        pytest.param(er.RegistryEntryDisabler.DEVICE, True, er.RegistryEntryDisabler.USER, id="device"),
+        # A stale DEVICE disabler on an enabled legacy device is not carried over.
+        pytest.param(er.RegistryEntryDisabler.DEVICE, False, None, id="device-on-enabled-device"),
         pytest.param(
             er.RegistryEntryDisabler.INTEGRATION,
+            False,
             er.RegistryEntryDisabler.INTEGRATION,
             id="integration",
         ),
-        pytest.param(None, None, id="enabled"),
+        pytest.param(None, False, None, id="enabled"),
     ],
 )
 async def test_disabled_router_replacement_keeps_disabled_state(
     hass: HomeAssistant,
     aioclient_mock: Any,
     old_disabled_by: er.RegistryEntryDisabler | None,
+    device_disabled: bool,
     expected: er.RegistryEntryDisabler | None,
 ) -> None:
     """Each way a 0.3.0 router was disabled carries over to its replacement; names do not carry over."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
-    device_id = _disabled_legacy_device(hass, entry) if old_disabled_by is er.RegistryEntryDisabler.DEVICE else None
+    device_id = (
+        _legacy_device(hass, entry, disabled=device_disabled)
+        if old_disabled_by is er.RegistryEntryDisabler.DEVICE
+        else None
+    )
     old = _create(
         hass,
         entry,
@@ -403,6 +428,8 @@ async def test_disabled_router_replacement_keeps_disabled_state(
         disabled_by=old_disabled_by,
         device_id=device_id,
     )
+    if old_disabled_by is er.RegistryEntryDisabler.DEVICE and not device_disabled:
+        _stale_device_disabler(hass, old)
     registry = er.async_get(hass)
     registry.async_update_entity(old, name="Noisy router")
 
@@ -485,7 +512,7 @@ async def test_migration_with_disabled_routers_is_idempotent(hass: HomeAssistant
     """A second run with the disabled replacements present changes no registry entry and keeps one issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
-    legacy_device = _disabled_legacy_device(hass, entry)
+    legacy_device = _legacy_device(hass, entry)
     _create(hass, entry, "binary_sensor", "http_router_file-ok@file", disabled_by=er.RegistryEntryDisabler.USER)
     _create(
         hass,
@@ -541,7 +568,7 @@ async def test_device_disabled_entities_stay_disabled_after_device_updates(
             "sensor",
             f"{SERVICES.prefix}whoami@docker",
             disabled_by=by_device,
-            device_id=_disabled_legacy_device(hass, entry, "http_services"),
+            device_id=_legacy_device(hass, entry, "http_services"),
         ),
         "aggregate": _create(
             hass,
@@ -549,7 +576,7 @@ async def test_device_disabled_entities_stay_disabled_after_device_updates(
             "binary_sensor",
             UID_ROUTERS_PROBLEM,
             disabled_by=by_device,
-            device_id=_disabled_legacy_device(hass, entry, "diagnostics"),
+            device_id=_legacy_device(hass, entry, "diagnostics"),
         ),
         "cert": _create(
             hass,
@@ -557,7 +584,7 @@ async def test_device_disabled_entities_stay_disabled_after_device_updates(
             CERT_EXPIRING.domain,
             f"{CERT_EXPIRING.prefix}{CERT_HOST}",
             disabled_by=by_device,
-            device_id=_disabled_legacy_device(hass, entry, "http_routers_tls"),
+            device_id=_legacy_device(hass, entry, "http_routers_tls"),
         ),
     }
     new_device = {
@@ -601,14 +628,16 @@ async def test_device_disabled_entities_stay_disabled_after_device_updates(
 
 
 async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssistant) -> None:
-    """Only this entry's entities on its legacy devices change; other entries and devices keep DEVICE; a rerun is a no-op."""
+    """Only this entry's entities on its disabled legacy devices change; others keep DEVICE; a rerun is a no-op."""
     by_device = er.RegistryEntryDisabler.DEVICE
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     entry.add_to_hass(hass)
     other = make_traefik_entry(entry_id=OTHER_ENTRY_ID, unique_id="other.example.com", version=1, minor_version=1)
     other.add_to_hass(hass)
-    own_legacy = _disabled_legacy_device(hass, entry, "http_services")
-    other_legacy = _disabled_legacy_device(hass, other, "http_services")
+    own_legacy = _legacy_device(hass, entry, "http_services")
+    other_legacy = _legacy_device(hass, other, "http_services")
+    # A DEVICE disabler on an enabled legacy device is stale; Home Assistant clears it, the migration leaves it.
+    own_enabled_legacy = _legacy_device(hass, entry, "http_entrypoints", disabled=False)
     # A disabled device with the current main identifier (an install older than 0.3.0) is not a legacy device.
     device_registry = dr.async_get(hass)
     main = device_registry.async_get_or_create(
@@ -619,6 +648,8 @@ async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssist
         hass, entry, "sensor", f"{SERVICES.prefix}whoami@docker", disabled_by=by_device, device_id=own_legacy
     )
     on_main = _create(hass, entry, "sensor", "http_entrypoint_web", disabled_by=by_device, device_id=main.id)
+    on_enabled_legacy = _create(hass, entry, "sensor", "http_entrypoint_websecure", device_id=own_enabled_legacy)
+    _stale_device_disabler(hass, on_enabled_legacy)
     other_on_own_legacy = _create(
         hass, other, "sensor", f"{SERVICES.prefix}whoami@docker", disabled_by=by_device, device_id=own_legacy
     )
@@ -632,6 +663,7 @@ async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssist
     expected = {
         service: er.RegistryEntryDisabler.USER,
         on_main: by_device,
+        on_enabled_legacy: by_device,
         other_on_own_legacy: by_device,
         other_on_other_legacy: by_device,
     }
@@ -885,3 +917,58 @@ async def test_migration_keeps_unique_id_owned_by_another_entry(
     assert ENTRY_ID in message
     assert OTHER_ENTRY_ID in message
     assert "already in use" not in caplog.text
+
+
+# ----------------------- repair issue: title after the last step -----------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "issue_title"),
+    [
+        pytest.param("Traefik Proxy", "traefik.example.com", id="default-name"),
+        pytest.param("My proxy", "My proxy", id="user-renamed"),
+    ],
+)
+async def test_migration_issue_names_title_after_migration(hass: HomeAssistant, title: str, issue_title: str) -> None:
+    """The repair issue of a 1.1 entry names the title the entry has after 1.3, not the default title it had."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1, title=title)
+    entry.add_to_hass(hass)
+    _create(hass, entry, "button", "diagnostics_reload")
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.title == issue_title
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders == {"entry_title": issue_title, "removed_count": "1"}
+
+
+async def test_title_migration_updates_existing_issue(hass: HomeAssistant) -> None:
+    """A 1.2 entry whose default title becomes the host gets its existing repair issue updated; its count stays."""
+    entry = make_traefik_entry(entry_id=ENTRY_ID, minor_version=2, title="Traefik Proxy")
+    entry.add_to_hass(hass)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _issue_id(ENTRY_ID),
+        config_entry_id=ENTRY_ID,
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="entities_migrated",
+        translation_placeholders={"entry_title": "Traefik Proxy", "removed_count": "3"},
+    )
+    other = make_traefik_entry(
+        entry_id=OTHER_ENTRY_ID, unique_id="other.example.com", minor_version=2, title="Traefik Proxy"
+    )
+    other.add_to_hass(hass)
+
+    assert await integration.async_migrate_entry(hass, entry)
+    assert await integration.async_migrate_entry(hass, other)
+
+    issue = _get_issue(hass, ENTRY_ID)
+    assert issue is not None
+    assert issue.translation_placeholders == {"entry_title": "traefik.example.com", "removed_count": "3"}
+    assert issue.is_persistent is True
+    # Without an issue from the 1.2 step, the title change raises none.
+    assert _get_issue(hass, OTHER_ENTRY_ID) is None
