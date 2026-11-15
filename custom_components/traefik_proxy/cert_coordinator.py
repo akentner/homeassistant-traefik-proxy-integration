@@ -46,6 +46,7 @@ from homeassistant.util import ssl as ha_ssl
 
 from .api import TraefikProxyApiError, TraefikProxyNotFoundError
 from .const import (
+    CERT_RETRY_INTERVAL,
     CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
@@ -213,7 +214,9 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     successful cycle one day-boundary timer is scheduled at the earliest
     :meth:`HostCertState.next_day_change` of the hosts; it notifies the
     listeners the same way and schedules the next one. Shutdown (entry
-    unload) cancels it.
+    unload) cancels it. After a failed cycle the next one runs after
+    ``CERT_RETRY_INTERVAL``; a successful cycle restores the normal
+    interval.
     """
 
     config_entry: TraefikProxyConfigEntry
@@ -253,10 +256,22 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         # False until the default store was built; the built store may be None.
         self._trust_store_ready = trust_store is not None
         self._unsub_day_boundary: CALLBACK_TYPE | None = None
+        self._normal_interval = timedelta(seconds=update_interval_seconds)
+        self._retry_interval = timedelta(seconds=CERT_RETRY_INTERVAL)
 
     async def _async_update_data(self) -> dict[str, HostCertState]:
-        """Run one cert cycle and schedule the day-boundary timer for its states."""
-        states = await self._async_cycle()
+        """Run one cert cycle, set the next interval and schedule the day-boundary timer.
+
+        Any failure switches to the retry interval; Home Assistant schedules
+        the next cycle from ``update_interval`` after this returns or raises.
+        A cancelled cycle changes neither.
+        """
+        try:
+            states = await self._async_cycle()
+        except Exception:
+            self.update_interval = self._retry_interval
+            raise
+        self.update_interval = self._normal_interval
         self._async_schedule_day_boundary(states)
         return states
 

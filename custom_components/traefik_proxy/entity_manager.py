@@ -16,7 +16,9 @@ registry entry. The missing-since times are kept in a per-entry Store, so the
 grace period survives reloads and restarts, and a timer of its own removes
 expired keys even when the snapshot never changes. Registry entries of the
 entry whose key is absent from the first snapshot are adopted as missing
-entities at setup, so orphans expire the same way.
+entities at setup, so orphans expire the same way. When the coordinator's
+last cycle failed at registration, orphans are adopted as present instead,
+because a failed cycle says nothing about which items exist.
 
 With the per-item option off, the router and service kinds are not
 registered and their registry entries are purged at setup, without a grace
@@ -217,6 +219,12 @@ class TraefikEntityManager:
         already ran out is removed instead. Stored times of keys that are
         present again or no longer registered are dropped.
 
+        When the coordinator's last cycle failed (``last_update_success`` is
+        False, e.g. a failed first cert cycle), an orphan without a stored
+        time is adopted as present: added, but not marked missing. Orphans
+        with a stored time keep it (or are removed when it ran out). The next
+        successful cycle reconciles them like any other key.
+
         The kind listener is registered before any entity exists, so on every
         coordinator notification it runs before the entities' own listeners
         and they already see the updated missing marks.
@@ -234,7 +242,12 @@ class TraefikEntityManager:
             if domain == spec.domain and (key := spec.key_of(entry_id, unique_id)) is not None
         } - present
         now = dt_util.utcnow()
+        # A failed cycle carries no information about which items exist.
+        failed = not coordinator.last_update_success
         for key in sorted(orphans):
+            if failed and key not in stored:
+                present.add(key)
+                continue
             since = stored.get(key, now)
             if now - since >= MISSING_GRACE_PERIOD:
                 self._async_remove_registry_entry(spec, key)

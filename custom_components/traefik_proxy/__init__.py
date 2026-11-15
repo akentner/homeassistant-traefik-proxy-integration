@@ -217,11 +217,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     2. Await the main coordinator's first refresh. It raises
        ``ConfigEntryNotReady`` on transient failure (HA retries) or
        ``ConfigEntryAuthFailed`` on 401/403 (reauth flow).
-    3. ``try/except``-guarded first refresh on the cert coordinator: a TLS
-       failure on the first cycle must not also raise
-       ``ConfigEntryNotReady``. On failure an empty cache is seeded via
-       ``async_set_updated_data({})`` so the platforms see a defined state
-       instead of awaiting an unfinished refresh.
+    3. Run the cert coordinator's first cycle with ``async_refresh``, which
+       never raises: a certificate failure must not block the setup. A
+       failed cycle stays failed, so the cert entities are unavailable and
+       the cycle is retried after ``CERT_RETRY_INTERVAL``.
     4. Load the entity manager: stored missing-since times, the entry's
        registry entries and the deadline timer. With the per-item option
        off, purge the router and service registry entries right away.
@@ -249,16 +248,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         int(cert_coordinator.update_interval.total_seconds()) if cert_coordinator.update_interval else 0,
         cert_coordinator.threshold_days,
     )
-    try:
-        await cert_coordinator.async_config_entry_first_refresh()
-    except Exception as err:  # final-resort catch-all; cert failure must not raise ConfigEntryNotReady
-        _LOGGER.debug(
-            "cert coordinator first refresh failed (TLS probes deferred to next 6h cycle): %s",
-            err,
-        )
-        # Seed an empty cache so the platforms see a defined state
-        # instead of awaiting an unfinished refresh.
-        cert_coordinator.async_set_updated_data({})
+    await cert_coordinator.async_refresh()
 
     entity_manager = entry.runtime_data.entity_manager
     await entity_manager.async_load()
