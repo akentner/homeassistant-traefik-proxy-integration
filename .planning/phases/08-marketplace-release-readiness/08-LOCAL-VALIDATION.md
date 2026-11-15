@@ -150,3 +150,46 @@ execution of all 10 hacs/action validators on this tree.
 
 A **GitHub release for 1.0.0** is a catalog requirement checked by humans, not by
 the action. It is created by the user (M8, I4/I5: tag `v1.0.0`).
+
+## Final pre-push run (08-13, D-27)
+
+Run on 2026-11-15 by the 08-13 executor on the final code tree (HEAD `435751b`;
+the later 08-13 commits change only `.planning/` documents). Commands ran in this
+order; each output was redirected to a log and the exit status checked directly.
+
+| # | Command | Exit | Key result line |
+|---|---|---|---|
+| 1 | `uv run pytest -q` | 0 | `1152 passed, 5 warnings`; `Required test coverage of 99.0% reached. Total coverage: 99.29%`; no `Lingering` |
+| 2a | `uv run ruff check custom_components tests` | 0 | `All checks passed!` |
+| 2b | `uv run ruff format --check custom_components tests` | 0 | `50 files already formatted` |
+| 2c | `uv run mypy --strict custom_components/traefik_proxy` | 0 | `Success: no issues found in 16 source files` |
+| 3 | `make test-min-ha` (hashed lock, `homeassistant==2026.11.0`, `pytest-homeassistant==2026.11.0`) | 0 | `1152 passed, 5 warnings`; coverage gate reached (99.29 %) |
+| 4 | `~/.cache/traefik-proxy-integration/ha2611-venv/bin/python -m pytest -q -o addopts="-p no:respx" tests` (HA 2026.11.0) | 0 | `1152 passed, 5 warnings` |
+| 5 | `uvx pre-commit run --all-files` | 0 | all 13 hooks `Passed` (incl. ruff, mypy --strict, hassfest key order, translations shape) |
+| 6 | `make hassfest` (`ghcr.io/home-assistant/hassfest@sha256:da6522993280166fe072704989a2b4c33e639e8ceb69c8ab6ad7ec5045c1a1e3`, same digest as 08-08) | 0 | `Integrations: 1` / `Invalid integrations: 0`; no `[ERROR]`, no `[WARNING]` |
+| 7 | `make hacs-action` | **not run** | **REL-07 pending — proven by the first PR run of validate.yml (HACS job).** User decision 2026-11-15: the target needs the user's `gh auth token`; agents never read or pass that credential. No result line exists locally. |
+| 8 | README consistency check (08-10 Task 1 verify: entity keys/names, states, option keys; private-host grep; reload/YAML grep) | 0 / 0 / 0 | `missing: []` |
+| 9 | Planning-reference grep over `custom_components/` (`*.py`, `*.json`; 08-03 Task 3) + `pytest tests/test_baseline_guards.py -k "planning_references or doc_links or syntax_warning or multi_second_sleep" --no-cov` | 0 / 0 | no match; `4 passed` |
+
+Docker cleanup after step 6: `docker ps -a`, `docker network ls` and
+`docker volume ls` were identical before and after the hassfest run and match
+`docker-baseline-phase8.txt` (7 pre-existing containers, networks `bridge`,
+`host`, `none`, `winboat_default`, 6 volumes). No container, network or volume
+of this phase remains. `git status` showed no file written by the container.
+
+Still open after this run (not satisfiable locally by decision):
+
+- **hacs/action (10 checks, REL-07):** pending the first PR run of
+  `validate.yml` (HACS job). The statement in the hacs/action section above that
+  "08-13 re-runs both validators before the push" is superseded by the user
+  decision of 2026-11-15 (deferred to CI).
+- **Negative control (unknown category):** not run; manual follow-up for the
+  user (`make hacs-action` on a temporary copy with
+  `computers_network.bogus`, expected failing `integration_categories`).
+
+Checks the first CI run must confirm (in addition to the list in "Checks the
+post-push CI run must confirm" above): all five `validate.yml` jobs green
+(`lint`, `test`, `test-min-ha` with the hashed install, `hassfest`, `hacs`
+with `permissions: {}`). The hassfest action is pinned to a `master` commit
+(`# master (2026-10-26)`) that Dependabot may not bump; the hassfest and hacs
+actions pull moving images.
