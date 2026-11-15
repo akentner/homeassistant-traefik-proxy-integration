@@ -555,6 +555,43 @@ async def test_failed_cycle_never_marks_missing(hass, aioclient_mock, mock_tls_p
     assert _store_key(entry.entry_id) not in hass_storage
 
 
+async def test_failed_cycle_keeps_stored_cert_missing_time(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, freezer, hass_storage
+) -> None:
+    """A failed first cert cycle keeps a restored host's stored missing time and stamps no other host."""
+    stored_host, plain_host = "www.secure.example.com", "secure.example.com"
+    key = _store_key("stored-cert-entry")
+    stored_since = dt_util.utcnow() - timedelta(hours=2)
+    hass_storage[key] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": key,
+        "data": {CERT_EXPIRY.name: {stored_host: stored_since.isoformat()}},
+    }
+    entry = make_traefik_entry(entry_id="stored-cert-entry")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for host in (stored_host, plain_host):
+        registry.async_get_or_create(
+            CERT_EXPIRY.domain, DOMAIN, CERT_EXPIRY.unique_id(entry.entry_id, host), config_entry=entry
+        )
+    aioclient_mock.get(f"{MOCK_URL}/api/certificates", status=500)
+    stub_traefik(aioclient_mock)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+
+    assert not entry.runtime_data.cert_coordinator.last_update_success
+    manager = entry.runtime_data.entity_manager
+    assert manager.missing_since(CERT_EXPIRY, stored_host) == stored_since
+    assert manager.missing_since(CERT_EXPIRY, plain_host) is None
+    for host in (stored_host, plain_host):
+        entity_id = entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, host))
+        state = hass.states.get(entity_id)
+        assert state is not None and state.state == "unavailable", host
+    assert hass_storage[key]["data"] == {CERT_EXPIRY.name: {stored_host: stored_since.isoformat()}}
+
+
 async def test_remove_entry_deletes_missing_store(hass, aioclient_mock, mock_tls_probe, hass_storage) -> None:  # type: ignore[no-untyped-def]
     """Removing the config entry deletes its missing-since Store."""
     entry = await setup_traefik_entry(hass, aioclient_mock)

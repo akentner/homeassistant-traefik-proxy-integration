@@ -6,11 +6,17 @@ new probe. The cert coordinator keeps one timer at the earliest moment a
 host's whole-day count changes; when it fires the listeners re-evaluate and
 write only the entities whose state changed.
 
-Every setup runs on the v2.11 capture (``/api/certificates`` answers 404,
-so certificates come from the probe) with the probe replaced by a stub that
-returns a certificate per SNI name, and the clock frozen at ``T0``. Clock
-moves stay below the 6 h cert interval after setup, so only the day-boundary
-timer can explain a state change.
+A failed cert cycle is reported as it is: the first one does not block the
+setup, leaves the cert entities unavailable instead of faking an empty
+success, never marks registry-restored hosts missing and is retried after
+5 minutes.
+
+The timer setups run on the v2.11 capture (``/api/certificates`` answers
+404, so certificates come from the probe) with the probe replaced by a stub
+that returns a certificate per SNI name, and the clock frozen at ``T0``.
+Clock moves stay below the 6 h cert interval after setup, so only the
+day-boundary timer can explain a state change. The failure setups run on
+the v3.7 capture with ``/api/certificates`` failing.
 """
 
 from __future__ import annotations
@@ -21,18 +27,30 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import aiohttp
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
+from custom_components.traefik_proxy.const import DEFAULT_TLS_CERT_COOLDOWN, DOMAIN
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
 from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
-from tests.conftest import entity_id_for, make_cert_state, setup_traefik_entry
+from tests.conftest import (
+    MOCK_URL,
+    entity_id_for,
+    make_cert_state,
+    make_traefik_entry,
+    rawdata_copy,
+    restub_traefik,
+    setup_traefik_entry,
+    stub_traefik,
+)
 
 # TLS hosts of the v2.11 capture.
 HOST = "secure.example.com"
@@ -43,6 +61,8 @@ HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
 PROBE_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_probe_certificate"
 TRACK_TARGET = "custom_components.traefik_proxy.cert_coordinator.async_track_point_in_utc_time"
+# The spec value, independent of the constant it is checked against.
+RETRY = timedelta(seconds=300)
 
 
 @dataclass
@@ -282,3 +302,115 @@ async def test_unload_cancels_the_boundary_timer(hass: HomeAssistant, aioclient_
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
     assert not _timer_pending(cert_coordinator)
+
+
+async def _setup_failing_certificates(
+    hass: HomeAssistant,
+    aioclient_mock: Any,
+    *,
+    restored: tuple[str, ...] = (HOST, OTHER_HOST),
+    exc: Exception | None = None,
+) -> MockConfigEntry:
+    """Set up a v3.7 entry whose /api/certificates fails (500, or ``exc``); assert it loaded.
+
+    Registry entries of both cert kinds are created for every host in
+    ``restored`` before the setup, as after a restart.
+    """
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for host in restored:
+        for spec in (CERT_EXPIRY, CERT_EXPIRING):
+            registry.async_get_or_create(spec.domain, DOMAIN, spec.unique_id(entry.entry_id, host), config_entry=entry)
+    if exc is not None:
+        aioclient_mock.get(f"{MOCK_URL}/api/certificates", exc=exc)
+    else:
+        aioclient_mock.get(f"{MOCK_URL}/api/certificates", status=500)
+    stub_traefik(aioclient_mock, version="v3.7")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    return entry
+
+
+async def test_failed_first_cycle_keeps_restored_hosts_unavailable_not_missing(
+    hass: HomeAssistant, aioclient_mock: Any, certs: CertStub
+) -> None:
+    """A failed first cert cycle stays failed; restored hosts are unavailable and not missing."""
+    entry = await _setup_failing_certificates(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    manager = entry.runtime_data.entity_manager
+
+    assert not cert_coordinator.last_update_success
+    for host in (HOST, OTHER_HOST):
+        assert _expiry(hass, entry, host).state == "unavailable", host
+        assert _expiring(hass, entry, host).state == "unavailable", host
+        assert manager.missing_since(CERT_EXPIRY, host) is None, host
+        assert manager.missing_since(CERT_EXPIRING, host) is None, host
+    assert certs.probe.call_count == 0
+
+
+async def test_restored_hosts_reconciled_by_the_next_successful_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, certs: CertStub
+) -> None:
+    """After the failed first cycle, the next success makes present hosts available and marks absent ones missing."""
+    entry = await _setup_failing_certificates(hass, aioclient_mock)
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    manager = entry.runtime_data.entity_manager
+
+    rawdata = rawdata_copy("v3.7")
+    rawdata["routers"]["secure@file"]["tls"]["domains"][0]["sans"] = []
+    restub_traefik(aioclient_mock, version="v3.7", rawdata=rawdata)
+    await entry.runtime_data.coordinator.async_refresh()
+    await cert_coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert cert_coordinator.last_update_success
+    expiry = _expiry(hass, entry)
+    assert expiry.state not in ("unavailable", "unknown")
+    assert expiry.attributes["source"] == "api"
+    assert _expiring(hass, entry).state == "off"
+    assert manager.missing_since(CERT_EXPIRY, HOST) is None
+    assert manager.missing_since(CERT_EXPIRY, OTHER_HOST) == dt_util.utcnow()
+    assert manager.missing_since(CERT_EXPIRING, OTHER_HOST) == dt_util.utcnow()
+    assert _expiry(hass, entry, OTHER_HOST).state == "unavailable"
+
+
+async def test_retry_five_minutes_after_a_failed_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, certs: CertStub, freezer: Any
+) -> None:
+    """A failed cycle retries after 300 s; a successful one goes back to the 6 h interval."""
+    entry = await _setup_failing_certificates(hass, aioclient_mock, restored=())
+    cert_coordinator = entry.runtime_data.cert_coordinator
+    assert not cert_coordinator.last_update_success
+    assert cert_coordinator.update_interval == RETRY
+    requests = _certificates_requests(aioclient_mock)
+    assert requests == 1
+
+    freezer.tick(RETRY + SECOND)
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert _certificates_requests(aioclient_mock) == requests + 1
+    assert not cert_coordinator.last_update_success
+    assert cert_coordinator.update_interval == RETRY
+
+    restub_traefik(aioclient_mock, version="v3.7")
+    freezer.tick(RETRY + SECOND)
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert _certificates_requests(aioclient_mock) == 1
+    assert cert_coordinator.last_update_success
+    assert cert_coordinator.update_interval == timedelta(seconds=DEFAULT_TLS_CERT_COOLDOWN)
+
+
+@pytest.mark.parametrize(
+    "exc", [None, aiohttp.ClientConnectionError("connection refused")], ids=["status_500", "connection_error"]
+)
+async def test_certificate_failure_never_raises_not_ready(
+    hass: HomeAssistant, aioclient_mock: Any, certs: CertStub, exc: Exception | None
+) -> None:
+    """A failing certificate source at setup never blocks the entry (no ConfigEntryNotReady)."""
+    entry = await _setup_failing_certificates(hass, aioclient_mock, restored=(), exc=exc)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.coordinator.last_update_success
+    assert not entry.runtime_data.cert_coordinator.last_update_success
