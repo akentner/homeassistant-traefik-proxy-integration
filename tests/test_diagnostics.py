@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -12,7 +13,9 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant.components.diagnostics import get_diagnostics_for_config_entry
 
 from custom_components.traefik_proxy import api
+from custom_components.traefik_proxy.cert_coordinator import CertSource
 from custom_components.traefik_proxy.const import CONF_URL, CONF_VERIFY_SSL
+from custom_components.traefik_proxy.diagnostics import _jsonable, _safe_url
 from tests.conftest import (
     AUTH_TYPE,
     MOCK_URL,
@@ -169,3 +172,24 @@ async def test_diagnostics_list_missing_items(hass: HomeAssistant, hass_client: 
     since = diag["missing"]["router"][VANISHING_ROUTER]
     assert isinstance(since, str)
     assert since.endswith("+00:00")
+
+
+def test_jsonable_converts_model_values() -> None:
+    """Datetimes become ISO strings, timedeltas seconds, tuples lists, enums their value, keys strings."""
+    value = {
+        1: (datetime(2026, 11, 15, 12, 0, tzinfo=UTC), timedelta(minutes=5)),
+        "source": CertSource.API,
+        "nested": [{"none": None}],
+    }
+
+    assert _jsonable(value) == {
+        "1": ["2026-11-15T12:00:00+00:00", 300.0],
+        "source": "api",
+        "nested": [{"none": None}],
+    }
+
+
+def test_safe_url_redacts_an_unparsable_url() -> None:
+    """A stored URL that cannot be parsed is redacted as a whole; a non-string passes through."""
+    assert _safe_url("https://diag-user:diag-pass@[::1:8080") == REDACTED
+    assert _safe_url(None) is None
