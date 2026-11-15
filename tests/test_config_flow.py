@@ -35,7 +35,6 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.setup import async_setup_component
 
-from custom_components.traefik_proxy import config_flow
 from custom_components.traefik_proxy.api import (
     Auth,
     AuthMode,
@@ -54,6 +53,7 @@ from custom_components.traefik_proxy.config_flow import (
     InvalidAuth,
     InvalidUrl,
     Redirect,
+    UrlHasCredentials,
     _check_url_shape,
     _validate_input,
 )
@@ -184,7 +184,7 @@ def test_check_url_shape_accepts_http_and_https() -> None:
 )
 def test_check_url_shape_rejects_userinfo(url: str) -> None:
     """Credentials embedded in a well-formed URL raise UrlHasCredentials, without the URL as argument."""
-    with pytest.raises(config_flow.UrlHasCredentials) as err:
+    with pytest.raises(UrlHasCredentials) as err:
         _check_url_shape(url)
     assert err.value.args == ()
 
@@ -378,7 +378,7 @@ async def test_entry_data_round_trips_to_probe_header(hass: object, aioclient_mo
 
 async def test_validate_input_rejects_userinfo_url_without_request(hass: object, aioclient_mock: Any) -> None:
     """A userinfo URL is refused by the shape check before any request is sent."""
-    with pytest.raises(config_flow.UrlHasCredentials):
+    with pytest.raises(UrlHasCredentials):
         await _validate_input(hass, {**BEARER_DATA, CONF_URL: USERINFO_URL, CONF_VERIFY_SSL: True})
 
     assert aioclient_mock.call_count == 0
@@ -901,6 +901,33 @@ async def test_error_matrix_probe_failure_maps_to_its_key(
 
 
 @pytest.mark.parametrize("step", STEPS)
+async def test_error_matrix_request_construction_error_is_invalid_url(
+    hass: Any, aioclient_mock: Any, step: str
+) -> None:
+    """aiohttp refusing to build the probe request is invalid_url in every step, never 'unknown'."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
+
+    result = await _run_step(hass, step, {})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+
+
+async def test_reauth_stored_url_has_credentials(hass: Any, aioclient_mock: Any) -> None:
+    """A stored URL that still carries credentials is url_has_credentials in reauth; nothing is sent."""
+    entry = make_traefik_entry(data={CONF_URL: USERINFO_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"})
+    entry.add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await _reauth(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "new"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "url_has_credentials"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize("step", STEPS)
 async def test_unknown_error_is_logged_once_without_input(
     hass: Any, aioclient_mock: Any, caplog: pytest.LogCaptureFixture, step: str
 ) -> None:
@@ -994,3 +1021,34 @@ async def test_user_step_error_order(
         assert result["type"] is FlowResultType.FORM
         assert result["errors"] == expected
     assert aioclient_mock.call_count == 0
+
+
+FLOW_ERROR_KEYS = {
+    "invalid_url",
+    "url_has_credentials",
+    "invalid_auth",
+    "cannot_connect",
+    "api_disabled",
+    "redirect",
+    "required",
+    "unknown",
+}
+
+
+@pytest.mark.parametrize("language", ["en", "de"])
+def test_flow_error_keys_have_texts(language: str) -> None:
+    """Every form error and the already_configured abort have a text in en and de, without a URL literal."""
+    import json
+    from pathlib import Path
+
+    import custom_components.traefik_proxy as integration
+
+    path = Path(integration.__file__).parent / "translations" / f"{language}.json"
+    config = json.loads(path.read_text(encoding="utf-8"))["config"]
+
+    assert set(config["error"]) == FLOW_ERROR_KEYS
+    assert config["abort"]["already_configured"]
+    for text in [*config["error"].values(), config["abort"]["already_configured"]]:
+        assert text.strip()
+        assert "://" not in text
+        assert "{" not in text

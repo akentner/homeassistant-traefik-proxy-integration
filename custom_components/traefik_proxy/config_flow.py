@@ -152,7 +152,11 @@ class ApiDisabled(Exception):
 
 
 class InvalidUrl(Exception):
-    """The provided URL is malformed or carries credentials (userinfo)."""
+    """The provided URL is malformed; raised without arguments, so no URL ends up in ``args``."""
+
+
+class UrlHasCredentials(Exception):
+    """The provided URL is well-formed but carries credentials (userinfo)."""
 
 
 class Redirect(Exception):
@@ -169,20 +173,33 @@ def _check_url_shape(url: str) -> None:
     ``TextSelector(type=URL)`` field cannot block (e.g. ``http;//`` from
     autocomplete / paste mistakes). Raises :class:`InvalidUrl` if the URL
     cannot be parsed, is missing a scheme, has a non-HTTP scheme, has no
-    host or an invalid port, or carries credentials (``user:pass@host``):
-    credentials belong in the authentication fields. A URL that passes has
-    a :func:`url_unique_id`.
+    host or an invalid port; only a URL of valid shape that carries
+    credentials (``user:pass@host``, also an empty userinfo) raises
+    :class:`UrlHasCredentials`: credentials belong in the authentication
+    fields. Neither carries the URL as argument. A URL that passes has a
+    :func:`url_unique_id`.
     """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.hostname:
-            raise InvalidUrl(url)
-        if parsed.username or parsed.password:
-            raise InvalidUrl(url)
+            raise InvalidUrl
         # Raises ValueError for a port out of range or not a number.
         _ = parsed.port
     except ValueError:
-        raise InvalidUrl(url) from None
+        raise InvalidUrl from None
+    if parsed.username is not None or parsed.password is not None:
+        raise UrlHasCredentials
+
+
+def _url_errors(url: str) -> dict[str, str]:
+    """Return the form errors of a newly entered URL (empty when it may be probed)."""
+    try:
+        _check_url_shape(url)
+    except InvalidUrl:
+        return {"base": "invalid_url"}
+    except UrlHasCredentials:
+        return {"base": "url_has_credentials"}
+    return {}
 
 
 async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
@@ -216,7 +233,7 @@ async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
     except TraefikProxyRedirectError:
         raise Redirect from None
     except TraefikProxyInvalidUrlError:
-        raise InvalidUrl(data[CONF_URL]) from None
+        raise InvalidUrl from None
     except TraefikProxyApiError, TimeoutError:
         raise CannotConnect from None
 
@@ -224,12 +241,16 @@ async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
 async def _async_probe(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
     """Probe Traefik with entry data; return the form errors (empty on success).
 
-    The only place that maps a probe failure to a form error key.
+    The only place that maps a probe failure to a form error key. Any other
+    exception is logged with a fixed message (never the URL or a credential)
+    and shown as ``unknown``.
     """
     try:
         await _validate_input(hass, data)
     except InvalidUrl:
         return {"base": "invalid_url"}
+    except UrlHasCredentials:
+        return {"base": "url_has_credentials"}
     except InvalidAuth:
         return {"base": "invalid_auth"}
     except ApiDisabled:
@@ -238,6 +259,9 @@ async def _async_probe(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str
         return {"base": "redirect"}
     except CannotConnect:
         return {"base": "cannot_connect"}
+    except Exception:
+        _LOGGER.exception("Unexpected error while validating the Traefik connection")
+        return {"base": "unknown"}
     return {}
 
 
@@ -388,11 +412,10 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             url = user_input[CONF_URL]
             auth_type = user_input.get(CONF_AUTH_TYPE, AuthMode.none.value)
-            try:
-                _check_url_shape(url)
-            except InvalidUrl:
-                errors["base"] = "invalid_url"
-            else:
+            # Only the first failing stage is reported: URL shape and URL
+            # credentials, duplicate, credential fields, probe.
+            errors = _url_errors(url)
+            if not errors:
                 # One entry per Traefik (host:port); a configured one is not
                 # contacted again.
                 await self.async_set_unique_id(url_unique_id(url))
@@ -465,11 +488,8 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             url = user_input[CONF_URL]
-            try:
-                _check_url_shape(url)
-            except InvalidUrl:
-                errors["base"] = "invalid_url"
-            else:
+            errors = _url_errors(url)
+            if not errors:
                 # Checked before the probe so a Traefik owned by another
                 # entry is never contacted.
                 unique_id = url_unique_id(url)
