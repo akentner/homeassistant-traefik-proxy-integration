@@ -109,6 +109,11 @@ def test_strings_json_equals_en_json() -> None:
     assert STRINGS.read_bytes() == EN.read_bytes()
 
 
+def test_english_texts_have_one_source() -> None:
+    """translations/en.json is the only English source; the package root holds no text file (D-28)."""
+    assert sorted(path.name for path in PACKAGE.glob("*.json")) == ["icons.json", "manifest.json"]
+
+
 def test_de_matches_en_keys_and_placeholders() -> None:
     """de.json parses as UTF-8 JSON and mirrors en.json's device/entity/issues keys and placeholders."""
     en = _phase_strings(EN)
