@@ -754,3 +754,68 @@ async def test_user_step_other_port_on_same_host_is_a_new_entry(hass: Any, aiocl
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["result"].unique_id == "traefik.example.com:8443"
+
+
+# ----------------------- redirects (IN-01) -----------------------
+
+INTRUDER = "https://intruder.example.org/api/version"
+
+
+def _stub_redirect(aioclient_mock: Any, status: int = 302) -> None:
+    """/api/version answers with a redirect to another host."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=status, headers={"Location": INTRUDER})
+
+
+def _assert_single_probe_without_location(aioclient_mock: Any) -> None:
+    """Exactly one request was sent; the Location target was never contacted."""
+    assert aioclient_mock.call_count == 1
+    assert not [call for call in aioclient_mock.mock_calls if "intruder.example.org" in str(call[1])]
+
+
+async def test_user_step_redirect_shows_redirect_error(hass: Any, aioclient_mock: Any) -> None:
+    """A 3xx answer to the user step's probe is the 'redirect' form error; the redirect is not followed."""
+    _stub_redirect(aioclient_mock)
+
+    result = await _submit_user(hass, {AUTH_TYPE: "bearer", CONF_TOKEN: "tok"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "redirect"}
+    _assert_single_probe_without_location(aioclient_mock)
+
+
+async def test_reauth_redirect_shows_redirect_error(hass: Any, aioclient_mock: Any) -> None:
+    """A 3xx answer to the reauth probe is the 'redirect' form error; the entry is unchanged."""
+    _stub_redirect(aioclient_mock)
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await _reauth(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "new"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "redirect"}
+    assert dict(entry.data) == before
+    _assert_single_probe_without_location(aioclient_mock)
+
+
+@pytest.mark.parametrize("status", [301, 307, 308])
+async def test_validate_input_maps_redirect_status_to_redirect(hass: Any, aioclient_mock: Any, status: int) -> None:
+    """Every redirect status of the probe raises the flow's Redirect sentinel."""
+    from custom_components.traefik_proxy import config_flow
+
+    _stub_redirect(aioclient_mock, status)
+
+    with pytest.raises(config_flow.Redirect):
+        await _validate_input(hass, {**BEARER_DATA, CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True})
+    _assert_single_probe_without_location(aioclient_mock)
+
+
+@pytest.mark.parametrize("status", [400, 500])
+async def test_validate_input_maps_other_error_status_to_cannot_connect(
+    hass: Any, aioclient_mock: Any, status: int
+) -> None:
+    """A non-redirect error status keeps mapping to cannot_connect (the redirect branch is not a catch-all)."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=status)
+
+    with pytest.raises(CannotConnect):
+        await _validate_input(hass, {**BEARER_DATA, CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True})

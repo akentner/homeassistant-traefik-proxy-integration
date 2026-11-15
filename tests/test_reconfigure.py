@@ -301,3 +301,20 @@ async def test_reconfigure_unusable_url_is_invalid_url(hass, aioclient_mock, cap
     assert dict(entry.data) == before
     assert aioclient_mock.call_count == 0
     assert "Traceback" not in caplog.text
+
+
+async def test_reconfigure_redirect_shows_redirect_error(hass, aioclient_mock) -> None:
+    """A 3xx answer to the reconfigure probe is the 'redirect' form error; nothing is stored or followed."""
+    aioclient_mock.get(
+        f"{MOCK_URL}/api/version", status=302, headers={"Location": "https://intruder.example.org/api/version"}
+    )
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "redirect"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 1
+    assert not [call for call in aioclient_mock.mock_calls if "intruder.example.org" in str(call[1])]
