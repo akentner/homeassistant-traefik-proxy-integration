@@ -6,9 +6,9 @@ Covers the data-path invariants of ``custom_components.traefik_proxy.cert_coordi
 - Per-host ``asyncio.timeout(5)`` graceful error path (D-10 — never raises).
 - ``async_set_threshold`` mutates ``threshold_days`` AND fires
   ``async_update_listeners()`` (D-08 live re-eval).
-- ``_collect_hosts_from_main_coordinator`` union extraction from
-  ``tls.domains[].main`` + ``tls.domains[].sans[]`` + ``Host(`...`)``
-  rule matches — the BLOCKER #1 fix surface (config_entry wiring).
+- ``_collect_hosts`` union extraction from ``tls.domains[].main`` +
+  ``tls.domains[].sans[]`` + literal ``Host()`` rule names (config_entry
+  wiring), sorted and normalized.
 
 All async tests run under ``pytest-homeassistant-custom-component``;
 ``MagicMock`` powers the entry / main-coordinator state. Network
@@ -26,18 +26,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.traefik_proxy.cert_coordinator import (
-    _HOST_FROM_RULE,
-    CertCoordinator,
-)
+from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import (
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
+from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
 from custom_components.traefik_proxy.tls import CertError, CertInfo, is_error
-from tests.conftest import make_snapshot
+from tests.conftest import entity_id_for, make_snapshot, rawdata_copy, setup_traefik_entry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -157,7 +155,7 @@ def test_config_entry_wired_via_super_init() -> None:
     """BLOCKER #1 fix pin: ``super().__init__(config_entry=entry)`` wires the entry.
 
     Without this, ``self.config_entry.runtime_data.coordinator.data`` access in
-    ``_collect_hosts_from_main_coordinator`` raises ``AttributeError``.
+    ``_collect_hosts`` raises ``AttributeError``.
     """
     entry = _make_entry()
     c = CertCoordinator(MagicMock(), entry)
@@ -420,8 +418,8 @@ def test_collect_hosts_extracts_union_of_domains_and_sans() -> None:
     c = CertCoordinator(MagicMock(), entry)
     assert c.config_entry is entry  # BLOCKER #1 fix pin
 
-    hosts = c._collect_hosts_from_main_coordinator()
-    assert hosts == {"h1.example.com", "h1-alt.example.com", "h2.example.com"}
+    hosts = c._collect_hosts()
+    assert hosts == ("h1-alt.example.com", "h1.example.com", "h2.example.com")
     assert "internal.example.com" not in hosts  # internal router not in the snapshot
     assert "r3" not in hosts and "api@internal" not in hosts
 
@@ -444,8 +442,8 @@ def test_collect_hosts_lowercases_for_dedup() -> None:
         ],
     )
     c = CertCoordinator(MagicMock(), entry)
-    hosts = c._collect_hosts_from_main_coordinator()
-    assert hosts == {"example.com"}
+    hosts = c._collect_hosts()
+    assert hosts == ("example.com",)
 
 
 def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
@@ -476,8 +474,8 @@ def test_collect_hosts_skips_routers_with_tls_but_no_host() -> None:
         ],
     )
     c = CertCoordinator(MagicMock(), entry)
-    hosts = c._collect_hosts_from_main_coordinator()
-    assert hosts == {"good.example.com"}
+    hosts = c._collect_hosts()
+    assert hosts == ("good.example.com",)
 
 
 def test_collect_hosts_handles_sans_as_string_or_list() -> None:
@@ -510,7 +508,8 @@ def test_collect_hosts_handles_sans_as_string_or_list() -> None:
         ],
     )
     c = CertCoordinator(MagicMock(), entry)
-    hosts = c._collect_hosts_from_main_coordinator()
+    hosts = c._collect_hosts()
+    assert hosts == tuple(sorted(hosts))
     assert {
         "h.example.com",
         "alt.example.com",
@@ -521,14 +520,70 @@ def test_collect_hosts_handles_sans_as_string_or_list() -> None:
     }.issubset(hosts)
 
 
-def test_host_from_rule_helper_extracts_match() -> None:
-    """Module-level ``_HOST_FROM_RULE`` regex pulls the hostname out."""
-    match = _HOST_FROM_RULE.search("Host(`api.example.com`)")
-    assert match is not None
-    assert match.group(1) == "api.example.com"
+def test_collect_hosts_multi_host_rules_and_domains() -> None:
+    """v2 multi-argument rules, normalized domains, skipped wildcards, non-TLS routers ignored."""
+    entry = _make_entry()
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
+            {
+                "name": "r1",
+                "tls": {},
+                "rule": "Host(`a.example.com`, `b.example.com`)",
+            },
+            {
+                "name": "r2",
+                "tls": {
+                    "domains": [
+                        {"main": "C.example.com", "sans": ["*.wild.example.com", "d.example.com"]},
+                    ],
+                },
+                "rule": "",
+            },
+            {
+                "name": "r3",
+                "rule": "Host(`x.example.com`)",
+            },
+        ],
+    )
+    c = CertCoordinator(MagicMock(), entry)
+    assert c._collect_hosts() == (
+        "a.example.com",
+        "b.example.com",
+        "c.example.com",
+        "d.example.com",
+    )
 
-    match_multi = _HOST_FROM_RULE.search("Host(`a`) && Path(`/x`)")
-    assert match_multi is not None
-    assert match_multi.group(1) == "a"
 
-    assert _HOST_FROM_RULE.search("Path(`/api`)") is None
+def test_collect_hosts_skips_regex_sni_and_negated_names() -> None:
+    """HostRegexp, HostSNI and negated Host() names never become probe targets."""
+    entry = _make_entry()
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
+            {
+                "name": "r1",
+                "tls": {},
+                "rule": "HostRegexp(`{sub:[a-z]+}.example.com`) || HostSNI(`sni.example.com`)",
+            },
+            {
+                "name": "r2",
+                "tls": {},
+                "rule": "PathPrefix(`/x`) && !Host(`neg.example.com`) || Host(`Ok.Example.com.`)",
+            },
+        ],
+    )
+    c = CertCoordinator(MagicMock(), entry)
+    assert c._collect_hosts() == ("ok.example.com",)
+
+
+async def test_full_setup_registers_cert_entities_for_alt_host(
+    hass: Any, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """A v2 multi-argument rule in the v3.7 capture yields cert entities for every host."""
+    rawdata = rawdata_copy("v3.7")
+    rawdata["routers"]["secure@file"]["rule"] = "Host(`secure.example.com`, `alt.example.com`)"
+    entry = await setup_traefik_entry(hass, aioclient_mock, rawdata=rawdata)
+
+    probed = {call.args[0] for call in mock_tls_probe.call_args_list}
+    assert "alt.example.com" in probed
+    entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, "alt.example.com"))
+    entity_id_for(hass, CERT_EXPIRING.domain, CERT_EXPIRING.unique_id(entry.entry_id, "alt.example.com"))
