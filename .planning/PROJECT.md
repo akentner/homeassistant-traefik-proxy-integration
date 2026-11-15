@@ -1,4 +1,4 @@
-# Home Assistant Traefik Integration
+# Home Assistant Traefik Proxy Integration
 
 ## What This Is
 
@@ -41,10 +41,10 @@ and which TLS certificates are expiring soon.
       when any router is reporting a non-`enabled` status. _(Validated in
       Phase 2 — `TraefikAnyRouterFailingBinarySensor` on the Diagnostics
       device.)_
-- [x] **DIAG-03**: The integration supports a "reload" service that calls the
-      Traefik `/api/http/routers/refresh` endpoint, allowing HA automations
-      to trigger a hot reload after route changes. _(Validated in Phase 2 —
-      `traefik.reload_routers` registered at module level.)_
+- [x] **DIAG-03**: ~~The integration supports a "reload" service that triggers
+      a Traefik router refresh.~~ _(Superseded in Phase 5: the reload service
+      and reload button were removed; the "Refresh now" button, which polls
+      Traefik again on demand, replaces them.)_
 
 - [x] **TLS-01**: For every router terminating TLS, the integration exposes
       a sensor with the certificate's `notAfter` date and a calculated
@@ -83,7 +83,7 @@ and which TLS certificates are expiring soon.
 
 - **Mutating Traefik configuration files on disk** — Traefik's dynamic
   configuration is intentionally external; this integration only reads
-  state and triggers a refresh, it does not write files.
+  state, it does not write files.
 - **Auto-provisioning TLS certificates (Let's Encrypt / ACME flow)** —
   Traefik already handles this; duplicating it in HA would fight the
   source of truth.
@@ -112,19 +112,20 @@ Home Assistant integrations follow a well-documented convention:
 concern. The HA Core `DataUpdateCoordinator` pattern is the standard way
 to poll an external API and fan updates out to entities.
 
-The Traefik HTTP API (`/api/...` with a `Bearer` token) provides
-read-only access to operational state and one mutate endpoint
-(`/api/http/routers/refresh`). All endpoints return JSON.
+The Traefik HTTP API (`/api/...`, optionally behind basic auth or a
+`Bearer` token) provides read-only access to operational state. The
+integration only reads it. All endpoints return JSON.
 
 ## Constraints
 
-- **Tech stack**: Python 3.14+, Home Assistant Core (min version 2026.3.x),
-  `aiohttp` for HTTP, HACS-compatible.
+- **Tech stack**: Python >= 3.14.2, Home Assistant Core (minimum version
+  2026.11.0), `aiohttp` for HTTP, HACS-compatible.
 - **Distribution**: HACS default repository structure (`hacs.json`,
-  `info.md`, `README.md`, version tags via releases).
+  `README.md` as the information file — no `info.md`, version tags via
+  releases).
 - **Compatibility**: Must work against Traefik v2.11+ and v3.x.
 - **Performance**: API polling must not exceed one call-set per scan
-  interval (default 30s) per integration instance; multiple endpoints
+  interval (default 15 s) per integration instance; multiple endpoints
   fetched in parallel via `asyncio.gather`.
 - **Security**: API tokens never logged; integration must support
   self-signed certificates via user option.
