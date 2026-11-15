@@ -7,9 +7,10 @@ suite instead of waiting for a manual grep:
 
 * 07-01: no import shim or test helper for releases before the minimum.
 * 07-02: shipped code reads no attribute private to an HA base class.
-* 07-03: no code path, comment or requirement text for releases before the minimum.
+* 07-03: no code path or comment for releases before the minimum.
 
-They need no Home Assistant fixture. This file is excluded from the text scans.
+They need no Home Assistant fixture and read no planning docs (PR branches are
+cut without .planning/). This file is excluded from the text scans.
 """
 
 from __future__ import annotations
@@ -49,8 +50,6 @@ PRIVATE_BASE_ATTRS = frozenset(
 # Old minimum release (07-01/07-02/07-03 acceptance greps).
 OLD_RELEASE = re.compile(rb"2026\.3")
 OLDER_HA_WORDING = re.compile(rb"older home assistant", re.IGNORECASE)
-# Requirement text that kept the old minimum or excluded 2026.11-only APIs (07-03 acceptance grep).
-OLD_REQUIREMENT_TEXT = re.compile(r"2026\.3\.(0|x)|would raise min HA|Would raise the minimum")
 
 
 def _files(*dirs: Path) -> Iterator[Path]:
@@ -181,19 +180,3 @@ def test_no_text_for_releases_before_the_minimum() -> None:
     assert not hits, f"reference to Home Assistant 2026.3: {hits}"
     hits = _grep(OLDER_HA_WORDING, *_files(PACKAGE.parent))
     assert not hits, f"code justified by older Home Assistant releases: {hits}"
-
-
-def test_requirement_text_names_the_new_minimum() -> None:
-    """07-03: REQUIREMENTS and the Phase 8 roadmap keep no requirement text for the old minimum."""
-    requirements = (ROOT / ".planning" / "REQUIREMENTS.md").read_text(encoding="utf-8")
-    stale = [
-        f"REQUIREMENTS.md:{lineno}"
-        for lineno, line in enumerate(requirements.splitlines(), start=1)
-        if OLD_REQUIREMENT_TEXT.search(line)
-    ]
-    assert not stale, f"requirement text for a release before 2026.11.0: {stale}"
-    assert "homeassistant: 2026.11.0" in requirements
-
-    roadmap = (ROOT / ".planning" / "ROADMAP.md").read_text(encoding="utf-8")
-    phase_8 = roadmap[roadmap.index("### Phase 8") :]
-    assert "2026.3.0" not in phase_8, "ROADMAP Phase 8 still names Home Assistant 2026.3.0"
