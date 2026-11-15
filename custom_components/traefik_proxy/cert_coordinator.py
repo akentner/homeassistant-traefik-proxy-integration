@@ -39,6 +39,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
+    MAX_CERT_HOSTS,
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
@@ -188,6 +189,10 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         Every name goes through :func:`.rules.normalize_host`; wildcard,
         regex, SNI and template names are skipped. A TLS router without
         domains and without a literal ``Host()`` name contributes no host.
+
+        At most ``MAX_CERT_HOSTS`` names are returned: the first ones in
+        sorted order, so the same hosts stay probed across cycles. A cut is
+        logged once per call with the counts only, never the names.
         """
         hosts: set[str] = set()
         for router in self.config_entry.runtime_data.coordinator.data.routers.values():
@@ -199,7 +204,14 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
                     if host is not None:
                         hosts.add(host)
             hosts.update(extract_hosts(router.rule))
-        return tuple(sorted(hosts))
+        ordered = sorted(hosts)
+        if len(ordered) > MAX_CERT_HOSTS:
+            _LOGGER.warning(
+                "Certificate host limit of %d reached; %d hosts are not checked",
+                MAX_CERT_HOSTS,
+                len(ordered) - MAX_CERT_HOSTS,
+            )
+        return tuple(ordered[:MAX_CERT_HOSTS])
 
     def get_threshold(self) -> int:
         """Return the current warning threshold (read accessor)."""

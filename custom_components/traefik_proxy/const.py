@@ -64,6 +64,8 @@ DEFAULT_TLS_WARN_DAYS: Final = 14
 TLS_HANDSHAKE_TIMEOUT: Final = 5.0
 TLS_SEMAPHORE: Final = 4
 DEFAULT_TLS_CERT_COOLDOWN: Final = 21600
+# Upper bound of hosts probed per cert cycle (a constant, not an option).
+MAX_CERT_HOSTS: Final = 200
 
 # Version - bumped manually; CI in Plan 04 enforces match with git tag
 VERSION: Final = "1.0.0"
