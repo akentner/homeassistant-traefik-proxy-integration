@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
@@ -43,17 +42,13 @@ from .const import (
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
+from .rules import extract_hosts, normalize_host
 from .tls import CertError, CertInfo, fetch_cert_info_async
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
-
-# Pull the ``Host(`...`)`` substring out of a Traefik rule string. Copied
-# from ``binary_sensor.py`` (Phase 1 origin) so this module does not import
-# a platform module.
-_HOST_FROM_RULE = re.compile(r"Host\(`([^`]+)`\)")
 
 
 class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
@@ -64,16 +59,16 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
     1. Reads the routers of the main ``TraefikProxyCoordinator`` snapshot
        (no direct Traefik HTTP API call — main cycle already covers
        that at the 15s scan interval).
-    2. Extracts the deduplicated union of hostnames from
-       ``tls_domains[].main`` + ``tls_domains[].sans`` + ``Host(...)``
-       rule matches.
+    2. Collects the sorted, normalized union of hostnames from
+       ``tls_domains[].main`` + ``tls_domains[].sans`` + the literal
+       ``Host()`` names of the router rule (see :mod:`.rules`).
     3. Probes every hostname concurrently through
        ``asyncio.Semaphore(4)`` + ``asyncio.timeout(5)`` — each
        handshake runs on a worker thread via ``asyncio.to_thread`` so
        the HA event loop stays responsive.
     4. Writes the per-host result back to ``self.data`` keyed by
        hostname; ``CertInfo`` AND ``CertError`` are both kept (CONTEXT.md
-       D-06 — errors surface on the entity, not just successes).
+       errors surface on the entity, not just successes).
 
     Threshold mutations (``CONF_TLS_WARN_DAYS`` from the Options Flow)
     flow through :meth:`async_set_threshold` from the
@@ -96,11 +91,10 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
     ) -> None:
         """Construct the cert coordinator with the spike-validated defaults.
 
-        The ``config_entry=entry`` kwarg to ``super().__init__`` is the
-        BLOCKER #1 fix — it auto-populates ``self.config_entry`` (the
-        HA base class only sets it when the kwarg is provided), which
-        in turn is what :meth:`_collect_hosts_from_main_coordinator`
-        needs to read the main coordinator's ``data`` dict.
+        The ``config_entry=entry`` kwarg to ``super().__init__``
+        populates ``self.config_entry`` (the HA base class only sets it
+        when the kwarg is provided), which :meth:`_collect_hosts` needs
+        to read the main coordinator's snapshot.
         """
         super().__init__(
             hass,
@@ -127,7 +121,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         contract: :meth:`_probe` catches every exception internally so
         no exception is ever returned. The cycle can never raise.
         """
-        hosts = self._collect_hosts_from_main_coordinator()
+        hosts = self._collect_hosts()
         tasks = [self._probe(host) for host in hosts]
         results = await asyncio.gather(*tasks, return_exceptions=False)
         return {host: result for host, result in zip(hosts, results, strict=False)}
@@ -175,43 +169,37 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         self.threshold_days = int(threshold_days)
         self.async_update_listeners()
 
-    def _collect_hosts_from_main_coordinator(self) -> set[str]:
-        """Build the deduplicated, lowercased hostname set for this cycle.
+    def _collect_hosts(self) -> tuple[str, ...]:
+        """Return the sorted, normalized hostnames to probe in this cycle.
 
         Reads the routers of the main coordinator's snapshot through
-        ``self.config_entry.runtime_data.coordinator.data`` (needs
-        ``config_entry=entry`` set in ``__init__``). Traefik-internal
+        ``self.config_entry.runtime_data.coordinator.data``. Traefik-internal
         routers are not part of the snapshot, so they never become probe
         targets. Routers without TLS are skipped.
 
         For each TLS router, hostnames come from the union of:
 
-        - ``tls_domains[].main`` — primary domain on the cert
-        - ``tls_domains[].sans`` — Subject Alternative Names on the cert
-        - ``Host(`x`)`` regex matches in the rule — the routing-side
-          hostname (may differ from the cert's main/SAN; e.g. a router
-          named ``api.example.com`` may be served by a wildcard cert
-          whose SAN covers ``api.example.com`` but the cert's main
-          domain is the apex)
+        - ``tls_domains[].main`` and ``tls_domains[].sans`` — the names
+          requested for the certificate;
+        - the literal ``Host()`` names of the rule (:func:`.rules.extract_hosts`)
+          — the routing-side names, which may be covered by a wildcard
+          certificate whose main domain differs.
 
-        A TLS router without domains and without a ``Host`` rule (wildcard
-        / default cert, owned by Traefik) contributes no host.
+        Every name goes through :func:`.rules.normalize_host`; wildcard,
+        regex, SNI and template names are skipped. A TLS router without
+        domains and without a literal ``Host()`` name contributes no host.
         """
         hosts: set[str] = set()
         for router in self.config_entry.runtime_data.coordinator.data.routers.values():
             if not router.tls:
                 continue
             for domain in router.tls_domains:
-                if domain.main:
-                    hosts.add(domain.main.lower())
-                for san in domain.sans:
-                    if san:
-                        hosts.add(san.lower())
-            # ``Host(`x`)`` matches in the rule (routing-side hostname).
-            for match in _HOST_FROM_RULE.findall(router.rule):
-                if isinstance(match, str) and match:
-                    hosts.add(match.lower())
-        return hosts
+                for name in (domain.main, *domain.sans):
+                    host = normalize_host(name) if name else None
+                    if host is not None:
+                        hosts.add(host)
+            hosts.update(extract_hosts(router.rule))
+        return tuple(sorted(hosts))
 
     def get_threshold(self) -> int:
         """Return the current warning threshold (read accessor)."""
