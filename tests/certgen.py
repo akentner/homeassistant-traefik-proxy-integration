@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography import x509
@@ -166,3 +166,16 @@ def write_pem(
         )
     )
     return chain_path, key_path
+
+
+def warm_up_datetime_types() -> None:
+    """Make ``cryptography`` resolve ``datetime.datetime`` while it is the real class.
+
+    ``cryptography`` looks the class up on first use and caches it. When the
+    first use happens under ``freezer``, it caches freezegun's fake class and
+    every later real datetime is rejected with ``TypeError``. ``conftest``
+    calls this at import time, before any test freezes the clock.
+    """
+    now = datetime.now(UTC)
+    cert, _key = make_self_signed(["warm-up.invalid"], not_before=now, not_after=now + timedelta(days=1))
+    assert cert.not_valid_after_utc > now

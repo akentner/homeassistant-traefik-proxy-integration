@@ -190,6 +190,58 @@ def chain_verified(chain: Sequence[bytes], host: str, store: Store | None, now: 
     return True
 
 
+# Most specific first: TimeoutError, SSLError and gaierror are OSError
+# subclasses, so each must be checked before the generic OSError.
+_ERROR_CLASSES: Final[tuple[tuple[type[BaseException], ProbeError], ...]] = (
+    (TimeoutError, ProbeError.TIMEOUT),
+    (ssl.SSLError, ProbeError.SSL),
+    (socket.gaierror, ProbeError.DNS),
+    (ConnectionRefusedError, ProbeError.REFUSED),
+    (OSError, ProbeError.OSERROR),
+)
+
+
+def _classify(err: Exception) -> ProbeFailure:
+    """Map an exception to exactly one ``ProbeError`` class."""
+    detail = f"{type(err).__name__}: {err}"
+    for exc_type, error in _ERROR_CLASSES:
+        if isinstance(err, exc_type):
+            return ProbeFailure(error, detail)
+    return ProbeFailure(ProbeError.UNKNOWN, detail)
+
+
+def _read_presented(writer: asyncio.StreamWriter, sni: str, trust_store: Store | None, now: datetime) -> ProbeResult:
+    """Read and judge the certificate of an established probe connection."""
+    ssl_object = writer.get_extra_info("ssl_object")
+    der = ssl_object.getpeercert(binary_form=True) if ssl_object is not None else None
+    if not der:
+        return ProbeFailure(ProbeError.EMPTY, "no peer certificate")
+    try:
+        certificate = certificate_from_der(der)
+    except ValueError as err:
+        return ProbeFailure(ProbeError.PARSE, f"{type(err).__name__}: {err}")
+    chain = list(ssl_object.get_unverified_chain() or []) or [der]
+    names = (*certificate.sans, certificate.common_name) if certificate.common_name else certificate.sans
+    return ProbedCertificate(
+        certificate=certificate,
+        verified=chain_verified(chain, sni, trust_store, now),
+        san_mismatch=not _hostname_matches_san(sni, names),
+    )
+
+
+async def _close_writer(writer: asyncio.StreamWriter, close_timeout: float) -> None:
+    """Close the probe connection; abort it when the TLS shutdown does not finish in time."""
+    writer.close()
+    try:
+        async with asyncio.timeout(close_timeout):
+            await writer.wait_closed()
+    except asyncio.CancelledError:
+        writer.transport.abort()
+        raise
+    except Exception:  # TimeoutError, OSError or any other close error: never raise from the probe
+        writer.transport.abort()
+
+
 async def async_probe_certificate(
     connect_host: str,
     port: int,
@@ -199,23 +251,25 @@ async def async_probe_certificate(
     trust_store: Store | None,
     now: datetime,
 ) -> ProbeResult:
-    """Handshake with ``connect_host:port`` using SNI ``sni`` and read the presented leaf."""
-    async with asyncio.timeout(handshake_timeout):
-        _reader, writer = await asyncio.open_connection(connect_host, port, ssl=_PROBE_CONTEXT, server_hostname=sni)
+    """Handshake with ``connect_host:port`` using SNI ``sni`` and read the presented leaf.
+
+    Never sends application data. Returns ``ProbedCertificate`` for any
+    certificate that handshakes (expired, self-signed and untrusted ones
+    included) and ``ProbeFailure`` otherwise; the only exception that
+    propagates is ``asyncio.CancelledError``. The connection is closed on
+    every path, bounded by ``handshake_timeout``.
+    """
     try:
-        ssl_object = writer.get_extra_info("ssl_object")
-        der = ssl_object.getpeercert(binary_form=True)
-        certificate = certificate_from_der(der)
-        chain = list(ssl_object.get_unverified_chain() or []) or [der]
-        names = (*certificate.sans, certificate.common_name) if certificate.common_name else certificate.sans
-        return ProbedCertificate(
-            certificate=certificate,
-            verified=chain_verified(chain, sni, trust_store, now),
-            san_mismatch=not _hostname_matches_san(sni, names),
-        )
+        async with asyncio.timeout(handshake_timeout):
+            _reader, writer = await asyncio.open_connection(connect_host, port, ssl=_PROBE_CONTEXT, server_hostname=sni)
+    except Exception as err:
+        return _classify(err)
+    try:
+        return _read_presented(writer, sni, trust_store, now)
+    except Exception as err:
+        return _classify(err)
     finally:
-        writer.close()
-        await writer.wait_closed()
+        await _close_writer(writer, handshake_timeout)
 
 
 class CertError(TypedDict, total=False):

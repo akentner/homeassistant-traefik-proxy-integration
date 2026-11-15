@@ -48,6 +48,10 @@ from custom_components.traefik_proxy.models import (
     parse_services,
     parse_version,
 )
+from tests.certgen import warm_up_datetime_types
+
+# Resolve cryptography's cached datetime class before any test freezes time.
+warm_up_datetime_types()
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
