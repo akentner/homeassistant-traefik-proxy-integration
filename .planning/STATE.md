@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-08-PLAN.md (hacs/action run blocked)
-last_updated: "2026-11-15T20:43:03.927Z"
+stopped_at: Completed 08-09-PLAN.md
+last_updated: "2026-11-15T20:59:49.118Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: c1297aca52136c0a6c1350e737c99f9b8a999c5b
+state_head: 312319d38cb09ebbdc7e18f2fba8652b8bfab4c9
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 52
+  completed_plans: 53
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 9 of 13
+Plan: 10 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -119,6 +119,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P06 | 8min | 2 tasks | 25 files |
 | Phase 08 P07 | 5 min | 2 tasks | 5 files |
 | Phase 08 P08 | 7min | 2 tasks | 4 files |
+| Phase 08 P09 | 15min | 3 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -257,6 +258,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: min-HA stack = hashed lock .github/requirements-min-ha.txt (123 pkgs) via make test-min-ha; pre-commit ruff/mypy as uv run local hooks (pre-commit 4.7.0 ephemeral)
 - [Phase 08]: 08-07: release check as tested script (tag via env/argv, one leading v stripped, exit 2 on usage error); every CI run: step = a Makefile command string; all actions SHA-pinned (hassfest pin comment is a branch date, DIST-04)
 - [Phase 08]: 08-08: hacs/action local run recorded as BLOCKED (permission classifier denied passing the gh token into the container); overlay proven on digest sha256:187499a0, hassfest passes
+- [Phase 08]: 08-09: German shots use HA system language de, English en (entity/device names are backend-translated)
+- [Phase 08]: 08-09: visual check found no code-caused finding (F-01 cosmetic, F-02 upstream in deferred-items)
+- [Phase 08]: 08-09: REL-02 confirmed - HA 2026.11.0 serves all six brand PNGs byte-for-byte, no fallback
 
 ### Pending Todos
 
@@ -302,7 +306,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T20:43:03.703Z
-Stopped at: Completed 08-08-PLAN.md (hacs/action run blocked)
+Last session: 2026-11-15T20:59:48.860Z
+Stopped at: Completed 08-09-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

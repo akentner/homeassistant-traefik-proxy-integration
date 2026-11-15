@@ -312,7 +312,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 - [x] **REL-01**: `manifest.json` has `categories:
       ["computers_network.monitoring"]` (sorted keys) and version `1.0.0`;
       `hacs.json` keeps `homeassistant: 2026.11.0`. (research §2)
-- [ ] **REL-02**: Brand icons are re-exported trimmed and centred, `logo.png`
+- [x] **REL-02**: Brand icons are re-exported trimmed and centred, `logo.png`
       / `logo@2x.png` are added, `icon.svg` moves to `docs/`, local brand
       serving is confirmed for HA 2026.11.0, and the README carries the Traefik
       trademark note. (B-01..B-06, research §3)
@@ -476,7 +476,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-07 | Phase 7 | Complete |
 | FLOW-08 | Phase 7 | Complete |
 | REL-01 | Phase 8 | Complete |
-| REL-02 | Phase 8 | Pending |
+| REL-02 | Phase 8 | Complete |
 | REL-03 | Phase 8 | Pending |
 | REL-04 | Phase 8 | Complete |
 | REL-05 | Phase 8 | Complete |
