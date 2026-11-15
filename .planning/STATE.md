@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 8
+current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Phase 07 complete, ready to plan Phase 08
-last_updated: "2026-11-15T19:25:11.260Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-11-15T19:37:22.926Z"
 last_activity: 2026-11-15
-last_activity_desc: Phase 07 complete, transitioned to Phase 08
-state_head: 83711c8ff657b0cb9bf51b0042952fba1172d642
+last_activity_desc: Phase 08 execution started
+state_head: fdcefc983f954a5279b9bcaf0a89d2903d9b130b
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 44
+  completed_plans: 45
 milestone_name: milestone
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-11-15)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 07 — Config flow, HA 2026.11 baseline, observability
+**Current focus:** Phase 08 — Marketplace + release readiness
 
 ## Current Position
 
-Phase: 8 (Marketplace + release readiness) — READY TO EXECUTE
-Plan: Not started
+Phase: 08 (Marketplace + release readiness) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-11-15 — Phase 07 complete, transitioned to Phase 08
+Last activity: 2026-11-15 — Phase 08 execution started
 
 Progress: [█████████░] 88% (6 of 8 phases)
 
@@ -111,6 +111,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 07 P07 | 12min | 2 tasks | 8 files |
 | Phase 07 P08 | 12min | 2 tasks | 5 files |
 | Phase 07 P09 | 17min | 3 tasks | 9 files |
+| Phase 08 P01 | 8 min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -234,6 +235,8 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: diagnostics dump parsed models only and redact username/password/token/api_key/users/authorization; URL userinfo is cut, an unparsable stored URL is redacted as a whole
 - [Phase 07]: Phase 07: insecure_credentials repair (WARNING, not fixable, entry-bound) is raised at the end of every setup while http is used with credentials; unload deletes it, so a reload resets a user's ignore (accepted)
 - [Phase 07]: Phase 07: en/de translation parity is enforced over the whole files
+- [Phase 08]: 08-01: Router errors split at the raw rule; a matcher call in any other segment redacts the whole error (diagnostics only)
+- [Phase 08]: 08-01: v2-form Query argument without '=' becomes the whole marker (ambiguous v2 key vs v3 value, fail closed)
 
 ### Pending Todos
 
@@ -278,7 +281,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T15:12:28.647Z
-Stopped at: Phase 07 complete, ready to plan Phase 08
+Last session: 2026-11-15T19:37:22.704Z
+Stopped at: Completed 08-01-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
