@@ -562,7 +562,7 @@ tag and catalog PR themselves remain the user's action.
      `.planning/`; `feat/marketplace-polish` is pushed and a **Draft PR** to
      `main` is open — no tag, release or `hacs/default` PR is created by the
      assistant (U1, M8). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 9/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
+**Plans**: 10/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
 
 Plans:
 **Wave 1**
@@ -587,7 +587,7 @@ Plans:
 - [x] 08-09-PLAN.md — Tracer: throwaway HA 2026.11.0 visual check de/en, brand serving byte-equal, real 0.3.0 migration repair, fix protocol for findings, teardown (REL-02; D-04, D-25, M35)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 08-10-PLAN.md — Tracer: README rewrite and CHANGELOG 0.1.0-1.0.0 (REL-03, REL-02, DOCS-02, DOCS-04; D-05, D-06)
+- [x] 08-10-PLAN.md — Tracer: README rewrite and CHANGELOG 0.1.0-1.0.0 (REL-03, REL-02, DOCS-02, DOCS-04; D-05, D-06)
 - [ ] 08-11-PLAN.md — Tracer: skill rename, PROJECT/STACK fixes, CLAUDE.md regenerated (REL-06; D-07)
 - [ ] 08-12-PLAN.md — Tracer: REQUIREMENTS wording and coverage footer, review dispositions of Phases 4-7 closed (REL-06; D-08, D-21, D-22)
 
@@ -615,7 +615,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
 | 7. Config flow, HA 2026.11 baseline, observability | 9/9 | Complete    | 2026-11-15 |
-| 8. Marketplace + release readiness | 9/13 | In Progress | - |
+| 8. Marketplace + release readiness | 10/13 | In Progress | - |
 
 **Coverage:**
 

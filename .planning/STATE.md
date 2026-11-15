@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-11-15T20:59:49.118Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-11-15T21:09:41.728Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: 312319d38cb09ebbdc7e18f2fba8652b8bfab4c9
+state_head: a6215764a2deb0ade3e06eb8e2965f5c46ef6c5d
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 53
+  completed_plans: 54
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -120,6 +120,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P07 | 5 min | 2 tasks | 5 files |
 | Phase 08 P08 | 7min | 2 tasks | 4 files |
 | Phase 08 P09 | 15min | 3 tasks | 28 files |
+| Phase 08 P10 | 8min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -261,6 +262,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: German shots use HA system language de, English en (entity/device names are backend-translated)
 - [Phase 08]: 08-09: visual check found no code-caused finding (F-01 cosmetic, F-02 upstream in deferred-items)
 - [Phase 08]: 08-09: REL-02 confirmed - HA 2026.11.0 serves all six brand PNGs byte-for-byte, no fallback
+- [Phase 08]: 08-10: README trademark note states Traefik Labs guidelines were not reviewed and no permission is claimed (A3/A8 open); CHANGELOG 1.0.0 stays 'Unreleased' until the user tags
+- [Phase 08]: 08-10: CHANGELOG 1.0.0 describes the end state against 0.3.0; developer-only changes (lock, coverage gate, CI pins) are not listed
 
 ### Pending Todos
 
@@ -306,7 +309,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T20:59:48.860Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-11-15T21:09:41.126Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

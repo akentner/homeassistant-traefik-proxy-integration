@@ -135,11 +135,11 @@ Requirements for initial release. Each maps to a roadmap phase.
       every configuration option, and example dashboards / automations
       (including a "notify when a router goes down" pattern and a
       "warn me N days before TLS expiry" pattern).
-- [ ] **DOCS-02**: A `CHANGELOG.md` is added for the first release and
+- [x] **DOCS-02**: A `CHANGELOG.md` is added for the first release and
       updated on every release tag.
 - [~] ~~**DOCS-03**~~ _(dropped — `info.md` is not used by the Marketplace; README is the information file (research §6 Q8))_: A `info.md` (HACS store card) summarizes the
       integration for the HACS browse view.
-- [ ] **DOCS-04**: An FAQ addresses the locked-out anti-features
+- [x] **DOCS-04**: An FAQ addresses the locked-out anti-features
       (config-file edits, ACME in HA, v1 Traefik, etc.) so users do not
       file duplicate issues.
 
@@ -316,7 +316,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       / `logo@2x.png` are added, `icon.svg` moves to `docs/`, local brand
       serving is confirmed for HA 2026.11.0, and the README carries the Traefik
       trademark note. (B-01..B-06, research §3)
-- [ ] **REL-03**: README is rewritten (Marketplace/My-link badge,
+- [x] **REL-03**: README is rewritten (Marketplace/My-link badge,
       prerequisites incl. protecting the Traefik API, install/removal, options,
       entity table matching the code, automations, troubleshooting, data update
       cadence, known limitations) with no private hostnames. (H-01, H-02)
@@ -438,9 +438,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIST-04 | Phase 8 | Complete |
 | DIST-05 | — | Superseded |
 | DOCS-01 | Phase 1 | Complete |
-| DOCS-02 | Phase 8 | Pending |
+| DOCS-02 | Phase 8 | Complete |
 | DOCS-03 | — | Superseded |
-| DOCS-04 | Phase 8 | Pending |
+| DOCS-04 | Phase 8 | Complete |
 | TEST-01 | Phase 1 | Complete |
 | TEST-02 | Phase 2 | Complete |
 | TEST-03 | Phase 1 | Complete (refined by DATA-07) |
@@ -477,7 +477,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-08 | Phase 7 | Complete |
 | REL-01 | Phase 8 | Complete |
 | REL-02 | Phase 8 | Complete |
-| REL-03 | Phase 8 | Pending |
+| REL-03 | Phase 8 | Complete |
 | REL-04 | Phase 8 | Complete |
 | REL-05 | Phase 8 | Complete |
 | REL-06 | Phase 8 | Pending |
