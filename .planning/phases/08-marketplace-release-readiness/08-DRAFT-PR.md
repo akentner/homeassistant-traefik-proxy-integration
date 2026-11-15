@@ -72,8 +72,8 @@ local history (M1).
 |---|---|
 | `uv run pytest -q` (coverage gate `fail_under = 99`) | 1152 passed; total coverage 99.29 % |
 | `ruff check` / `ruff format --check` / `mypy --strict` | clean |
-| Minimum HA 2026.11.0 (`make test-min-ha`, hashed lock) | see 08-LOCAL-VALIDATION.md "Final pre-push run" |
-| `uvx pre-commit run --all-files` | see 08-LOCAL-VALIDATION.md "Final pre-push run" |
+| Minimum HA 2026.11.0 (`make test-min-ha`, hashed lock `.github/requirements-min-ha.txt`) | 1152 passed; coverage gate reached (99.29 %) |
+| `uvx pre-commit run --all-files` | all 13 hooks passed |
 | hassfest (`make hassfest`, throwaway container, HA 2026.11.1 image) | `Integrations: 1`, `Invalid integrations: 0` |
 | hacs/action (10 checks, category `integration`, no `ignore`) | **pending — proven by the first PR run of validate.yml (HACS job)**. Not run locally: it needs a GitHub token, and passing the user's credential to a container was declined (user decision). The overlay harness and the five repository-metadata checks (archived, description, issues, license, topics) were verified without a token. |
 | Visual check (throwaway HA 2026.11.0 + Traefik v3.7.19, de/en) | passed: brand images served byte-identical, config flow, options, repairs, device tree, states and icons, 0.3.0 -> 1.0.0 migration (08-VISUAL-CHECK.md) |
