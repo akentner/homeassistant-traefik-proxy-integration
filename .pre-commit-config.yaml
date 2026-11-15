@@ -59,8 +59,8 @@ repos:
         pass_filenames: false
 
       - id: hassfest-strings-shape
-        name: hassfest strings.json shape (no top-level reauth/reconfigure/entity, no URLs in labels)
+        name: hassfest translations/*.json shape (no top-level reauth/reconfigure/entity, no URLs in labels)
         entry: python scripts/hassfest_checks.py strings-shape
         language: system
-        files: ^custom_components/traefik/(strings|translations/.*)\.json$
+        files: ^custom_components/traefik/translations/.*\.json$
         pass_filenames: false

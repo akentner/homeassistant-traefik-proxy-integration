@@ -14,7 +14,7 @@ caused in this repo:
 
 1. manifest.json key order — hassfest requires `domain`, then `name`,
    then alphabetical. Manual JSON editing drops the ordering invariant.
-2. strings.json / translations/*.json shape — hassfest schema rejects
+2. translations/*.json shape — hassfest schema rejects
    unknown top-level keys (`reauth`, `reconfigure`, `entity`) and
    any string containing a literal URL.
 3. strict JSON parse — if a comma is missing, every subsequent check
@@ -99,9 +99,7 @@ def _check_strings_shape(path: Path) -> list[str]:
 
 
 def check_strings_shape() -> list[str]:
-    paths = [INTEGRATION / "strings.json"]
-    if TRANSLATIONS.is_dir():
-        paths.extend(sorted(TRANSLATIONS.glob("*.json")))
+    paths = sorted(TRANSLATIONS.glob("*.json"))
     errors: list[str] = []
     for path in paths:
         errors.extend(_check_strings_shape(path))

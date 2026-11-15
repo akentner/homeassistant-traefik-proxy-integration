@@ -101,7 +101,7 @@ STEP_YAML_DATA_SCHEMA = vol.Schema(
 # Options Flow schema — scan_interval (15..300s), verify_ssl (bool),
 # tls_warn_days (1..90d) per CONTEXT.md D-09. Clamps enforced via
 # ``vol.Range``; the matching translation keys live at
-# ``options.step.init.errors.scan_interval_out_of_range`` in strings.json.
+# ``options.step.init.errors.scan_interval_out_of_range`` in translations/en.json.
 STEP_OPTIONS_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(

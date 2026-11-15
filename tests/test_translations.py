@@ -34,7 +34,6 @@ from tests.conftest import make_traefik_entry, setup_traefik_entry
 PACKAGE = Path(__file__).parent.parent / "custom_components" / "traefik_proxy"
 EN = PACKAGE / "translations" / "en.json"
 DE = PACKAGE / "translations" / "de.json"
-STRINGS = PACKAGE / "strings.json"
 ICONS = PACKAGE / "icons.json"
 
 # Sections this phase owns; config/options stay English until Phase 7.
@@ -102,11 +101,6 @@ def _code_keys() -> set[tuple[str, str]]:
     keys.add(("binary_sensor", _class_key(binary_sensor.TraefikCertificatesProblemBinarySensor)))
     keys.add(("button", _class_key(TraefikRefreshButton)))
     return keys
-
-
-def test_strings_json_equals_en_json() -> None:
-    """strings.json is byte-identical to translations/en.json until Phase 7 deletes it."""
-    assert STRINGS.read_bytes() == EN.read_bytes()
 
 
 def test_english_texts_have_one_source() -> None:
