@@ -394,7 +394,13 @@ async def test_user_step_basic_auth_reaches_traefik(hass: Any, aioclient_mock: A
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"},
+        {
+            CONF_URL: MOCK_URL,
+            CONF_VERIFY_SSL: True,
+            AUTH_TYPE: "basic",
+            CONF_USERNAME: "admin",
+            CONF_PASSWORD: "s3cret",
+        },
     )
     await hass.async_block_till_done(wait_background_tasks=True)
 

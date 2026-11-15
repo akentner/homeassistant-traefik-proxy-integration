@@ -1,4 +1,84 @@
 {
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit Traefik verbinden",
+        "description": "Gib die Adresse der Traefik-API ein und wie sie geschützt ist. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft. Über HTTP werden Zugangsdaten unverschlüsselt gesendet; nutze möglichst HTTPS.",
+        "data": {
+          "url": "URL der Traefik-API",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "url": "Adresse der Traefik-API mit Schema (http oder https), Host und Port, zum Beispiel die Adresse des Traefik-Dashboards ohne den Pfad /dashboard/.",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Benutzername der basicAuth-Middleware vor der Traefik-API.",
+          "password": "Passwort der basicAuth-Middleware vor der Traefik-API.",
+          "token": "Token, das deine forwardAuth-Middleware akzeptiert; es wird als Bearer-Token gesendet."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Erneut bei Traefik anmelden",
+        "description": "Traefik hat die gespeicherten Zugangsdaten abgelehnt. Wähle, wie die Traefik-API geschützt ist, und gib die aktuellen Zugangsdaten ein. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft.",
+        "data": {
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Benutzername der basicAuth-Middleware vor der Traefik-API.",
+          "password": "Passwort der basicAuth-Middleware vor der Traefik-API.",
+          "token": "Token, das deine forwardAuth-Middleware akzeptiert; es wird als Bearer-Token gesendet."
+        }
+      },
+      "reconfigure": {
+        "title": "Traefik neu konfigurieren",
+        "description": "Ändere die Adresse der Traefik-API, die TLS-Prüfung oder die Authentifizierung; die Integration wird danach neu geladen. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft. Über HTTP werden Zugangsdaten unverschlüsselt gesendet; nutze möglichst HTTPS.",
+        "data": {
+          "url": "URL der Traefik-API",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "url": "Adresse der Traefik-API mit Schema (http oder https), Host und Port, zum Beispiel die Adresse des Traefik-Dashboards ohne den Pfad /dashboard/.",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Lass das Feld leer, um den gespeicherten Benutzernamen zu behalten, solange die Authentifizierung gleich bleibt.",
+          "password": "Lass das Feld leer, um das gespeicherte Passwort zu behalten, solange die Authentifizierung gleich bleibt.",
+          "token": "Lass das Feld leer, um das gespeicherte Token zu behalten, solange die Authentifizierung gleich bleibt."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Traefik ist nicht erreichbar. Prüfe die URL, das Netzwerk und ob die API aktiviert ist.",
+      "invalid_url": "Die URL ist ungültig. Nutze das Schema http oder https und einen nicht leeren Host.",
+      "invalid_auth": "Traefik hat die Zugangsdaten abgelehnt, oder sie enthalten Zeichen, die nicht gesendet werden können (ein Steuerzeichen oder einen Doppelpunkt im Benutzernamen).",
+      "api_disabled": "Die Traefik-API ist nicht aktiviert. Ergänze den api-Block in deiner statischen Traefik-Konfiguration.",
+      "required": "Für die gewählte Authentifizierung erforderlich.",
+      "unknown": "Unerwarteter Fehler. Sieh im Log nach."
+    },
+    "abort": {
+      "already_configured": "Diese Traefik-Instanz ist bereits eingerichtet."
+    }
+  },
+  "selector": {
+    "auth_type": {
+      "options": {
+        "none": "Keine Authentifizierung",
+        "basic": "Basic Auth (Benutzername und Passwort)",
+        "bearer": "Bearer-Token"
+      }
+    }
+  },
   "exceptions": {
     "auth_failed": {
       "message": "Traefik hat die Zugangsdaten für {path} abgelehnt. Gib sie im Dialog zur erneuten Authentifizierung neu ein."

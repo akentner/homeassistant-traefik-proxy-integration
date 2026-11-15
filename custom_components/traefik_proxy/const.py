@@ -5,10 +5,15 @@ from typing import Final
 
 DOMAIN: Final = "traefik_proxy"
 
-# Configuration keys (entry.data)
+# Configuration keys (entry.data). The credentials of the chosen auth type use
+# Home Assistant's CONF_USERNAME / CONF_PASSWORD / CONF_TOKEN.
 CONF_URL: Final = "url"
-CONF_API_KEY: Final = "api_key"
 CONF_VERIFY_SSL: Final = "verify_ssl"
+# Auth type of the entry; the values are those of ``api.AuthMode``.
+CONF_AUTH_TYPE: Final = "auth_type"
+# Bearer token of entries before 1.3. Only the 1.2 -> 1.3 migration reads it;
+# diagnostics redact it.
+CONF_API_KEY: Final = "api_key"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_TLS_WARN_DAYS: Final = "tls_warn_days"
 

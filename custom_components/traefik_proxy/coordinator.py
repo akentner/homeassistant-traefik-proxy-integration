@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import aiohttp_client
@@ -27,7 +28,7 @@ from .api import (
     TraefikProxyRedirectError,
 )
 from .const import (
-    CONF_API_KEY,
+    CONF_AUTH_TYPE,
     CONF_SCAN_INTERVAL,
     CONF_URL,
     CONF_VERIFY_SSL,
@@ -59,16 +60,18 @@ def effective_verify_ssl(entry: ConfigEntry[Any]) -> bool:
 
 
 def auth_from_entry_data(data: Mapping[str, Any]) -> Auth:
-    """Map stored entry data to the client's Auth value.
+    """Map entry data to the client's Auth value; the single mapping point.
 
-    Entries store a single optional bearer token: a non-empty token selects
-    bearer auth, an empty or missing one selects no auth. Basic auth is not
-    reachable from entry data yet.
+    Entry data names its auth type (``none`` when absent) plus the credentials
+    of that type: username and password for basic, a token for bearer. Raises
+    ``ValueError`` for an unknown auth type or credentials ``Auth`` rejects.
     """
-    token = data.get(CONF_API_KEY)
-    if isinstance(token, str) and token:
-        return Auth(mode=AuthMode.bearer, token=token)
-    return Auth()
+    return Auth(
+        mode=AuthMode(data.get(CONF_AUTH_TYPE, AuthMode.none)),
+        username=data.get(CONF_USERNAME),
+        password=data.get(CONF_PASSWORD),
+        token=data.get(CONF_TOKEN),
+    )
 
 
 def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:

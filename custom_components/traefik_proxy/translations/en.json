@@ -3,54 +3,78 @@
     "step": {
       "user": {
         "title": "Connect to Traefik",
-        "description": "Provide the URL of your Traefik instance and the API key from your Traefik static config (api.dashboard / api.insecure). Plain HTTP transmits the bearer token in cleartext \u2014 use HTTPS whenever possible.",
+        "description": "Enter the address of the Traefik API and how it is protected. Traefik's API has no credentials of its own: it is protected by a middleware in front of the api@internal service, usually basicAuth (username and password) or a forwardAuth that checks a bearer token. Plain HTTP sends credentials unencrypted; prefer HTTPS.",
         "data": {
-          "url": "Traefik base URL",
-          "api_key": "Bearer token (optional \u2014 leave empty for Traefik with no api auth)",
-          "verify_ssl": "Verify TLS certificate (disable for self-signed)"
+          "url": "Traefik API URL",
+          "verify_ssl": "Verify TLS certificate",
+          "auth_type": "Authentication",
+          "username": "Username",
+          "password": "Password",
+          "token": "Bearer token"
+        },
+        "data_description": {
+          "url": "Address of the Traefik API with scheme (http or https), host and port, for example the address of the Traefik dashboard without the /dashboard/ path.",
+          "verify_ssl": "Turn off only for a self-signed certificate on the Traefik API.",
+          "auth_type": "How the Traefik API is protected: no authentication, basic auth or a bearer token checked by a forwardAuth middleware.",
+          "username": "Username of the basicAuth middleware in front of the Traefik API.",
+          "password": "Password of the basicAuth middleware in front of the Traefik API.",
+          "token": "Token your forwardAuth middleware accepts; it is sent as a bearer token."
         }
       },
-      "yaml": {
-        "title": "YAML configuration detected",
-        "description": "Configure the traefik: block in configuration.yaml. The integration validates the URL and token before saving."
-      },
       "reauth_confirm": {
-        "title": "Reauthenticate Traefik",
-        "description": "The Traefik bearer token has been rejected (HTTP 401/403) \u2014 enter the new token from your Traefik static config to continue polling.",
+        "title": "Re-authenticate with Traefik",
+        "description": "Traefik rejected the stored credentials. Choose how the Traefik API is protected and enter the current credentials. Traefik's API has no credentials of its own: it is protected by a middleware in front of the api@internal service, usually basicAuth (username and password) or a forwardAuth that checks a bearer token.",
         "data": {
-          "api_key": "New bearer token (optional \u2014 leave empty to clear auth)"
+          "auth_type": "Authentication",
+          "username": "Username",
+          "password": "Password",
+          "token": "Bearer token"
+        },
+        "data_description": {
+          "auth_type": "How the Traefik API is protected: no authentication, basic auth or a bearer token checked by a forwardAuth middleware.",
+          "username": "Username of the basicAuth middleware in front of the Traefik API.",
+          "password": "Password of the basicAuth middleware in front of the Traefik API.",
+          "token": "Token your forwardAuth middleware accepts; it is sent as a bearer token."
         }
       },
       "reconfigure": {
         "title": "Reconfigure Traefik",
-        "description": "Update the Traefik base URL and/or bearer token \u2014 the integration will reload against the new endpoint.",
+        "description": "Change the address of the Traefik API, TLS verification or authentication; the integration reloads afterwards. Traefik's API has no credentials of its own: it is protected by a middleware in front of the api@internal service, usually basicAuth (username and password) or a forwardAuth that checks a bearer token. Plain HTTP sends credentials unencrypted; prefer HTTPS.",
         "data": {
-          "url": "Traefik base URL",
-          "api_key": "Bearer token",
-          "verify_ssl": "Verify TLS certificate (disable for self-signed)"
+          "url": "Traefik API URL",
+          "verify_ssl": "Verify TLS certificate",
+          "auth_type": "Authentication",
+          "username": "Username",
+          "password": "Password",
+          "token": "Bearer token"
         },
         "data_description": {
-          "api_key": "Leave empty to keep the current token."
+          "url": "Address of the Traefik API with scheme (http or https), host and port, for example the address of the Traefik dashboard without the /dashboard/ path.",
+          "verify_ssl": "Turn off only for a self-signed certificate on the Traefik API.",
+          "auth_type": "How the Traefik API is protected: no authentication, basic auth or a bearer token checked by a forwardAuth middleware.",
+          "username": "Leave empty to keep the stored username while the authentication type stays the same.",
+          "password": "Leave empty to keep the stored password while the authentication type stays the same.",
+          "token": "Leave empty to keep the stored token while the authentication type stays the same."
         }
       }
     },
     "error": {
-      "cannot_connect": "Unable to reach Traefik \u2014 check URL, network, and that the API is enabled.",
+      "cannot_connect": "Unable to reach Traefik. Check the URL, the network and that the API is enabled.",
       "invalid_url": "The URL is malformed. Use the http or https scheme and a non-empty host.",
-      "invalid_auth": "Invalid bearer token. Rotate the token in your Traefik static config.",
-      "api_disabled": "Traefik's API is not enabled \u2014 add the api block to your static config.",
-      "unknown": "Unexpected error \u2014 see logs."
+      "invalid_auth": "Traefik rejected the credentials, or they contain characters that cannot be sent (a control character, or a colon in the username).",
+      "api_disabled": "Traefik's API is not enabled. Add the api block to your Traefik static configuration.",
+      "required": "Required for the selected authentication.",
+      "unknown": "Unexpected error. See the logs."
     },
     "abort": {
-      "already_configured": "This Traefik instance is already configured.",
-      "reauth_successful": "Traefik reauthenticated."
+      "already_configured": "This Traefik instance is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Traefik options",
-        "description": "Adjust polling cadence, TLS verification, and the certificate warning threshold \u2014 URL changes use the separate Reconfigure flow.",
+        "description": "Adjust polling cadence, TLS verification, and the certificate warning threshold — URL changes use the separate Reconfigure flow.",
         "data": {
           "scan_interval": "Polling interval (seconds, 15-300)",
           "verify_ssl": "Verify TLS certificate (disable for self-signed)",
@@ -60,6 +84,15 @@
     },
     "error": {
       "scan_interval_out_of_range": "Polling interval must be between 15 and 300 seconds."
+    }
+  },
+  "selector": {
+    "auth_type": {
+      "options": {
+        "none": "No authentication",
+        "basic": "Basic auth (username and password)",
+        "bearer": "Bearer token"
+      }
     }
   },
   "exceptions": {

@@ -1,52 +1,55 @@
 """Config flow for the Traefik integration.
 
-Implements four flows against the Phase 1 probe-and-validate foundation:
+- :meth:`TraefikProxyConfigFlow.async_step_user` sets up an entry: the Traefik
+  API URL, TLS verification and how the API is protected (no authentication,
+  basic auth or a bearer token). The credential fields are shown only for the
+  auth type that uses them; Home Assistant drops hidden fields from the
+  submitted data.
+- :meth:`TraefikProxyConfigFlow.async_step_reauth_confirm` asks for new
+  credentials for the stored URL when Traefik rejected the stored ones.
+- :meth:`TraefikProxyConfigFlow.async_step_reconfigure` changes URL, TLS
+  verification and credentials of an existing entry. Secrets are never sent to
+  the form; with an unchanged auth type an empty secret keeps the stored one.
+- :class:`TraefikProxyOptionsFlow` holds the polling and certificate options.
 
-- :class:`TraefikProxyConfigFlow.async_step_user` / ``async_step_yaml`` — initial
-  setup (CFG-01 / CFG-02). Preserved byte-for-byte from Phase 1 so the
-  integration tests against ``async_step_user`` keep passing.
-- :class:`TraefikProxyOptionsFlow.async_step_init` — post-setup scan_interval /
-  verify_ssl / tls_warn_days knobs (CFG-05, CONTEXT.md D-09). Validates via
-  ``vol.Range`` and aborts on out-of-range via the ``scan_interval_out_of_range``
-  translation key.
-- :class:`TraefikProxyConfigFlow.async_step_reauth` / ``async_step_reauth_confirm``
-  — token rotation (CFG-04, CONTEXT.md D-10). Fires when the coordinator
-  raises ``ConfigEntryAuthFailed``; the new bearer token is validated against
-  ``/api/version`` and the entry's data is updated in place + reloaded.
-- :class:`TraefikProxyConfigFlow.async_step_reconfigure` — in-place URL + token
-  change (CFG-03, CONTEXT.md D-11). Pre-fills the URL from ``entry.data`` and
-  verify_ssl from the effective value (options, then data); the token is never
-  pre-filled, and an empty token keeps the stored one. Aborts only when another
-  entry already owns the new host, validates, and calls
-  ``async_update_reload_and_abort`` with ``data_updates`` plus the verify_ssl
-  value mirrored into ``options``.
+Every step probes ``/api/version`` before it stores anything, and stores the
+complete entry data (``_entry_data``), so no credential of an auth type the
+entry no longer uses is kept.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
 import probatio as vol
+from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
 )
-from homeassistant.core import callback
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
     BooleanSelector,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
 )
 
 from .api import (
+    Auth,
+    AuthMode,
     TraefikProxyApiClient,
     TraefikProxyApiError,
     TraefikProxyAuthError,
@@ -54,7 +57,7 @@ from .api import (
     TraefikProxyNotFoundError,
 )
 from .const import (
-    CONF_API_KEY,
+    CONF_AUTH_TYPE,
     CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
@@ -73,28 +76,54 @@ from .coordinator import auth_from_entry_data, effective_verify_ssl
 
 _LOGGER = logging.getLogger(__name__)
 
-# UI schemas use Home Assistant's typed selectors so HA's frontend can render
-# the right input widget AND so ``voluptuous_serialize`` can serialise the
-# schema for the JSON-over-WS config flow (a raw ``cv.url`` function ref in
-# ``vol.All(cv.string, cv.url)`` breaks that serializer — see v0.1.3 release
-# notes). URL shape is additionally enforced server-side by
-# :func:`_check_url_shape` so a malformed URL still surfaces
-# ``errors["base"] = "invalid_url"``.
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_URL): TextSelector(TextSelectorConfig(type=TextSelectorType.URL)),
-        vol.Optional(CONF_API_KEY, default=""): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
-    }
+# UI schemas use Home Assistant's typed selectors so the frontend renders the
+# right input widget and the schema serializes for the config flow API (a raw
+# ``cv.url`` function cannot be serialized). URL shape is enforced
+# server-side by :func:`_check_url_shape` (``errors["base"] = "invalid_url"``).
+_URL_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.URL))
+_SECRET_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+_AUTH_TYPE_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[mode.value for mode in AuthMode],
+        translation_key=CONF_AUTH_TYPE,
+        mode=SelectSelectorMode.LIST,
+    )
 )
 
-# YAML schema has no frontend — plain string validators only; URL shape is
-# revalidated by :func:`_validate_input` → :func:`_check_url_shape`.
-STEP_YAML_DATA_SCHEMA = vol.Schema(
+# Credential fields each auth type needs, in the order they are checked.
+_CREDENTIAL_KEYS: dict[AuthMode, tuple[str, ...]] = {
+    AuthMode.none: (),
+    AuthMode.basic: (CONF_USERNAME, CONF_PASSWORD),
+    AuthMode.bearer: (CONF_TOKEN,),
+}
+
+
+def _auth_fields(default_auth: str) -> dict[Any, Any]:
+    """Return the auth type selector and the credential fields shown for it.
+
+    The credential fields are optional at schema level and visible only for
+    their auth type; the step enforces the credentials of the chosen type.
+    Secrets never carry a default or suggested value.
+    """
+    return {
+        vol.Required(CONF_AUTH_TYPE, default=default_auth): _AUTH_TYPE_SELECTOR,
+        data_entry_flow.Optional(
+            CONF_USERNAME, visible={"field": CONF_AUTH_TYPE, "value": AuthMode.basic.value}
+        ): TextSelector(),
+        data_entry_flow.Optional(
+            CONF_PASSWORD, visible={"field": CONF_AUTH_TYPE, "value": AuthMode.basic.value}
+        ): _SECRET_SELECTOR,
+        data_entry_flow.Optional(
+            CONF_TOKEN, visible={"field": CONF_AUTH_TYPE, "value": AuthMode.bearer.value}
+        ): _SECRET_SELECTOR,
+    }
+
+
+STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_URL): cv.string,
-        vol.Optional(CONF_API_KEY, default=""): cv.string,
-        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): cv.boolean,
+        vol.Required(CONF_URL): _URL_SELECTOR,
+        vol.Optional(CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL): BooleanSelector(),
+        **_auth_fields(AuthMode.none.value),
     }
 )
 
@@ -135,39 +164,31 @@ class InvalidUrl(Exception):
 _ALLOWED_URL_SCHEMES = frozenset({"http", "https"})
 
 
-def _check_url_shape(url: str, *, allow_userinfo: bool = False) -> None:
+def _check_url_shape(url: str) -> None:
     """Pre-flight URL shape check before handing it to aiohttp.
 
     Catches the common class of malformed-input bugs that the
     ``TextSelector(type=URL)`` field cannot block (e.g. ``http;//`` from
     autocomplete / paste mistakes). Raises :class:`InvalidUrl` if the URL
-    is missing a scheme, has a non-HTTP scheme, or has no host.
-
-    Also raises :class:`InvalidUrl` for credentials embedded in the URL
-    (``user:pass@host``) unless ``allow_userinfo`` is set: credentials
-    belong in the token field, which the client sends as a per-request
-    Authorization header. Basic auth gets its own selector later.
+    is missing a scheme, has a non-HTTP scheme, has no host, or carries
+    credentials (``user:pass@host``): credentials belong in the
+    authentication fields.
     """
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
         raise InvalidUrl(url)
-    if not allow_userinfo and (parsed.username or parsed.password):
+    if parsed.username or parsed.password:
         raise InvalidUrl(url)
 
 
-async def _validate_input(hass: Any, data: dict[str, Any], *, allow_userinfo: bool = False) -> None:
-    """Probe /api/version and map client errors to user-friendly exceptions.
+async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
+    """Probe /api/version with entry data and map client errors to flow errors.
 
-    Shared by the user / yaml / reauth / reconfigure flows so that the
     401/403 -> InvalidAuth, 404 -> ApiDisabled, invalid URL -> InvalidUrl,
-    and everything-else -> CannotConnect mapping is defined exactly once.
-
-    A newly entered URL must not carry credentials (see
-    :func:`_check_url_shape`); only steps that validate a URL the user does
-    not enter anew opt out via ``allow_userinfo``. Should aiohttp refuse to
-    build the request for such a URL, the client error maps to InvalidUrl.
+    everything else -> CannotConnect. Should aiohttp refuse to build the
+    request for the URL, the client error maps to InvalidUrl.
     """
-    _check_url_shape(data[CONF_URL], allow_userinfo=allow_userinfo)
+    _check_url_shape(data[CONF_URL])
     try:
         auth = auth_from_entry_data(data)
     except ValueError:
@@ -190,6 +211,74 @@ async def _validate_input(hass: Any, data: dict[str, Any], *, allow_userinfo: bo
         raise InvalidUrl(data[CONF_URL]) from None
     except TraefikProxyApiError, TimeoutError:
         raise CannotConnect from None
+
+
+async def _async_probe_errors(hass: HomeAssistant, data: Mapping[str, Any]) -> dict[str, str]:
+    """Probe Traefik with entry data; return the form errors (empty on success)."""
+    try:
+        await _validate_input(hass, data)
+    except InvalidUrl:
+        return {"base": "invalid_url"}
+    except InvalidAuth:
+        return {"base": "invalid_auth"}
+    except ApiDisabled:
+        return {"base": "api_disabled"}
+    except CannotConnect:
+        return {"base": "cannot_connect"}
+    return {}
+
+
+def _rejected_field(mode: AuthMode, credentials: Mapping[str, str]) -> str:
+    """Return the credential field ``Auth`` rejected for complete credentials."""
+    if mode is AuthMode.basic:
+        try:
+            Auth(mode=AuthMode.basic, username=credentials[CONF_USERNAME], password="-")
+        except ValueError:
+            return CONF_USERNAME
+        return CONF_PASSWORD
+    return CONF_TOKEN
+
+
+def _collect_credentials(
+    user_input: Mapping[str, Any], auth_type: str, stored: Mapping[str, Any] | None = None
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return the credentials of ``auth_type`` from the form and the field errors.
+
+    A missing or empty field falls back to ``stored`` when given (reconfigure
+    with an unchanged auth type) and is otherwise ``required``. Complete
+    credentials ``Auth`` rejects (a ':' or control character in the username,
+    a control character in a secret) mark that field ``invalid_auth``.
+    """
+    try:
+        mode = AuthMode(auth_type)
+    except ValueError:
+        return {}, {CONF_AUTH_TYPE: "invalid_auth"}
+    credentials: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    for key in _CREDENTIAL_KEYS[mode]:
+        value = user_input.get(key) or (stored or {}).get(key)
+        if isinstance(value, str) and value:
+            credentials[key] = value
+        else:
+            errors[key] = "required"
+    if errors:
+        return credentials, errors
+    try:
+        Auth(mode=mode, **credentials)
+    except ValueError:
+        errors[_rejected_field(mode, credentials)] = "invalid_auth"
+    return credentials, errors
+
+
+def _entry_data(url: str, verify_ssl: bool, auth_type: str, credentials: Mapping[str, str]) -> dict[str, Any]:
+    """Build complete entry data: URL, TLS verification, auth type and its credentials."""
+    return {CONF_URL: url, CONF_VERIFY_SSL: verify_ssl, CONF_AUTH_TYPE: auth_type, **credentials}
+
+
+def _stored_auth_type(data: Mapping[str, Any]) -> str:
+    """Return the entry's auth type as a selector value (none for an unknown type)."""
+    stored = data.get(CONF_AUTH_TYPE)
+    return stored if stored in {mode.value for mode in AuthMode} else AuthMode.none.value
 
 
 class TraefikProxyOptionsFlow(OptionsFlow):
@@ -260,43 +349,34 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Traefik."""
 
     VERSION = 1
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> TraefikProxyOptionsFlow:
-        """Return the options flow handler (CFG-05 / CONTEXT.md D-09).
-
-        The flow itself stores its values in ``entry.options``; the
-        ``_async_options_updated`` listener in ``__init__.py`` applies the
-        new ``scan_interval`` to the running coordinator so the change is
-        live (no integration reload required for interval tweaks).
-        """
+        """Return the options flow handler."""
         return TraefikProxyOptionsFlow()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the UI setup step."""
+        """Set up an entry: URL, TLS verification and authentication."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            url = user_input[CONF_URL]
+            auth_type = user_input.get(CONF_AUTH_TYPE, AuthMode.none.value)
             try:
-                await _validate_input(self.hass, user_input)
+                _check_url_shape(url)
             except InvalidUrl:
                 errors["base"] = "invalid_url"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except ApiDisabled:
-                errors["base"] = "api_disabled"
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
             else:
+                credentials, errors = _collect_credentials(user_input, auth_type)
+            if not errors:
+                data = _entry_data(url, user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL), auth_type, credentials)
+                errors = await _async_probe_errors(self.hass, data)
+            if not errors:
                 # unique_id = URL host avoids double-add for same Traefik
-                host = urlparse(user_input[CONF_URL]).hostname or user_input[CONF_URL]
-                await self.async_set_unique_id(host)
+                await self.async_set_unique_id(urlparse(url).hostname or url)
                 self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=DEFAULT_NAME,
-                    data=user_input,
-                )
+                return self.async_create_entry(title=DEFAULT_NAME, data=data)
 
         return self.async_show_form(
             step_id="user",
@@ -304,164 +384,91 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_yaml(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle YAML import (CFG-02)."""
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            validated = STEP_YAML_DATA_SCHEMA(user_input)
-            try:
-                # Existing YAML imports with credentials in the URL keep
-                # working until basic auth gets its own selector.
-                await _validate_input(self.hass, validated, allow_userinfo=True)
-            except InvalidUrl:
-                errors["base"] = "invalid_url"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except ApiDisabled:
-                errors["base"] = "api_disabled"
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            else:
-                host = urlparse(validated[CONF_URL]).hostname or validated[CONF_URL]
-                await self.async_set_unique_id(host)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=DEFAULT_NAME,
-                    data=validated,
-                )
-        return self.async_show_form(
-            step_id="yaml",
-            data_schema=STEP_YAML_DATA_SCHEMA,
-            errors=errors,
-        )
-
-    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
-        """Handle reauth entry point (CFG-04 / CONTEXT.md D-10).
-
-        Triggered by HA when the coordinator raises ``ConfigEntryAuthFailed``
-        (e.g., the user rotated the bearer token in Traefik's static config).
-        Delegates straight to :meth:`async_step_reauth_confirm` so the
-        ``step_id`` of the rendered form is ``reauth_confirm`` and HA's
-        submission loop dispatches back to the same handler.
-        """
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
+        """Start reauthentication after Traefik rejected the stored credentials."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Validate the new bearer token and persist it (CONTEXT.md D-10).
+        """Ask for new credentials for the stored URL, probe them and store them.
 
-        On success: ``async_update_entry`` writes the new token into
-        ``entry.data`` (URL and verify_ssl untouched), ``async_reload``
-        triggers HA's standard entry reload so the new token is picked up,
-        and the flow aborts with ``reauth_successful``.
+        Every credential of the chosen auth type is required. The entry data
+        is replaced as a whole, so credentials of another auth type are
+        dropped; the entry reloads and the flow aborts with Home Assistant's
+        central ``reauth_successful`` reason.
         """
         errors: dict[str, str] = {}
         entry = self._get_reauth_entry()
+        stored_auth = _stored_auth_type(entry.data)
 
         if user_input is not None:
-            new_api_key = user_input.get(CONF_API_KEY, "")
-            probe_data = {
-                CONF_URL: entry.data[CONF_URL],
-                CONF_API_KEY: new_api_key,
-                CONF_VERIFY_SSL: effective_verify_ssl(entry),
-            }
-            try:
-                # Probes the stored URL, which this form cannot edit.
-                await _validate_input(self.hass, probe_data, allow_userinfo=True)
-            except InvalidUrl:
-                errors["base"] = "invalid_url"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except ApiDisabled:
-                errors["base"] = "api_disabled"
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            else:
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    data={**entry.data, CONF_API_KEY: new_api_key},
+            auth_type = user_input.get(CONF_AUTH_TYPE, stored_auth)
+            credentials, errors = _collect_credentials(user_input, auth_type)
+            if not errors:
+                new_data = _entry_data(
+                    entry.data[CONF_URL],
+                    entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                    auth_type,
+                    credentials,
                 )
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
+                errors = await _async_probe_errors(
+                    self.hass, {**new_data, CONF_VERIFY_SSL: effective_verify_ssl(entry)}
+                )
+            if not errors:
+                return self.async_update_reload_and_abort(entry, data=new_data)
 
-        schema = vol.Schema(
-            {
-                vol.Optional(CONF_API_KEY, default=""): cv.string,
-            }
-        )
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=schema,
+            data_schema=vol.Schema(_auth_fields(stored_auth)),
             errors=errors,
         )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle in-place URL + token change (CFG-03 / CONTEXT.md D-11).
+        """Change URL, TLS verification and credentials of an existing entry.
 
-        Pre-fills the URL from ``entry.data`` and verify_ssl from the
-        effective value (options, then data). The stored token is never sent
-        to the form; an empty or omitted token keeps it (for the probe and
-        storage), a non-empty token replaces it. The same host and a host no
-        other entry owns are accepted; a host owned by another entry aborts
-        with ``already_configured``. On submit, validates the new
-        endpoint via ``/api/version`` and calls
-        ``async_update_reload_and_abort`` with ``data_updates`` so HA
-        rewrites the entry's data in place and reloads — no delete + re-add
-        required. verify_ssl is also written to ``options`` so the value the
-        user just set stays the effective one.
+        The URL and the effective TLS verification are pre-filled; secrets are
+        not. With an unchanged auth type an empty or omitted credential keeps
+        the stored one (for the probe and storage); a changed auth type needs
+        its own credentials, and none removes them. A host owned by another
+        entry aborts with ``already_configured`` before any request. The new
+        TLS verification value is also written to the options, so it stays
+        the effective one.
         """
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
+        stored_auth = _stored_auth_type(entry.data)
 
         if user_input is not None:
-            # Abort only when ANOTHER entry already owns the new host; this
-            # entry's own host (same-host reconfigure) and unused hosts are
-            # fine. Checked before the probe so a conflicting host is never
-            # contacted.
-            host = urlparse(user_input[CONF_URL]).hostname or user_input[CONF_URL]
-            for other in self._async_current_entries(include_ignore=False):
-                if other.entry_id != entry.entry_id and other.unique_id == host:
-                    return self.async_abort(reason="already_configured")
-            api_key = user_input.get(CONF_API_KEY) or entry.data.get(CONF_API_KEY, "")
-            verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-            probe_data = {
-                CONF_URL: user_input[CONF_URL],
-                CONF_API_KEY: api_key,
-                CONF_VERIFY_SSL: verify_ssl,
-            }
+            url = user_input[CONF_URL]
             try:
-                await _validate_input(self.hass, probe_data)
+                _check_url_shape(url)
             except InvalidUrl:
                 errors["base"] = "invalid_url"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except ApiDisabled:
-                errors["base"] = "api_disabled"
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
             else:
+                # Checked before the probe so a host owned by another entry
+                # is never contacted.
+                host = urlparse(url).hostname or url
+                for other in self._async_current_entries(include_ignore=False):
+                    if other.entry_id != entry.entry_id and other.unique_id == host:
+                        return self.async_abort(reason="already_configured")
+                auth_type = user_input.get(CONF_AUTH_TYPE, stored_auth)
+                stored = entry.data if auth_type == entry.data.get(CONF_AUTH_TYPE) else None
+                credentials, errors = _collect_credentials(user_input, auth_type, stored)
+            if not errors:
+                verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+                new_data = _entry_data(url, verify_ssl, auth_type, credentials)
+                errors = await _async_probe_errors(self.hass, new_data)
+            if not errors:
                 return self.async_update_reload_and_abort(
                     entry,
-                    data_updates={
-                        CONF_URL: user_input[CONF_URL],
-                        CONF_API_KEY: api_key,
-                        CONF_VERIFY_SSL: verify_ssl,
-                    },
+                    data=new_data,
                     options={**entry.options, CONF_VERIFY_SSL: verify_ssl},
                 )
 
-        # Pre-fill defaults so the form shows the currently-saved URL and the
-        # effective verify_ssl value. The token is never sent to the frontend.
-        defaults = {
-            CONF_URL: entry.data.get(CONF_URL, ""),
-            CONF_VERIFY_SSL: effective_verify_ssl(entry),
-        }
         schema = vol.Schema(
             {
-                vol.Required(CONF_URL, default=defaults[CONF_URL]): TextSelector(
-                    TextSelectorConfig(type=TextSelectorType.URL)
-                ),
-                vol.Optional(CONF_API_KEY): TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD)),
-                vol.Optional(CONF_VERIFY_SSL, default=defaults[CONF_VERIFY_SSL]): BooleanSelector(),
+                vol.Required(CONF_URL, default=entry.data.get(CONF_URL, "")): _URL_SELECTOR,
+                vol.Optional(CONF_VERIFY_SSL, default=effective_verify_ssl(entry)): BooleanSelector(),
+                **_auth_fields(stored_auth),
             }
         )
         return self.async_show_form(

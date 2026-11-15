@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import timedelta
-from typing import Final
+from typing import Any, Final
 
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.core import HomeAssistant, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
+from .api import AuthMode
 from .cert_coordinator import CertCoordinator
 from .const import (
+    CONF_API_KEY,
+    CONF_AUTH_TYPE,
     CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
+    CONF_URL,
+    CONF_VERIFY_SSL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
     DOMAIN,
@@ -64,8 +71,30 @@ def _issue_id(entry_id: str) -> str:
     return f"{ISSUE_ENTITIES_MIGRATED}_{entry_id}"
 
 
+def _migrated_entry_data(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return entry data 1.3 for the data of an older entry.
+
+    The 0.3.0 bearer token (``api_key``) becomes auth type bearer when it is
+    non-empty and auth type none otherwise. Data that already names an auth
+    type keeps its auth keys. Only known keys are carried over.
+    """
+    new_data: dict[str, Any] = {key: data[key] for key in (CONF_URL, CONF_VERIFY_SSL) if key in data}
+    if CONF_AUTH_TYPE in data:
+        new_data.update(
+            {key: data[key] for key in (CONF_AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN) if key in data}
+        )
+        return new_data
+    token = data.get(CONF_API_KEY)
+    if isinstance(token, str) and token:
+        new_data[CONF_AUTH_TYPE] = AuthMode.bearer.value
+        new_data[CONF_TOKEN] = token
+    else:
+        new_data[CONF_AUTH_TYPE] = AuthMode.none.value
+    return new_data
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
-    """Migrate a config entry to the current version (D-18).
+    """Migrate a config entry to the current version.
 
     1.1 -> 1.2: remove this entry's router binary sensors (replaced by router
     sensors with new entity IDs) and the reload button, and enable the three
@@ -78,8 +107,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     other entity of this entry that was disabled through one of its 0.3.0
     devices becomes user-disabled. User-disabled entities stay disabled; no
     surviving entity is renamed or re-IDed. A persistent repair issue explains
-    the change when anything was removed. An entry from a newer major version
-    fails (downgrade).
+    the change when anything was removed.
+
+    1.2 -> 1.3: the entry data names its auth type (none, basic or bearer)
+    and carries only the credentials of that type. The 1.1 -> 1.2 step runs
+    first, so a 1.1 entry reaches 1.3 in one setup. An entry from a newer
+    major version fails (downgrade).
     """
     if entry.version > 1:
         _LOGGER.debug(
@@ -162,6 +195,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
             removed,
             len(replacements),
         )
+
+    if entry.minor_version < 3:
+        new_data = _migrated_entry_data(entry.data)
+        hass.config_entries.async_update_entry(entry, data=new_data, minor_version=3)
+        _LOGGER.debug("Migrated Traefik entry %s to 1.3: auth type %s", entry.entry_id, new_data[CONF_AUTH_TYPE])
 
     return True
 
