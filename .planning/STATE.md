@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-11-15T12:57:34.658Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-11-15T13:33:07.985Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: bb8440927d9db3e18908121f7671c31ee9c5a0c3
+state_head: 238f952d198b4177a6c53a8294f70b6dd4be71f5
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 36
+  completed_plans: 37
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 07 execution started
 
@@ -102,6 +102,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 06 P06 | 8min | 2 tasks | 7 files |
 | Phase 06 P07 | 13min | 2 tasks | 10 files |
 | Phase 07 P01 | 4min | 2 tasks | 17 files |
+| Phase 07 P02 | 10min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -204,6 +205,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-01: test stack is pytest-homeassistant>=2026.11.0 (dev HA 2026.11.1); provenance asserted from installed metadata (M38)
 - [Phase 07]: 07-01: minimum HA 2026.11.0 enforced by hacs.json, ~/.cache/traefik-proxy-integration/ha2611-venv and CI job test-min-ha; ha2603-venv retired
 - [Phase 07]: 07-01: pre-2026.11 import shims removed (probatio as vol only; single BinarySensorDeviceClass import)
+- [Phase 07]: Phase 07: sub-devices link via the 2026.11 via_device_id keyword of async_get_or_create (not ChildDeviceInfo, M37); the async_update_device workaround is gone
+- [Phase 07]: Phase 07: migration repair issue carries config_entry_id and stays is_persistent=True; async_remove_entry only deletes the missing-since Store
+- [Phase 07]: Phase 07: setup/unload return None, unload uses async_unload_platforms_or_raise; async_migrate_entry keeps bool (False on downgrade, direct-call test)
+- [Phase 07]: Phase 07: CertCoordinator._stopping set first in async_shutdown; no private DataUpdateCoordinator attribute is read
 
 ### Pending Todos
 
@@ -248,7 +253,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T12:57:34.487Z
-Stopped at: Completed 07-01-PLAN.md
+Last session: 2026-11-15T13:33:07.809Z
+Stopped at: Completed 07-02-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
