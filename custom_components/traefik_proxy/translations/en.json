@@ -74,16 +74,22 @@
     "step": {
       "init": {
         "title": "Traefik options",
-        "description": "Adjust polling cadence, TLS verification, and the certificate warning threshold — URL changes use the separate Reconfigure flow.",
+        "description": "Changes apply after Home Assistant reloads the integration automatically. To change the Traefik API address or the credentials, use Reconfigure.",
         "data": {
-          "scan_interval": "Polling interval (seconds, 15-300)",
-          "verify_ssl": "Verify TLS certificate (disable for self-signed)",
-          "tls_warn_days": "Certificate warning threshold (days before expiry, 1-90)"
+          "scan_interval": "Polling interval",
+          "verify_ssl": "Verify TLS certificate",
+          "tls_warn_days": "Certificate warning threshold",
+          "per_item_entities": "Create router and service entities",
+          "missing_grace_hours": "Grace period for missing entities"
+        },
+        "data_description": {
+          "scan_interval": "Seconds between two polls of the Traefik API (15-300).",
+          "verify_ssl": "Turn this off only if the Traefik API uses a self-signed certificate.",
+          "tls_warn_days": "Days before expiry at which a certificate counts as expiring (1-90).",
+          "per_item_entities": "One entity per router and per service. Off keeps the aggregate, diagnostic and certificate entities and removes the router and service entities after the reload.",
+          "missing_grace_hours": "Hours a router, service or certificate that vanished from Traefik stays as \"missing\" before its entity is removed (1-168)."
         }
       }
-    },
-    "error": {
-      "scan_interval_out_of_range": "Polling interval must be between 15 and 300 seconds."
     }
   },
   "selector": {

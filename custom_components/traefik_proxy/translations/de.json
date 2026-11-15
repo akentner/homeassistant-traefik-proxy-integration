@@ -70,6 +70,28 @@
       "already_configured": "Diese Traefik-Instanz ist bereits eingerichtet."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Traefik-Optionen",
+        "description": "Änderungen gelten, nachdem Home Assistant die Integration automatisch neu geladen hat. Die Adresse der Traefik-API oder die Zugangsdaten änderst du über „Neu konfigurieren“.",
+        "data": {
+          "scan_interval": "Abfrageintervall",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "tls_warn_days": "Warnschwelle für Zertifikate",
+          "per_item_entities": "Entitäten für Router und Dienste anlegen",
+          "missing_grace_hours": "Karenzzeit für fehlende Entitäten"
+        },
+        "data_description": {
+          "scan_interval": "Sekunden zwischen zwei Abfragen der Traefik-API (15-300).",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "tls_warn_days": "Tage vor Ablauf, ab denen ein Zertifikat als bald ablaufend gilt (1-90).",
+          "per_item_entities": "Eine Entität pro Router und pro Dienst. Aus behält die Sammel-, Diagnose- und Zertifikats-Entitäten und entfernt die Router- und Dienst-Entitäten nach dem Neuladen.",
+          "missing_grace_hours": "Stunden, die ein aus Traefik verschwundener Router, Dienst oder ein Zertifikat als „fehlend“ bleibt, bevor seine Entität entfernt wird (1-168)."
+        }
+      }
+    }
+  },
   "selector": {
     "auth_type": {
       "options": {

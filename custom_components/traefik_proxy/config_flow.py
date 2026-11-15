@@ -62,12 +62,14 @@ from .api import (
 from .const import (
     CONF_AUTH_TYPE,
     CONF_MISSING_GRACE_HOURS,
+    CONF_PER_ITEM_ENTITIES,
     CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
     DEFAULT_MISSING_GRACE_HOURS,
     DEFAULT_NAME,
+    DEFAULT_PER_ITEM_ENTITIES,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
     DEFAULT_VERIFY_SSL,
@@ -300,6 +302,8 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
       effective value of the entry).
     - ``tls_warn_days``: days before expiry at which a certificate counts as
       expiring (1..90, default 14).
+    - ``per_item_entities``: one entity per router and per service (default
+      on); off keeps the aggregate, diagnostic and certificate entities.
     - ``missing_grace_hours``: hours a router, service or certificate that
       vanished from Traefik stays as "missing" before its entity is removed
       (1..168, default 24).
@@ -327,6 +331,7 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
                     CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
                     CONF_VERIFY_SSL: bool(user_input[CONF_VERIFY_SSL]),
                     CONF_TLS_WARN_DAYS: int(user_input[CONF_TLS_WARN_DAYS]),
+                    CONF_PER_ITEM_ENTITIES: bool(user_input[CONF_PER_ITEM_ENTITIES]),
                     CONF_MISSING_GRACE_HOURS: int(user_input[CONF_MISSING_GRACE_HOURS]),
                 }
             )
@@ -340,6 +345,9 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
                 vol.Required(
                     CONF_TLS_WARN_DAYS, default=current.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
                 ): _number_selector(MIN_TLS_WARN_DAYS, MAX_TLS_WARN_DAYS, "d"),
+                vol.Required(
+                    CONF_PER_ITEM_ENTITIES, default=current.get(CONF_PER_ITEM_ENTITIES, DEFAULT_PER_ITEM_ENTITIES)
+                ): BooleanSelector(),
                 vol.Required(
                     CONF_MISSING_GRACE_HOURS, default=current.get(CONF_MISSING_GRACE_HOURS, DEFAULT_MISSING_GRACE_HOURS)
                 ): _number_selector(MIN_MISSING_GRACE_HOURS, MAX_MISSING_GRACE_HOURS, "h"),
