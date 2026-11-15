@@ -7,6 +7,8 @@ no test advances time after setup.
 
 from __future__ import annotations
 
+import base64
+import logging
 from typing import Any
 
 import pytest
@@ -695,3 +697,126 @@ async def test_migrated_token_entry_loads_with_bearer_header(hass: HomeAssistant
     versions = [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
     assert versions
     assert all((call[3] or {}).get("Authorization") == "Bearer k" for call in versions)
+
+
+# ----------------------- 1.2 -> 1.3: credentials in the URL -----------------------
+
+USERINFO_PATH_URL = "https://admin:p%40ss%3Aw@traefik.example.com:8080/traefik?x=1"
+
+
+def _legacy_entry(hass: HomeAssistant, url: str, **legacy: Any) -> Any:
+    entry = make_traefik_entry(
+        entry_id=ENTRY_ID, minor_version=2, data={CONF_URL: url, CONF_VERIFY_SSL: True, **legacy}
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+def _warnings(caplog: Any) -> list[Any]:
+    return [
+        record
+        for record in caplog.records
+        if record.name.startswith("custom_components.traefik_proxy") and record.levelno == logging.WARNING
+    ]
+
+
+async def test_userinfo_without_token_becomes_basic(hass: HomeAssistant, caplog: Any) -> None:
+    """URL credentials move percent-decoded into basic auth; the URL keeps everything but the userinfo."""
+    entry = _legacy_entry(hass, USERINFO_PATH_URL)
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert dict(entry.data) == {
+        CONF_URL: "https://traefik.example.com:8080/traefik?x=1",
+        CONF_VERIFY_SSL: True,
+        AUTH_TYPE: "basic",
+        "username": "admin",
+        "password": "p@ss:w",
+    }
+    assert _warnings(caplog) == []
+
+
+async def test_userinfo_entry_loads_with_basic_header(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """A migrated userinfo entry loads and sends the moved credentials as a Basic header."""
+    entry = make_traefik_entry(
+        entry_id=ENTRY_ID,
+        minor_version=2,
+        data={CONF_URL: "https://admin:p%40ss%3Aw@traefik.example.com:8080", CONF_VERIFY_SSL: True},
+    )
+
+    await setup_traefik_entry(hass, aioclient_mock, entry)
+
+    assert entry.data[CONF_URL] == MOCK_URL
+    expected = "Basic " + base64.b64encode(b"admin:p@ss:w").decode()
+    versions = [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
+    assert versions
+    assert all((call[3] or {}).get("Authorization") == expected for call in versions)
+
+
+async def test_userinfo_with_token_keeps_bearer_and_warns(hass: HomeAssistant, caplog: Any) -> None:
+    """The token wins over URL credentials; the userinfo is dropped with one WARNING naming no credential."""
+    entry = _legacy_entry(hass, USERINFO_PATH_URL, **{CONF_API_KEY: "tok-123"})
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert dict(entry.data) == {
+        CONF_URL: "https://traefik.example.com:8080/traefik?x=1",
+        CONF_VERIFY_SSL: True,
+        AUTH_TYPE: "bearer",
+        CONF_TOKEN: "tok-123",
+    }
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert ENTRY_ID in message
+    for secret in ("admin", "p@ss", "p%40ss", "tok-123"):
+        assert secret not in caplog.text
+
+
+async def test_incomplete_userinfo_becomes_none_and_warns(hass: HomeAssistant, caplog: Any) -> None:
+    """A username without password (and no token) cannot be basic auth: none, URL cleaned, one WARNING."""
+    entry = _legacy_entry(hass, "https://admin@traefik.example.com:8080")
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"}
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    assert ENTRY_ID in warnings[0].getMessage()
+    assert "admin" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("url", "expected_url", "credentials"),
+    [
+        pytest.param("http://u:p@[::1]:8080/", "http://[::1]:8080/", ("u", "p"), id="ipv6"),
+        pytest.param(
+            "https://U:P@Traefik.Example.com:8080", "https://Traefik.Example.com:8080", ("U", "P"), id="host-spelling"
+        ),
+    ],
+)
+async def test_userinfo_url_rewrite_keeps_host_and_port(
+    hass: HomeAssistant, url: str, expected_url: str, credentials: tuple[str, str]
+) -> None:
+    """Only the userinfo is cut: IPv6 brackets, host spelling and port stay as stored."""
+    entry = _legacy_entry(hass, url)
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.data[CONF_URL] == expected_url
+    assert entry.data[AUTH_TYPE] == "basic"
+    assert (entry.data["username"], entry.data["password"]) == credentials
+
+
+async def test_userinfo_migration_is_idempotent(hass: HomeAssistant, caplog: Any) -> None:
+    """A second run after a reset minor version changes nothing and logs no second WARNING."""
+    entry = _legacy_entry(hass, USERINFO_PATH_URL, **{CONF_API_KEY: "tok-123"})
+    assert await integration.async_migrate_entry(hass, entry)
+    after_first = (dict(entry.data), entry.unique_id, entry.title)
+
+    hass.config_entries.async_update_entry(entry, minor_version=2)
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert (dict(entry.data), entry.unique_id, entry.title) == after_first
+    assert entry.minor_version == 3
+    assert len(_warnings(caplog)) == 1

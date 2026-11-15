@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import CONF_TOKEN
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant.common import MockConfigEntry
 
@@ -193,3 +193,73 @@ async def test_reconfigure_rejects_userinfo_url(hass, aioclient_mock) -> None:
     assert result["errors"] == {"base": "invalid_url"}
     assert dict(entry.data) == before
     assert aioclient_mock.call_count == 0
+
+
+# ----------------------- auth type switches -----------------------
+
+# admin:s3cret, base64-encoded (RFC 7617)
+BASIC_HEADER = "Basic YWRtaW46czNjcmV0"
+BASIC_DATA = {AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"}
+
+
+def _make_basic_entry() -> MockConfigEntry:
+    return make_traefik_entry(data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_DATA})
+
+
+async def _reconfigure(hass, entry: MockConfigEntry, user_input: dict[str, Any]) -> Any:  # type: ignore[no-untyped-def]
+    entry.add_to_hass(hass)
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **user_input}
+    )
+    await hass.async_block_till_done()
+    return result
+
+
+async def test_unchanged_basic_with_empty_credentials_keeps_both(hass, aioclient_mock) -> None:
+    """Basic stays basic with empty username and password: both stored values are probed and kept."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "basic", CONF_USERNAME: "", CONF_PASSWORD: ""})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert _probe_auth(aioclient_mock) == BASIC_HEADER
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_DATA}
+
+
+async def test_bearer_to_basic_requires_new_password(hass, aioclient_mock) -> None:
+    """A changed auth type needs its own credentials; nothing is probed or stored."""
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "basic", CONF_USERNAME: "admin"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_PASSWORD: "required"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+async def test_bearer_to_none_keeps_no_credential(hass, aioclient_mock) -> None:
+    """Switching to none removes every credential; a stale submitted token is dropped."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "none", CONF_TOKEN: "stale"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"}
+    assert _probe_auth(aioclient_mock) is None
+
+
+async def test_basic_to_bearer_keeps_no_username_or_password(hass, aioclient_mock) -> None:
+    """Switching basic to bearer stores the token only."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "t2"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "t2"}
+    assert _probe_auth(aioclient_mock) == "Bearer t2"

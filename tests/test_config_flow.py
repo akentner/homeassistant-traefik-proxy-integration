@@ -24,10 +24,12 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
+import probatio as vol
 import pytest
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.setup import async_setup_component
 
 from custom_components.traefik_proxy.api import (
     Auth,
@@ -448,3 +450,251 @@ def _probe_auth(aioclient_mock: Any) -> str | None:
     assert versions, "no /api/version request recorded"
     headers: dict[str, str] = versions[0][3] or {}
     return headers.get("Authorization")
+
+
+# ----------------------- conditional credential fields -----------------------
+
+BASIC_VISIBLE = {"field": AUTH_TYPE, "value": "basic"}
+BEARER_VISIBLE = {"field": AUTH_TYPE, "value": "bearer"}
+BASIC_INPUT = {AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"}
+
+
+def _markers(result: Any) -> dict[str, Any]:
+    """Return {field name: schema marker} of a form result."""
+    return {str(marker): marker for marker in result["data_schema"].schema}
+
+
+def _assert_auth_markers(markers: dict[str, Any], default_auth: str) -> None:
+    """The auth selector defaults to ``default_auth``; credentials are visible only for their type."""
+    assert markers[AUTH_TYPE].default() == default_auth
+    assert markers[CONF_USERNAME].visible == BASIC_VISIBLE
+    assert markers[CONF_PASSWORD].visible == BASIC_VISIBLE
+    assert markers[CONF_TOKEN].visible == BEARER_VISIBLE
+    for key in (CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN):
+        # Never a stored value as default or suggested value.
+        assert markers[key].default is vol.UNDEFINED, key
+        assert markers[key].description is None, key
+
+
+def _basic_entry(hass: Any) -> Any:
+    entry = make_traefik_entry(data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_INPUT})
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def test_user_form_credential_fields_are_visible_per_auth_type(hass: Any) -> None:
+    """The user form defaults to no auth; username/password show for basic, token for bearer."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+
+    _assert_auth_markers(_markers(result), "none")
+
+
+async def test_reauth_form_credential_fields_are_visible_per_auth_type(hass: Any) -> None:
+    """The reauth form defaults to the stored auth type and pre-fills no credential."""
+    entry = _basic_entry(hass)
+
+    result = await entry.start_reauth_flow(hass)
+
+    markers = _markers(result)
+    assert set(markers) == {AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN}
+    _assert_auth_markers(markers, "basic")
+
+
+async def test_reconfigure_form_credential_fields_are_visible_per_auth_type(hass: Any) -> None:
+    """The reconfigure form defaults to the stored auth type and pre-fills no credential."""
+    entry = _basic_entry(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+
+    _assert_auth_markers(_markers(result), "basic")
+
+
+def test_user_schema_serializes_auth_selector_and_secrets() -> None:
+    """The serialized form carries the translated auth selector and password inputs for both secrets."""
+    from homeassistant.helpers import config_validation as cv
+    from probatio import to_field_list as serialize_schema
+
+    by_name = {
+        field["name"]: field
+        for field in serialize_schema(STEP_USER_DATA_SCHEMA, custom_serializer=cv.custom_serializer)
+    }
+
+    assert set(by_name) == {CONF_URL, CONF_VERIFY_SSL, AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN}
+    select = by_name[AUTH_TYPE]["selector"]["select"]
+    assert select["translation_key"] == "auth_type"
+    assert select["options"] == ["none", "basic", "bearer"]
+    assert by_name[CONF_PASSWORD]["selector"]["text"]["type"] == "password"
+    assert by_name[CONF_TOKEN]["selector"]["text"]["type"] == "password"
+
+
+async def test_flow_api_sends_visible_conditions(hass: Any, hass_client: Any) -> None:
+    """The config flow HTTP API ships the visible condition of each credential field to the frontend."""
+    assert await async_setup_component(hass, "config", {})
+    client = await hass_client()
+
+    response = await client.post("/api/config/config_entries/flow", json={"handler": DOMAIN})
+
+    assert response.status == 200
+    fields = {field["name"]: field for field in (await response.json())["data_schema"]}
+    assert fields[CONF_TOKEN]["visible"] == BEARER_VISIBLE
+    assert fields[CONF_USERNAME]["visible"] == BASIC_VISIBLE
+    assert fields[CONF_PASSWORD]["visible"] == BASIC_VISIBLE
+    assert "visible" not in fields[CONF_URL]
+
+
+async def _submit_user(hass: Any, user_input: dict[str, Any]) -> Any:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **user_input}
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return result
+
+
+@pytest.mark.parametrize(
+    ("submitted", "expected"),
+    [
+        pytest.param({AUTH_TYPE: "none", CONF_TOKEN: "stale", CONF_USERNAME: "stale"}, {AUTH_TYPE: "none"}, id="none"),
+        pytest.param({**BASIC_INPUT, CONF_TOKEN: "stale"}, BASIC_INPUT, id="basic"),
+        pytest.param(
+            {AUTH_TYPE: "bearer", CONF_TOKEN: "tok", CONF_PASSWORD: "stale"},
+            {AUTH_TYPE: "bearer", CONF_TOKEN: "tok"},
+            id="bearer",
+        ),
+    ],
+)
+async def test_user_step_strips_hidden_credentials(
+    hass: Any, aioclient_mock: Any, submitted: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """Credentials of another auth type in the submitted form are never stored."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+
+    result = await _submit_user(hass, submitted)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert dict(result["result"].data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **expected}
+
+
+@pytest.mark.parametrize(
+    ("submitted", "errors"),
+    [
+        pytest.param({AUTH_TYPE: "basic", CONF_PASSWORD: "s3cret"}, {CONF_USERNAME: "required"}, id="no-username"),
+        pytest.param({AUTH_TYPE: "basic", CONF_USERNAME: "admin"}, {CONF_PASSWORD: "required"}, id="no-password"),
+        pytest.param(
+            {AUTH_TYPE: "basic", CONF_USERNAME: "", CONF_PASSWORD: ""},
+            {CONF_USERNAME: "required", CONF_PASSWORD: "required"},
+            id="neither",
+        ),
+        pytest.param({AUTH_TYPE: "bearer"}, {CONF_TOKEN: "required"}, id="no-token"),
+        pytest.param({AUTH_TYPE: "bearer", CONF_TOKEN: ""}, {CONF_TOKEN: "required"}, id="empty-token"),
+    ],
+)
+async def test_user_step_requires_credentials_of_auth_type(
+    hass: Any, aioclient_mock: Any, submitted: dict[str, Any], errors: dict[str, str]
+) -> None:
+    """Missing credentials of the chosen type are field errors; Traefik is not contacted."""
+    result = await _submit_user(hass, submitted)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == errors
+    assert aioclient_mock.call_count == 0
+
+
+@pytest.mark.parametrize(
+    ("submitted", "errors"),
+    [
+        pytest.param({**BASIC_INPUT, CONF_USERNAME: "ad:min"}, {CONF_USERNAME: "invalid_auth"}, id="colon-username"),
+        pytest.param({**BASIC_INPUT, CONF_USERNAME: "ad\tmin"}, {CONF_USERNAME: "invalid_auth"}, id="control-username"),
+        pytest.param({**BASIC_INPUT, CONF_PASSWORD: "s3\x00cret"}, {CONF_PASSWORD: "invalid_auth"}, id="password"),
+        pytest.param({AUTH_TYPE: "bearer", CONF_TOKEN: "to\nken"}, {CONF_TOKEN: "invalid_auth"}, id="token"),
+    ],
+)
+async def test_user_step_rejected_credentials_mark_their_field(
+    hass: Any, aioclient_mock: Any, submitted: dict[str, Any], errors: dict[str, str]
+) -> None:
+    """A credential the client cannot send marks its field invalid_auth; Traefik is not contacted."""
+    result = await _submit_user(hass, submitted)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == errors
+    assert aioclient_mock.call_count == 0
+
+
+async def test_unknown_auth_type_is_rejected_without_request(hass: Any, aioclient_mock: Any) -> None:
+    """An auth type the integration does not know (bypassing the selector) is refused without a request."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}, data={CONF_URL: MOCK_URL, AUTH_TYPE: "digest"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {AUTH_TYPE: "invalid_auth"}
+    assert aioclient_mock.call_count == 0
+
+
+# ----------------------- reauth switches the auth type -----------------------
+
+
+async def _reauth(hass: Any, entry: Any, user_input: dict[str, Any]) -> Any:
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    return result
+
+
+async def test_reauth_basic_to_bearer_drops_username_and_password(hass: Any, aioclient_mock: Any) -> None:
+    """Switching a basic entry to bearer in reauth leaves no username or password."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _basic_entry(hass)
+
+    result = await _reauth(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "new"})
+
+    assert result["reason"] == "reauth_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "new"}
+
+
+async def test_reauth_bearer_to_none_drops_token(hass: Any, aioclient_mock: Any) -> None:
+    """Switching a bearer entry to none in reauth leaves no token and sends no header."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+
+    result = await _reauth(hass, entry, {AUTH_TYPE: "none"})
+
+    assert result["reason"] == "reauth_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"}
+    assert _probe_auth(aioclient_mock) is None
+
+
+async def test_reauth_to_basic_probes_and_stores_both(hass: Any, aioclient_mock: Any) -> None:
+    """Switching a bearer entry to basic in reauth probes with the Basic header and stores both credentials."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+
+    result = await _reauth(hass, entry, BASIC_INPUT)
+
+    assert result["reason"] == "reauth_successful"
+    assert _probe_auth(aioclient_mock) == BASIC_HEADER
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_INPUT}
+
+
+@pytest.mark.parametrize(
+    ("submitted", "errors"),
+    [
+        pytest.param({AUTH_TYPE: "bearer", CONF_TOKEN: ""}, {CONF_TOKEN: "required"}, id="token"),
+        pytest.param({**BASIC_INPUT, CONF_PASSWORD: ""}, {CONF_PASSWORD: "required"}, id="password"),
+    ],
+)
+async def test_reauth_requires_every_credential(
+    hass: Any, aioclient_mock: Any, submitted: dict[str, Any], errors: dict[str, str]
+) -> None:
+    """Reauth never falls back to a stored secret: an empty one is required, nothing is sent or stored."""
+    entry = _basic_entry(hass)
+    before = dict(entry.data)
+
+    result = await _reauth(hass, entry, submitted)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == errors
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
