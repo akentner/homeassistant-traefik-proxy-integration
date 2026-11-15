@@ -13,7 +13,7 @@ findings:
     title: "Diagnostics leak secret-bearing `HeaderRegexp`/`QueryRegexp` values through router `errors`"
   - id: WR-02
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "Probe mode connects only to the first resolved address (regression for IPv6-first or multi-address hosts)"
   - id: WR-03
     severity: warning
@@ -21,7 +21,7 @@ findings:
     title: "SHA pins of `hacs/action` and `home-assistant/actions/hassfest` do not pin the executed code"
   - id: WR-04
     severity: warning
-    disposition: open
+    disposition: fixed
     title: "CI lint and test jobs install dev dependencies without a lock (`uv.lock` is git-ignored)"
   - id: IN-01
     severity: info
@@ -47,9 +47,9 @@ findings:
     severity: info
     disposition: open
     title: "Coverage gate and x86-only lock make partial and non-x86 local runs fail"
-open: 8
+open: 6
 total: 11
-recorded: 2026-11-15T21:51:39.312Z
+recorded: 2026-11-15T21:51:48.954Z
 ---
 
 # Phase 08: Code Review Disposition
@@ -58,9 +58,9 @@ recorded: 2026-11-15T21:51:39.312Z
 |---------|----------|-------------|--------|
 | CR-01 | critical | fixed | 08-REVIEW-FIX.md |
 | WR-01 | warning | fixed | 08-REVIEW-FIX.md |
-| WR-02 | warning | open | - |
+| WR-02 | warning | fixed | 08-REVIEW-FIX.md |
 | WR-03 | warning | fixed | 08-REVIEW-FIX.md |
-| WR-04 | warning | open | - |
+| WR-04 | warning | fixed | 08-REVIEW-FIX.md |
 | IN-01 | info | open | - |
 | IN-02 | info | open | - |
 | IN-03 | info | open | - |
