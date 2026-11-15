@@ -252,16 +252,16 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Certificates (CERT) — Phase 6
 
-- [ ] **CERT-01**: On Traefik ≥ 3.7 certificate data comes from
+- [x] **CERT-01**: On Traefik ≥ 3.7 certificate data comes from
       `GET /api/certificates` (`source=api`, no probing); a 404 or older version
       falls back to probing. (T-01)
-- [ ] **CERT-02**: The fallback probe is native async
+- [x] **CERT-02**: The fallback probe is native async
       (`asyncio.open_connection`, no threads), uses one shared `SSLContext` with
       `CERT_NONE`, parses the DER certificate with `cryptography`, connects to
       the Traefik host from the entry URL on the TLS entrypoint port with
       SNI = router host, reports `verified`, and classifies `ssl` vs `oserror`
       correctly. (T-01, T-02, P-05, P-06, S-05)
-- [ ] **CERT-03**: `rules.py` `extract_hosts()` handles v2 multi-argument
+- [x] **CERT-03**: `rules.py` `extract_hosts()` handles v2 multi-argument
       `Host()` and v3 `||` rules and skips regex and wildcard hosts; at most 200
       hosts are probed; no module-level cache grows without bound. (A-12, P-07,
       P-08, S-07)
@@ -456,9 +456,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENT-08 | Phase 5 | Complete |
 | ENT-09 | Phase 5 | Complete |
 | ENT-10 | Phase 5 | Complete |
-| CERT-01 | Phase 6 | Pending |
-| CERT-02 | Phase 6 | Pending |
-| CERT-03 | Phase 6 | Pending |
+| CERT-01 | Phase 6 | Complete |
+| CERT-02 | Phase 6 | Complete |
+| CERT-03 | Phase 6 | Complete |
 | CERT-04 | Phase 6 | Complete |
 | CERT-05 | Phase 6 | Pending |
 | FLOW-01 | Phase 7 | Pending |
