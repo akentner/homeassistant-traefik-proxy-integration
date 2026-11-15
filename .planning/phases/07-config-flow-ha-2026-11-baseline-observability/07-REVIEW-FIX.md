@@ -30,14 +30,14 @@ status: all_fixed
 | IN-01 | fixed | `120e1f0` | `test_user_step_rejected_credentials_mark_their_field` (4 cases), `test_flow_error_keys_have_texts[en/de]`, `test_local_credential_rejection_does_not_blame_traefik[en/de]` (8 RED) |
 | IN-02 | fixed | `13bf364` | Comment only, so no test can fail first. The behaviour is already pinned by `test_incomplete_userinfo_becomes_none_and_warns` |
 | IN-06 | fixed | `8d9dd22` | Test-only fix. Mutation check: with `config_entry_id=` dropped locally, both new assertions fail |
-| WR-04 | deferred to Phase 8 | - | Out of scope (07-CONTEXT "Out of scope (Phase 8)" / ROADMAP Phase 8 SC3) |
-| WR-05 | deferred to Phase 8 | - | Out of scope |
-| WR-06 | deferred to Phase 8 | - | Out of scope |
-| WR-07 | deferred to Phase 8 | - | Out of scope |
-| IN-03 | deferred to Phase 8 | - | Out of scope |
-| IN-04 | deferred to Phase 8 | - | Out of scope (necessity) |
-| IN-05 | deferred to Phase 8 | - | Out of scope (necessity) |
-| IN-07 | deferred to Phase 8 | - | Out of scope (already a Phase 8 carry-over) |
+| WR-04 | deferred to Phase 8 | b6116e5 (08-06) | Out of scope (07-CONTEXT "Out of scope (Phase 8)" / ROADMAP Phase 8 SC3). Resolved in Phase 8: pre-commit hooks on `custom_components/traefik_proxy`, `hassfest_checks.py` strings-shape accepts `entity` |
+| WR-05 | deferred to Phase 8 | df061f4 (08-07) | Out of scope. Resolved in Phase 8: `timeout-minutes: 15` on every CI job |
+| WR-06 | deferred to Phase 8 | a0b0cd8 (08-06) + df061f4 (08-07) | Out of scope. Resolved in Phase 8: hashed min-HA lock and `make test-min-ha`; CI job runs the locked install |
+| WR-07 | deferred to Phase 8 | df061f4 (08-07) | Out of scope. Resolved in Phase 8: all actions SHA-pinned with a version comment |
+| IN-03 | deferred to Phase 8 | 4cf98b0 (08-02) | Out of scope. Resolved in Phase 8: `certificates_failed` raised `from _logged_cause(err)` |
+| IN-04 | deferred to Phase 8 | 3b6fc0c (08-03) | Out of scope (necessity). Resolved in Phase 8: defence branch kept with a comment explaining why |
+| IN-05 | deferred to Phase 8 | 3b6fc0c (08-03) | Out of scope (necessity). Resolved in Phase 8: defence branches kept with comments explaining why |
+| IN-07 | deferred to Phase 8 | b6116e5 (08-06) | Out of scope (already a Phase 8 carry-over). Resolved in Phase 8: `--cov=custom_components.traefik_proxy` |
 
 ## Fixed Issues
 
@@ -103,6 +103,19 @@ status: all_fixed
 ## Deferred (Phase 8)
 
 WR-04, WR-05, WR-06, WR-07, IN-03, IN-04, IN-05 and IN-07 are not changed here. They belong to Phase 8 per 07-CONTEXT "Out of scope (Phase 8)" and ROADMAP Phase 8 SC3.
+
+Resolved in Phase 8 (commits recorded in the 08-02, 08-03, 08-06 and 08-07 SUMMARYs; closed by 08-12):
+
+| Finding | Phase 8 commit | Plan |
+|---|---|---|
+| WR-04 | b6116e5 | 08-06 |
+| WR-05 | df061f4 | 08-07 |
+| WR-06 | a0b0cd8 (lock) + df061f4 (CI job) | 08-06, 08-07 |
+| WR-07 | df061f4 | 08-07 |
+| IN-03 | 4cf98b0 | 08-02 |
+| IN-04 | 3b6fc0c | 08-03 |
+| IN-05 | 3b6fc0c | 08-03 |
+| IN-07 | b6116e5 | 08-06 |
 
 ## Verification
 
