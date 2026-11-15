@@ -7,8 +7,8 @@ contract pins:
 
 - 24h parse-failure log throttle (CONTEXT.md D-11) — only one
   ``_LOGGER.debug`` line per host per cooldown window.
-- ``_hostname_matches_san`` covers RFC 6125 §6.4.3 wildcard + case
-  + bare-apex semantics (eight cases).
+- ``_hostname_matches_san`` covers the RFC 6125 §6.4.3 single-label wildcard,
+  case, trailing-dot, bare-apex and literal-IP semantics.
 - ``is_error`` type guard across ``CertInfo`` / ``CertError`` / empty
   dict edges.
 - ``fetch_cert_info`` never raises — refused / DNS / wrong-port paths
@@ -58,6 +58,7 @@ from custom_components.traefik_proxy.tls import (
     build_trust_store,
     fetch_cert_info,
     is_error,
+    match_certificate,
     parse_not_after,
 )
 from tests.certgen import Issued, make_ca, make_intermediate, make_leaf, make_self_signed, write_pem
@@ -168,21 +169,28 @@ def test_log_throttle_per_host_independent(
 # ``_hostname_matches_san`` — RFC 6125 §6.4.3 wildcard + case + bare-apex.
 # ---------------------------------------------------------------------------
 _HOST_SAN_CASES: list[tuple[str, tuple[str, ...], bool]] = [
-    ("api.example.com", ("*.example.com",), True),
-    ("example.com", ("*.example.com",), False),  # bare apex NOT covered by wildcard
-    ("foo.api.example.com", ("*.example.com",), True),  # multi-label wildcard match
-    ("foo.api.example.com", ("*.api.example.com",), True),  # narrow-wildcard match
-    ("example.com", ("example.com",), True),  # exact match
-    ("example.com", ("example.org",), False),  # no match
+    ("a.example.com", ("*.example.com",), True),
+    ("a.b.example.com", ("*.example.com",), False),  # a wildcard covers exactly one label
+    ("example.com", ("*.example.com",), False),  # bare apex not covered by a wildcard
+    ("foo.example.com.evil.org", ("*.example.com",), False),
+    ("A.Example.COM.", ("*.example.com",), True),  # case- and trailing-dot-insensitive
+    ("a.example.com", ("A.EXAMPLE.COM.",), True),
+    ("fa.example.com", ("f*.example.com",), False),  # partial-label wildcard is a literal
+    ("f*.example.com", ("f*.example.com",), True),
+    ("localhost", ("localhost",), True),
+    ("localhost", ("*.localhost", "*"), False),  # single-label host never matches a wildcard
+    ("192.168.1.10", ("192.168.1.10",), True),  # IP SANs compare literally
+    ("192.168.1.10", ("*.168.1.10",), False),  # never a wildcard match for an IP literal
+    ("bücher.example", ("xn--bcher-kva.example",), False),  # no Unicode normalization
     ("api.example.com", ("api.example.com", "other.com"), True),  # multi-SAN hit
-    ("EXAMPLE.com", ("example.COM",), True),  # case-insensitive
+    ("example.com", ("example.org",), False),
 ]
 
 
-@pytest.mark.parametrize(("host", "san", "expected"), _HOST_SAN_CASES)
-def test_hostname_matches_san(host: str, san: tuple[str, ...], expected: bool) -> None:
-    """RFC 6125 wildcard + case + bare-apex semantics (8 cases)."""
-    assert _hostname_matches_san(host, san) is expected
+@pytest.mark.parametrize(("host", "names", "expected"), _HOST_SAN_CASES)
+def test_hostname_matches_san(host: str, names: tuple[str, ...], expected: bool) -> None:
+    """RFC 6125 single-label wildcard, case, trailing-dot and literal semantics."""
+    assert _hostname_matches_san(host, names) is expected
 
 
 def test_hostname_matches_san_empty_san_rejects_all() -> None:
@@ -193,10 +201,9 @@ def test_hostname_matches_san_empty_san_rejects_all() -> None:
 def test_hostname_matches_san_wildcard_does_not_match_attacker_suffix() -> None:
     """``*.example.com`` must NOT match ``foo.example.com.evil.org``.
 
-    Wildcards are scoped to the cert's domain — a single-label suffix
-    match would let ``foo.example.com.evil.org`` claim a cert for
-    ``*.example.com`` via SNI spoofing. The label-count check in
-    ``_hostname_matches_san`` blocks this.
+    Wildcards are scoped to the cert's domain: the part of the host after
+    its first label must equal the wildcard's domain exactly, so a suffix
+    match cannot let ``foo.example.com.evil.org`` claim the certificate.
     """
     assert _hostname_matches_san("foo.example.com.evil.org", ("*.example.com",)) is False
 
@@ -905,3 +912,69 @@ def test_build_trust_store_from_ha_roots_records_no_warning(recwarn: pytest.Warn
 
     assert isinstance(build_trust_store(ders), Store)
     assert not [w for w in recwarn if issubclass(w.category, CryptographyDeprecationWarning)]
+
+
+# ---------------------------------------------------------------------------
+# ``match_certificate``: host -> API certificate (exact > wildcard > latest expiry).
+# ---------------------------------------------------------------------------
+
+_MATCH_BASE = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+
+
+def _api_cert(common_name: str = "", sans: tuple[str, ...] = (), *, days: int = 30) -> TraefikCertificate:
+    return TraefikCertificate(
+        common_name=common_name,
+        sans=sans,
+        not_after=_MATCH_BASE + timedelta(days=days),
+        not_before=_MATCH_BASE,
+        issuer_cn="Test CA",
+        status="enabled",
+        serial_number=str(days),
+    )
+
+
+def test_match_certificate_exact_beats_later_wildcard() -> None:
+    """An exact SAN match wins over a wildcard certificate that expires later."""
+    exact = _api_cert(sans=("a.example.com",), days=10)
+    wildcard = _api_cert(sans=("*.example.com",), days=80)
+    assert match_certificate("a.example.com", [wildcard, exact]) is exact
+
+
+def test_match_certificate_counts_common_name() -> None:
+    """A certificate covering the host only through its CN matches."""
+    cn_only = _api_cert("a.example.com")
+    assert match_certificate("A.example.com.", [cn_only]) is cn_only
+
+
+def test_match_certificate_two_exact_matches_latest_not_after() -> None:
+    """Among exact matches the latest not_after wins."""
+    early = _api_cert(sans=("a.example.com",), days=10)
+    late = _api_cert("a.example.com", days=60)
+    assert match_certificate("a.example.com", [late, early]) is late
+    assert match_certificate("a.example.com", [early, late]) is late
+
+
+def test_match_certificate_two_wildcard_matches_latest_not_after() -> None:
+    """Among wildcard matches the latest not_after wins."""
+    early = _api_cert("*.example.com", days=10)
+    late = _api_cert(sans=("*.example.com",), days=60)
+    assert match_certificate("a.example.com", [early, late]) is late
+
+
+def test_match_certificate_no_candidate_is_none() -> None:
+    """No covering certificate (multi-label wildcard, apex, other domain) gives None."""
+    certs = [_api_cert(sans=("*.example.com",)), _api_cert("other.org")]
+    assert match_certificate("a.b.example.com", certs) is None
+    assert match_certificate("example.com", certs) is None
+
+
+def test_match_certificate_empty_list_is_none() -> None:
+    """No certificates give None."""
+    assert match_certificate("a.example.com", ()) is None
+
+
+def test_match_certificate_never_returns_nameless_certificate() -> None:
+    """A certificate with an empty CN and no SANs matches nothing."""
+    nameless = _api_cert()
+    assert match_certificate("a.example.com", [nameless]) is None
+    assert match_certificate("", [nameless]) is None
