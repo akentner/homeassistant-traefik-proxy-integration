@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import socket
@@ -10,7 +11,8 @@ import ssl
 import subprocess
 import sys
 import tempfile
-from collections.abc import AsyncIterator, Iterable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -396,6 +398,88 @@ async def mock_certificate_server(
         finally:
             server.close()
             await server.wait_closed()
+
+
+@dataclass
+class TlsServer:
+    """A running ``tls_server`` instance.
+
+    ``received`` holds, per finished connection, every byte the client
+    sent after the handshake (``b""`` when it sent nothing).
+    """
+
+    port: int = 0
+    received: list[bytes] = field(default_factory=list)
+
+    async def wait_connections(self, count: int) -> None:
+        """Yield to the loop until ``count`` connections have finished.
+
+        Uses ``asyncio.sleep(0)`` only, so it also works under ``freezer``
+        (the loop clock is frozen there and timed sleeps never return).
+        """
+        for _ in range(10_000):
+            if len(self.received) >= count:
+                return
+            await asyncio.sleep(0)
+        raise AssertionError(f"expected {count} finished connections, got {len(self.received)}")
+
+
+type TlsServerStarter = Callable[..., Awaitable[TlsServer]]
+
+
+@pytest_asyncio.fixture
+async def tls_server(socket_enabled: None) -> AsyncIterator[TlsServerStarter]:
+    """Start asyncio TLS servers on 127.0.0.1 that pick the certificate by SNI.
+
+    Yields ``start(certs, *, default)``: ``certs`` maps an SNI name to the
+    ``(chain_pem, key_pem)`` pair of ``tests.certgen.write_pem``; a handshake
+    with an unknown or missing SNI name gets ``certs[default]``. One server
+    context is built per entry up front and the SNI callback only assigns
+    ``sslobj.context`` (never load a chain inside the callback). Every
+    connection is read until EOF and its bytes appended to ``received``.
+    Teardown closes every started server.
+    """
+    assert socket_enabled is None  # consumed for fixture propagation
+    servers: list[asyncio.Server] = []
+
+    async def start(certs: Mapping[str, tuple[Path, Path]], *, default: str) -> TlsServer:
+        contexts: dict[str, ssl.SSLContext] = {}
+        for name, (chain_pem, key_pem) in certs.items():
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(chain_pem, key_pem)
+            contexts[name] = context
+        default_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        default_context.load_cert_chain(*certs[default])
+
+        def _select(sslobj: ssl.SSLObject, server_name: str | None, _context: ssl.SSLContext) -> None:
+            if server_name is not None and server_name in contexts:
+                sslobj.context = contexts[server_name]
+
+        default_context.sni_callback = _select
+        record = TlsServer()
+
+        async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            data = b""
+            try:
+                data = await reader.read()
+            except OSError:
+                pass
+            finally:
+                record.received.append(data)
+                writer.close()
+                with contextlib.suppress(OSError):
+                    await writer.wait_closed()
+
+        server = await asyncio.start_server(_handle, "127.0.0.1", 0, ssl=default_context)
+        servers.append(server)
+        record.port = server.sockets[0].getsockname()[1]
+        return record
+
+    yield start
+    for server in servers:
+        server.close()
+        server.close_clients()
+        await server.wait_closed()
 
 
 async def _silence_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:

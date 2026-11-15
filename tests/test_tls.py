@@ -22,24 +22,36 @@ contract pins:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.x509.oid import ExtendedKeyUsageOID
+from homeassistant.util import dt as dt_util
 
 from custom_components.traefik_proxy.const import TLS_HANDSHAKE_TIMEOUT
+from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import (
     NOTAFTER_FORMATS,
     CertError,
     CertInfo,
+    ProbedCertificate,
     _fetch_cert_raw,
     _hostname_matches_san,
     _log_parse_failure_once,
+    async_probe_certificate,
+    build_trust_store,
     fetch_cert_info,
     is_error,
     parse_not_after,
 )
+from tests.certgen import Issued, make_ca, make_intermediate, make_leaf, make_self_signed, write_pem
+from tests.conftest import TlsServerStarter
 
 # ---------------------------------------------------------------------------
 # Known notAfter shapes — TEST-04's ≥3 minimum; six real-world shapes from
@@ -348,3 +360,149 @@ def test_notafter_formats_count_matches_spec() -> None:
 def test_tls_handshake_timeout_default() -> None:
     """``TLS_HANDSHAKE_TIMEOUT`` constant must be 5s (the spike-validated value)."""
     assert TLS_HANDSHAKE_TIMEOUT == 5.0
+
+
+# ---------------------------------------------------------------------------
+# Threadless CERT_NONE probe against a local TLS server (certificates from
+# ``tests/certgen.py``). Tests with generated certificates freeze time.
+# ---------------------------------------------------------------------------
+
+ROUTER_A = "router-a.example.test"
+DEFAULT_HOST = "default.example.test"
+
+
+@dataclass(frozen=True)
+class _Pki:
+    """A root and an intermediate CA, valid around ``now``."""
+
+    now: datetime
+    root: Issued
+    intermediate: Issued
+
+    @property
+    def root_der(self) -> bytes:
+        return self.root[0].public_bytes(Encoding.DER)
+
+
+def _make_pki() -> _Pki:
+    now = dt_util.utcnow()
+    root = make_ca("Test Root", not_before=now - timedelta(days=30), not_after=now + timedelta(days=3650))
+    intermediate = make_intermediate(
+        "Test Intermediate", root, not_before=now - timedelta(days=30), not_after=now + timedelta(days=3650)
+    )
+    return _Pki(now=now, root=root, intermediate=intermediate)
+
+
+def _valid_leaf(pki: _Pki, names: list[str], *, issuer: Issued | None = None) -> Issued:
+    return make_leaf(
+        names,
+        issuer if issuer is not None else pki.intermediate,
+        not_before=pki.now - timedelta(days=1),
+        not_after=pki.now + timedelta(days=90),
+    )
+
+
+def _serve(
+    tmp_path: Path, pki: _Pki, leaves: dict[str, Issued], *, with_intermediate: bool = True
+) -> dict[str, tuple[Path, Path]]:
+    """Write every leaf (plus the intermediate) as PEM files for ``tls_server``."""
+    certs: dict[str, tuple[Path, Path]] = {}
+    for index, (name, (cert, key)) in enumerate(leaves.items()):
+        chain = [cert, pki.intermediate[0]] if with_intermediate else [cert]
+        certs[name] = write_pem(tmp_path, f"leaf{index}", chain, key)
+    return certs
+
+
+def test_certgen_ca_extensions() -> None:
+    """Roots and intermediates carry what the cryptography verifier needs for a CA."""
+    pki = _make_pki()
+    for cert, _key in (pki.root, pki.intermediate):
+        basic = cert.extensions.get_extension_for_class(x509.BasicConstraints)
+        assert basic.critical is True
+        assert basic.value.ca is True
+        usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+        assert usage.key_cert_sign is True
+        assert usage.crl_sign is True
+        cert.extensions.get_extension_for_class(x509.SubjectKeyIdentifier)
+    pki.intermediate[0].extensions.get_extension_for_class(x509.AuthorityKeyIdentifier)
+
+
+def test_certgen_leaf_extensions() -> None:
+    """Leaves carry DNS/IP SANs, an AKI from the issuer, CA=false and serverAuth."""
+    pki = _make_pki()
+    leaf, _key = _valid_leaf(pki, [ROUTER_A, "127.0.0.1"])
+    san = leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert san.get_values_for_type(x509.DNSName) == [ROUTER_A]
+    assert [str(ip) for ip in san.get_values_for_type(x509.IPAddress)] == ["127.0.0.1"]
+    aki = leaf.extensions.get_extension_for_class(x509.AuthorityKeyIdentifier).value
+    ski = pki.intermediate[0].extensions.get_extension_for_class(x509.SubjectKeyIdentifier).value
+    assert aki.key_identifier == ski.digest
+    assert leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca is False
+    eku = leaf.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert ExtendedKeyUsageOID.SERVER_AUTH in eku
+    assert leaf.issuer == pki.intermediate[0].subject
+
+
+def test_certgen_self_signed_issuer_is_subject() -> None:
+    """A self-signed leaf names itself as issuer."""
+    now = dt_util.utcnow()
+    cert, _key = make_self_signed([ROUTER_A], not_before=now, not_after=now + timedelta(days=1))
+    assert cert.issuer == cert.subject
+
+
+async def test_probe_reads_verified_certificate_via_sni(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """Tracer: a real CERT_NONE handshake with SNI returns the parsed, verified leaf."""
+    pki = _make_pki()
+    leaf, key = _valid_leaf(pki, [ROUTER_A])
+    certs = _serve(tmp_path, pki, {ROUTER_A: (leaf, key), DEFAULT_HOST: _valid_leaf(pki, [DEFAULT_HOST])})
+    server = await tls_server(certs, default=DEFAULT_HOST)
+
+    result = await async_probe_certificate(
+        "127.0.0.1",
+        server.port,
+        ROUTER_A,
+        handshake_timeout=5.0,
+        trust_store=build_trust_store([pki.root_der]),
+        now=dt_util.utcnow(),
+    )
+
+    assert isinstance(result, ProbedCertificate), result
+    assert result.verified is True
+    assert result.san_mismatch is False
+    assert result.certificate == TraefikCertificate(
+        common_name=ROUTER_A,
+        sans=(ROUTER_A,),
+        not_after=leaf.not_valid_after_utc,
+        not_before=leaf.not_valid_before_utc,
+        issuer_cn="Test Intermediate",
+        status=None,
+        serial_number=str(leaf.serial_number),
+    )
+
+
+async def test_probe_sni_routing_and_default_certificate(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """The server presents the certificate of the SNI name, else its default certificate."""
+    pki = _make_pki()
+    certs = _serve(
+        tmp_path, pki, {ROUTER_A: _valid_leaf(pki, [ROUTER_A]), DEFAULT_HOST: _valid_leaf(pki, [DEFAULT_HOST])}
+    )
+    server = await tls_server(certs, default=DEFAULT_HOST)
+    store = build_trust_store([pki.root_der])
+
+    routed = await async_probe_certificate(
+        "127.0.0.1", server.port, ROUTER_A, handshake_timeout=5.0, trust_store=store, now=dt_util.utcnow()
+    )
+    unknown = await async_probe_certificate(
+        "127.0.0.1", server.port, "unknown.example.test", handshake_timeout=5.0, trust_store=store, now=dt_util.utcnow()
+    )
+
+    assert isinstance(routed, ProbedCertificate)
+    assert routed.certificate.common_name == ROUTER_A
+    assert isinstance(unknown, ProbedCertificate)
+    assert unknown.certificate.common_name == DEFAULT_HOST
+    assert unknown.san_mismatch is True
+    assert unknown.verified is False
