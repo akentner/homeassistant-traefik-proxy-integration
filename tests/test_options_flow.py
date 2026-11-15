@@ -1,9 +1,9 @@
 """Tests for the options flow: selectors, int storage, bounds and the reload.
 
 Covers:
-- the form: ``scan_interval`` and ``tls_warn_days`` are box NumberSelectors with
-  units and bounds, ``verify_ssl`` is a BooleanSelector; defaults for an entry
-  without options (D-17)
+- the form: ``scan_interval``, ``tls_warn_days`` and ``missing_grace_hours`` are
+  box NumberSelectors with units and bounds, ``verify_ssl`` is a BooleanSelector;
+  defaults for an entry without options (D-17)
 - the flow is an ``OptionsFlowWithReload``: changed options reload the entry
   and the reloaded runtime uses the new values; unchanged options (also a
   float of the stored int) do not reload (D-16, FLOW-02/adjacency)
@@ -36,6 +36,10 @@ SCAN_INTERVAL = "scan_interval"
 VERIFY_SSL = "verify_ssl"
 TLS_WARN_DAYS = "tls_warn_days"
 PER_ITEM_ENTITIES = "per_item_entities"
+MISSING_GRACE_HOURS = "missing_grace_hours"
+
+# The form defaults of an entry without options (verify_ssl: the entry data's True).
+DEFAULT_INPUT: dict[str, Any] = {SCAN_INTERVAL: 15, VERIFY_SSL: True, TLS_WARN_DAYS: 14, MISSING_GRACE_HOURS: 24}
 
 USAGE_REPORT = "Detected that custom integration 'traefik_proxy'"
 LISTENER_MESSAGE = "update listeners should not be used"
@@ -74,7 +78,7 @@ async def test_options_form_selectors(hass: HomeAssistant, aioclient_mock: Any, 
 
     fields = _fields(await _init_options(hass, entry))
 
-    assert list(fields) == [SCAN_INTERVAL, VERIFY_SSL, TLS_WARN_DAYS]
+    assert list(fields) == [SCAN_INTERVAL, VERIFY_SSL, TLS_WARN_DAYS, MISSING_GRACE_HOURS]
     scan = fields[SCAN_INTERVAL][1]
     assert isinstance(scan, NumberSelector)
     assert scan.config == {"min": 15, "max": 300, "step": 1, "unit_of_measurement": "s", "mode": "box"}
@@ -82,13 +86,16 @@ async def test_options_form_selectors(hass: HomeAssistant, aioclient_mock: Any, 
     assert isinstance(warn, NumberSelector)
     assert warn.config == {"min": 1, "max": 90, "step": 1, "unit_of_measurement": "d", "mode": "box"}
     assert isinstance(fields[VERIFY_SSL][1], BooleanSelector)
+    grace = fields[MISSING_GRACE_HOURS][1]
+    assert isinstance(grace, NumberSelector)
+    assert grace.config == {"min": 1, "max": 168, "step": 1, "unit_of_measurement": "h", "mode": "box"}
 
 
 @pytest.mark.parametrize("data_verify_ssl", [True, False])
 async def test_options_form_defaults_without_options(
     hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, data_verify_ssl: bool
 ) -> None:
-    """Without options the form shows 15 s, the effective TLS verification and 14 days."""
+    """Without options the form shows 15 s, the effective TLS verification, 14 days and 24 h."""
     entry_data = {**ENTRY_DATA, VERIFY_SSL: data_verify_ssl}
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(data=entry_data))
     assert dict(entry.options) == {}
@@ -96,7 +103,7 @@ async def test_options_form_defaults_without_options(
     fields = _fields(await _init_options(hass, entry))
 
     defaults = {name: marker.default() for name, (marker, _selector) in fields.items()}
-    assert defaults == {SCAN_INTERVAL: 15, VERIFY_SSL: data_verify_ssl, TLS_WARN_DAYS: 14}
+    assert defaults == {**DEFAULT_INPUT, VERIFY_SSL: data_verify_ssl}
 
 
 async def test_changed_options_reload_with_new_values(
@@ -108,10 +115,11 @@ async def test_changed_options_reload_with_new_values(
     runtime = entry.runtime_data
     assert entry.update_listeners == []
 
-    result = await _submit(hass, entry, {SCAN_INTERVAL: 45, VERIFY_SSL: False, TLS_WARN_DAYS: 30})
+    user_input = {**DEFAULT_INPUT, SCAN_INTERVAL: 45, VERIFY_SSL: False, TLS_WARN_DAYS: 30}
+    result = await _submit(hass, entry, user_input)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(entry.options) == {SCAN_INTERVAL: 45, VERIFY_SSL: False, TLS_WARN_DAYS: 30}
+    assert dict(entry.options) == user_input
     assert type(entry.options[SCAN_INTERVAL]) is int
     assert type(entry.options[TLS_WARN_DAYS]) is int
     assert entry.state is ConfigEntryState.LOADED
@@ -136,11 +144,11 @@ async def test_unchanged_options_do_not_reload(
     hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
 ) -> None:
     """Submitting the stored values again (45.0 for a stored 45) keeps the running entry."""
-    options = {SCAN_INTERVAL: 45, VERIFY_SSL: True, TLS_WARN_DAYS: 30}
+    options = {**DEFAULT_INPUT, SCAN_INTERVAL: 45, TLS_WARN_DAYS: 30}
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options=options))
     runtime = entry.runtime_data
 
-    result = await _submit(hass, entry, {SCAN_INTERVAL: 45.0, VERIFY_SSL: True, TLS_WARN_DAYS: 30.0})
+    result = await _submit(hass, entry, {**options, SCAN_INTERVAL: 45.0, TLS_WARN_DAYS: 30.0})
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.runtime_data is runtime
@@ -154,15 +162,22 @@ async def test_options_outside_the_form_are_kept(
     """An option the form does not show survives a save."""
     entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options={PER_ITEM_ENTITIES: False}))
 
-    await _submit(hass, entry, {SCAN_INTERVAL: 60, VERIFY_SSL: True, TLS_WARN_DAYS: 14})
+    await _submit(hass, entry, {**DEFAULT_INPUT, SCAN_INTERVAL: 60})
 
-    assert dict(entry.options) == {PER_ITEM_ENTITIES: False, SCAN_INTERVAL: 60, VERIFY_SSL: True, TLS_WARN_DAYS: 14}
+    assert dict(entry.options) == {PER_ITEM_ENTITIES: False, **DEFAULT_INPUT, SCAN_INTERVAL: 60}
     assert entry.state is ConfigEntryState.LOADED
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
-    [(SCAN_INTERVAL, 14), (SCAN_INTERVAL, 301), (TLS_WARN_DAYS, 0), (TLS_WARN_DAYS, 91)],
+    [
+        (SCAN_INTERVAL, 14),
+        (SCAN_INTERVAL, 301),
+        (TLS_WARN_DAYS, 0),
+        (TLS_WARN_DAYS, 91),
+        (MISSING_GRACE_HOURS, 0),
+        (MISSING_GRACE_HOURS, 169),
+    ],
 )
 async def test_values_outside_a_range_raise_invalid_data(
     hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, field: str, value: int
@@ -171,7 +186,7 @@ async def test_values_outside_a_range_raise_invalid_data(
     entry = await setup_traefik_entry(hass, aioclient_mock)
     runtime = entry.runtime_data
     result = await _init_options(hass, entry)
-    user_input = {SCAN_INTERVAL: 30, VERIFY_SSL: True, TLS_WARN_DAYS: 14, field: value}
+    user_input = {**DEFAULT_INPUT, SCAN_INTERVAL: 30, field: value}
 
     with pytest.raises(InvalidData):
         await hass.config_entries.options.async_configure(result["flow_id"], user_input)
@@ -192,10 +207,37 @@ async def test_range_bounds_are_accepted(
     """The bounds themselves are valid values."""
     entry = await setup_traefik_entry(hass, aioclient_mock)
 
-    result = await _submit(hass, entry, {SCAN_INTERVAL: scan_interval, VERIFY_SSL: True, TLS_WARN_DAYS: tls_warn_days})
+    user_input = {**DEFAULT_INPUT, SCAN_INTERVAL: scan_interval, TLS_WARN_DAYS: tls_warn_days}
+    result = await _submit(hass, entry, user_input)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert dict(entry.options) == {SCAN_INTERVAL: scan_interval, VERIFY_SSL: True, TLS_WARN_DAYS: tls_warn_days}
+    assert dict(entry.options) == user_input
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=scan_interval)
     assert entry.runtime_data.cert_coordinator.threshold_days == tls_warn_days
+
+
+@pytest.mark.parametrize("hours", [1, 168])
+async def test_missing_grace_hours_bounds_are_accepted(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock, hours: int
+) -> None:
+    """1 h and 168 h are valid grace periods and are stored as given."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+
+    result = await _submit(hass, entry, {**DEFAULT_INPUT, MISSING_GRACE_HOURS: hours})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[MISSING_GRACE_HOURS] == hours
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_missing_grace_hours_stored_as_truncated_int(
+    hass: HomeAssistant, aioclient_mock: Any, mock_tls_probe: AsyncMock
+) -> None:
+    """A non-integral grace period is truncated to whole hours and stored as int."""
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+
+    await _submit(hass, entry, {**DEFAULT_INPUT, MISSING_GRACE_HOURS: 24.9})
+
+    assert entry.options[MISSING_GRACE_HOURS] == 24
+    assert type(entry.options[MISSING_GRACE_HOURS]) is int

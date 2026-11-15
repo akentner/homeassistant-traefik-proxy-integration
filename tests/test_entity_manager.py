@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -338,13 +339,15 @@ def test_kind_spec_unique_id_round_trip() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Grace period: missing for 24 h on the wall clock, then removed
+# Grace period: missing for 24 h (or the configured hours) on the wall clock, then removed
 # ---------------------------------------------------------------------------
 
 # The spec values, independent of the constants they are checked against.
 GRACE = timedelta(hours=24)
 CHECK_INTERVAL = timedelta(minutes=5)
 GHOST = "ghost@file"
+# Stored option key of the grace period (a persistence contract).
+GRACE_OPTION = "missing_grace_hours"
 
 
 def _store_key(entry_id: str) -> str:
@@ -470,6 +473,73 @@ async def test_grace_period_survives_entry_reload(hass, aioclient_mock, mock_tls
     await _run_deadline_check(hass)
     assert er.async_get(hass).async_get(entity_id) is None
     assert hass.states.get(entity_id) is None
+
+
+async def _set_grace_hours_through_options(hass: HomeAssistant, entry: Any, hours: int) -> None:
+    """Save the options form with its defaults and ``hours`` as grace period; wait for the reload."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    defaults = {str(marker): marker.default() for marker in result["data_schema"].schema}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {**defaults, GRACE_OPTION: hours})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    # The reload is scheduled; the first cert cycle is an entry background task.
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.options[GRACE_OPTION] == hours
+
+
+async def test_configured_grace_period_removes_vanished_router(hass, aioclient_mock, mock_tls_probe, freezer) -> None:  # type: ignore[no-untyped-def]
+    """With a 2 h grace period a vanished router is still registered at 2 h - 1 s and removed at 2 h."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(options={GRACE_OPTION: 2}))
+    registry = er.async_get(hass)
+    entity_id = _router_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+
+    freezer.tick(timedelta(hours=2) - timedelta(seconds=1))
+    await _run_deadline_check(hass)
+    assert registry.async_get(entity_id) is not None
+    assert hass.states.get(entity_id).state == "missing"  # type: ignore[union-attr]
+
+    freezer.tick(timedelta(seconds=1))
+    await _run_deadline_check(hass)
+    assert registry.async_get(entity_id) is None
+    assert hass.states.get(entity_id) is None
+
+
+@pytest.mark.parametrize(("hours", "removed"), [(2, True), (48, False)])
+async def test_changed_grace_period_applies_after_options_reload(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, freezer, hass_storage, hours: int, removed: bool
+) -> None:
+    """A router missing for 3 h: a 2 h grace period removes it right after the reload, 48 h keeps it.
+
+    The stored missing-since time is the original one after the reload.
+    """
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    registry = er.async_get(hass)
+    entity_id = _router_entity_id(hass, entry)
+    rawdata = rawdata_copy()
+    del rawdata["routers"][ROUTER]
+    await _refresh(hass, aioclient_mock, entry, rawdata, "v3.7")
+    vanished_at = dt_util.utcnow()
+    freezer.tick(timedelta(hours=3))
+    await _run_deadline_check(hass)
+    assert registry.async_get(entity_id) is not None
+
+    await _set_grace_hours_through_options(hass, entry, hours)
+    freezer.tick(CHECK_INTERVAL)
+    await _run_deadline_check(hass)
+
+    if removed:
+        assert registry.async_get(entity_id) is None
+        assert hass.states.get(entity_id) is None
+        assert hass_storage[_store_key(entry.entry_id)]["data"] == {}
+    else:
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == "missing"
+        assert state.attributes["missing_since"] == vanished_at.isoformat()
+        assert hass_storage[_store_key(entry.entry_id)]["data"] == {"router": {ROUTER: vanished_at.isoformat()}}
 
 
 async def test_orphan_registry_entry_adopted_and_removed_after_grace(  # type: ignore[no-untyped-def]
