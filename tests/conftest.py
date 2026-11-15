@@ -360,7 +360,9 @@ class TlsServer:
                     return
                 await asyncio.sleep(0)
         finally:
+            # Join, so the timer thread is gone before HA's verify_cleanup lists threads.
             timer.cancel()
+            timer.join()
         raise AssertionError(f"expected {count} finished connections, got {len(self.received)}")
 
 
@@ -397,6 +399,7 @@ def wall_clock_watchdog(loop: asyncio.AbstractEventLoop, seconds: float) -> Iter
         yield fired
     finally:
         timer.cancel()
+        timer.join()
 
 
 @pytest_asyncio.fixture
