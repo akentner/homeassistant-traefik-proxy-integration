@@ -562,11 +562,35 @@ tag and catalog PR themselves remain the user's action.
      `.planning/`; `feat/marketplace-polish` is pushed and a **Draft PR** to
      `main` is open — no tag, release or `hacs/default` PR is created by the
      assistant (U1, M8). Tests, `ruff`, `mypy --strict` green.
-**Plans**: TBD
+**Plans**: 10 plans in 6 waves (executed sequentially in the worktree, W55)
 
 Plans:
+**Wave 1**
+- [ ] 08-01-PLAN.md — Tracer: diagnostics redact Header/Query values of router rules and errors (fail closed); entity attributes unchanged (REL-06; D-17, D-29)
+- [ ] 08-02-PLAN.md — Tracer: connect host resolved once per cert cycle, cert-cycle error chaining, deterministic socket tests, T-06-13 guard, probe clock IN-12..IN-14, fixture note (REL-04; D-18, D-20, D-22)
+- [ ] 08-03-PLAN.md — Tracer: migration repair with final title and kept-ID text, DEVICE->USER only for disabled devices, one host normalisation point, documented defence branches, planning-reference / doc-link / SyntaxWarning / sleep guards (REL-06, REL-04; D-10, D-11, D-16, D-19, D-21)
+- [ ] 08-04-PLAN.md — Tracer: brand re-export — trimmed icons, ProxyLogo logo, dark logo, `icon.svg` -> `docs/`, `docs/BRAND.md`, geometry test (REL-02; D-03, D-28, D-30)
 
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 08-05-PLAN.md — Tracer: locked min-HA job, coverage gate, SyntaxWarning filter, pre-commit on 3.14/traefik_proxy, Makefile = CI, SHA pins/timeouts/schedule/dispatch, release tag check, Dependabot (REL-04, REL-05, DIST-04, REL-01; D-01, D-02, D-09, D-10, D-12..D-15, D-31, D-32)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 08-06-PLAN.md — Tracer: manifest 1.0.0 + category; local hassfest and hacs/action (local-tree overlay) pass; post-push check list (REL-01, REL-07; D-01, D-24)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 08-07-PLAN.md — Tracer: throwaway HA 2026.11.0 visual check de/en, brand serving byte-equal, real 0.3.0 migration repair, teardown (REL-02; D-04, D-25, M35)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 08-08-PLAN.md — Tracer: README rewrite and CHANGELOG 0.1.0-1.0.0 (REL-03, REL-02, DOCS-02, DOCS-04; D-05, D-06)
+- [ ] 08-09-PLAN.md — Tracer: skill rename, PROJECT/STACK fixes, CLAUDE.md regenerated, REQUIREMENTS wording, review dispositions closed (REL-06; D-07, D-08)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 08-10-PLAN.md — Tracer: drafts (release notes, hacs/default PR, Draft PR), deferred items closed, final pre-push gates; push + Draft PR are the manager's action after verification (REL-07, REL-08; D-26, D-27)
+
+**Cross-cutting constraints:**
+- pytest (dev env, coverage gate from 08-05 on), ruff check, ruff format --check, mypy --strict and the HA 2026.11.0 venv suite are green after every task; tests change in the same task as the code
+- No push, tag, GitHub release, Draft PR or hacs/default PR by the assistant (U1, M8, M41); drafts only in the phase directory (D-26)
+- Deviation from the ROADMAP wording: SC5 / REL-07 say the drafts go "in `.planning/`" — they go into the phase directory, which is inside `.planning/`
 
 ## Progress
 
