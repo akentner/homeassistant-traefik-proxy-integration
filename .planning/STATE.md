@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Completed 07-07-PLAN.md
-last_updated: "2026-11-15T14:43:43.332Z"
+stopped_at: Completed 07-08-PLAN.md
+last_updated: "2026-11-15T14:53:28.844Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: 52db8fa5e888e7c3ef98a07266cb21b26d09e407
+state_head: 6f1ab6726f5a18c7fc00cd830ae86549d2c4955a
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 42
+  completed_plans: 43
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
-Plan: 8 of 9
+Plan: 9 of 9
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 07 execution started
 
@@ -108,6 +108,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 07 P05 | 19min | 3 tasks | 12 files |
 | Phase 07 P06 | 7min | 2 tasks | 11 files |
 | Phase 07 P07 | 12min | 2 tasks | 8 files |
+| Phase 07 P08 | 12min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -225,6 +226,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Options flow merges the submitted fields into the stored options, so options the form does not show survive a save
 - [Phase 07]: The missing-entity grace period is an option (missing_grace_hours, 1-168 h, default 24 h), read once per setup; stored missing-since times survive a reload, so a shortened period removes long-missing items within one check interval after the reload
 - [Phase 07]: per_item_entities is part of the options form (BooleanSelector, default on); all five options are labelled and described in en and de
+- [Phase 07]: Phase 07: a 3xx answer to the flow probe is the form error 'redirect' (user, reauth, reconfigure); the redirect is never followed
+- [Phase 07]: Phase 07: credentials in a newly entered URL are their own form error 'url_has_credentials'; a malformed URL is reported as invalid_url first
+- [Phase 07]: Phase 07: an unexpected exception during flow validation is 'unknown' and logged once with a fixed message (no URL, no credentials)
 
 ### Pending Todos
 
@@ -269,7 +273,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T14:43:43.160Z
-Stopped at: Completed 07-07-PLAN.md
+Last session: 2026-11-15T14:53:28.664Z
+Stopped at: Completed 07-08-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

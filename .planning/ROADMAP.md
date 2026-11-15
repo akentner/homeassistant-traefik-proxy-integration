@@ -485,7 +485,7 @@ the 2026.3 workarounds).
      listed in audit A-18 are removed; `translations/en.json` is the single
      source and `translations/de.json` covers every key in it (key-parity test);
      hassfest translation validation passes. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 7/9 plans executed in 8 waves (07-02 and 07-03 run in parallel)
+**Plans**: 8/9 plans executed in 8 waves (07-02 and 07-03 run in parallel)
 
 Plans:
 **Wave 1**
@@ -508,7 +508,7 @@ Plans:
 - [x] 07-07-PLAN.md — Tracer: missing-entity grace period (1–168 h) honoured by the entity manager; per-item toggle in the options form; all options texts en + de (FLOW-02)
 
 **Wave 7** *(blocked on Wave 6 completion)*
-- [ ] 07-08-PLAN.md — Tracer: `redirect` flow error; `url_has_credentials`, `unknown`, full error matrix, `config_flow.py` 100 % line coverage, final en/de error texts (FLOW-04, FLOW-07)
+- [x] 07-08-PLAN.md — Tracer: `redirect` flow error; `url_has_credentials`, `unknown`, full error matrix, `config_flow.py` 100 % line coverage, final en/de error texts (FLOW-04, FLOW-07)
 
 **Wave 8** *(blocked on Wave 7 completion)*
 - [ ] 07-09-PLAN.md — Tracer: redacted diagnostics download; `insecure_credentials` repair with `config_entry_id` and whole-file en ↔ de parity test; read-only phase checks incl. no new planning references in shipped code (DIAG-04, FLOW-06, FLOW-07)
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
-| 7. Config flow, HA 2026.11 baseline, observability | 7/9 | In Progress | - |
+| 7. Config flow, HA 2026.11 baseline, observability | 8/9 | In Progress | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
 **Coverage:**
