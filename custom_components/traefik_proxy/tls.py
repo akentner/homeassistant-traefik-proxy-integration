@@ -422,36 +422,67 @@ def parse_not_after(raw: str) -> datetime:
     raise ValueError(f"Unknown notAfter format: {raw!r}")
 
 
-def _hostname_matches_san(host: str, san: tuple[str, ...]) -> bool:
-    """RFC 6125 §6.4.3 wildcard match.
+_ASCII_LOWER: Final = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
-    Returns ``True`` when ``host`` is covered by any entry in ``san``:
 
-    - Exact match (case-insensitive, trailing-dot insensitive).
-    - Wildcard match: ``*.example.com`` matches ``foo.example.com`` and
-      ``foo.api.example.com`` (any sub-domain) but NOT ``example.com``
-      itself (the bare apex is not covered by a wildcard).
-    - Multi-level subdomains are covered by a single-level wildcard per
-      RFC 6125 (we enforce this by label-count comparison so a wildcard
-      cert for ``*.example.com`` does NOT match ``foo.example.com.evil.org``).
+def _normalize_name(name: str) -> str:
+    """ASCII-lowercase ``name`` and drop one trailing dot (no Unicode normalization)."""
+    return name.translate(_ASCII_LOWER).removesuffix(".")
 
-    Used to populate ``CertInfo.san_mismatch`` — a ``True`` return means
-    the cert was served for a hostname the cert actually covers; a
-    ``False`` return means Traefik served a default or wildcard cert
-    that does not strictly cover the probe hostname.
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _hostname_matches_san(host: str, names: Iterable[str]) -> bool:
+    """Return True when a certificate name in ``names`` covers ``host`` (RFC 6125 §6.4.3).
+
+    Names compare ASCII-case-insensitively with one trailing dot removed;
+    no Unicode normalization is applied, so a U-label never equals an
+    A-label. A name ``*.<domain>`` covers exactly one label: the host's
+    first label must be non-empty and the rest of the host must equal
+    ``<domain>`` (so not ``a.b.<domain>``, not the bare ``<domain>``). Any
+    other name, including a partial-label wildcard such as
+    ``f*.example.com``, matches only by equality. An IP-literal host only
+    matches an equal name.
     """
-    host_lower = host.lower().rstrip(".")
-    for entry in san:
-        entry_lower = entry.lower().rstrip(".")
-        if entry_lower == host_lower:
+    wanted = _normalize_name(host)
+    label, _, rest = wanted.partition(".")
+    wildcard_ok = bool(label and rest) and not _is_ip_literal(wanted)
+    for name in names:
+        candidate = _normalize_name(name)
+        if candidate == wanted:
             return True
-        if entry_lower.startswith("*."):
-            # Wildcard: *.example.com matches foo.example.com but not
-            # example.com itself (the bare apex is not covered).
-            suffix = entry_lower[1:]  # ".example.com"
-            if host_lower.endswith(suffix) and host_lower.count(".") >= entry_lower.count("."):
-                return True
+        if wildcard_ok and candidate.startswith("*.") and rest == candidate[2:]:
+            return True
     return False
+
+
+def match_certificate(host: str, certificates: Sequence[TraefikCertificate]) -> TraefikCertificate | None:
+    """Return the certificate that covers ``host``, or None.
+
+    Candidate names are a certificate's SANs plus its CN. An exact name
+    match beats a single-label wildcard match; among equal matches the
+    latest ``not_after`` wins.
+    """
+    wanted = _normalize_name(host)
+    best: TraefikCertificate | None = None
+    best_rank = 0
+    for certificate in certificates:
+        names = (*certificate.sans, certificate.common_name) if certificate.common_name else certificate.sans
+        if any(_normalize_name(name) == wanted for name in names):
+            rank = 2
+        elif _hostname_matches_san(host, names):
+            rank = 1
+        else:
+            continue
+        if best is None or rank > best_rank or (rank == best_rank and certificate.not_after > best.not_after):
+            best, best_rank = certificate, rank
+    return best
 
 
 # Per-host parse-failure log throttle (CONTEXT.md D-11). The first time a
