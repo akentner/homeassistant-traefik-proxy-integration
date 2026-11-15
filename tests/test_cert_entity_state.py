@@ -244,7 +244,8 @@ async def test_threshold_change_reaches_state_at_the_boundary(
     assert state.attributes["threshold_days"] == 14
 
     for threshold, expected in ((30, "on"), (29, "off"), (31, "on")):
-        await cert_coordinator.async_set_threshold(threshold)
+        cert_coordinator.threshold_days = threshold
+        cert_coordinator.async_update_listeners()
         await hass.async_block_till_done()
         state = _state(hass, expiring)
         assert state.state == expected, threshold
@@ -351,7 +352,8 @@ async def test_cert_notifications_do_not_grow_listeners(
     for days in (20, 10, 5):
         cert_coordinator.async_set_updated_data({HOST: _cert(HOST, days), OTHER_HOST: _cert(OTHER_HOST, days)})
         await hass.async_block_till_done()
-    await cert_coordinator.async_set_threshold(7)
+    cert_coordinator.threshold_days = 7
+    cert_coordinator.async_update_listeners()
     await hass.async_block_till_done()
 
     assert len(cert_coordinator._listeners) == listeners_after_setup
@@ -369,7 +371,8 @@ async def test_known_cert_hosts_are_never_added_again(
     for days in (20, 10, 5):
         cert_coordinator.async_set_updated_data({HOST: _cert(HOST, days), OTHER_HOST: _cert(OTHER_HOST, days)})
         await hass.async_block_till_done()
-    await cert_coordinator.async_set_threshold(7)
+    cert_coordinator.threshold_days = 7
+    cert_coordinator.async_update_listeners()
     await hass.async_block_till_done()
     assert len(cert_coordinator._listeners) == 7
 

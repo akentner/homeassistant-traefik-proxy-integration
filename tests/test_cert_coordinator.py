@@ -5,7 +5,7 @@ Covers ``custom_components.traefik_proxy.cert_coordinator``:
 - ``HostCertState``: live floor-day arithmetic and the problem precedence.
 - The probe cycle: one probe per host under the semaphore, connecting to the
   Traefik host with the router host as SNI; results become ``HostCertState``.
-- ``async_set_threshold`` mutates ``threshold_days`` and notifies listeners.
+- ``threshold_days`` comes from the options (or the argument) at construction.
 - ``_collect_hosts``: union of ``tls.domains[].main`` + ``sans[]`` + literal
   ``Host()`` names, sorted, normalized and capped.
 
@@ -1064,36 +1064,21 @@ async def test_host_dropped_from_host_set_and_new_host_without_history() -> None
 
 
 # ---------------------------------------------------------------------------
-# Threshold — live re-eval per D-08
+# Threshold — read once at construction
 # ---------------------------------------------------------------------------
 
 
-async def test_async_set_threshold_mutates_and_notifies_listeners() -> None:
-    """``async_set_threshold`` mutates ``threshold_days`` AND fires listeners once.
+@pytest.mark.parametrize(
+    ("tls_warn_days", "threshold_days", "expected"),
+    [(21, None, 21), (None, None, DEFAULT_TLS_WARN_DAYS), (21, 5, 5)],
+)
+def test_threshold_is_set_at_construction(tls_warn_days: int | None, threshold_days: int | None, expected: int) -> None:
+    """The threshold comes from the options (or the argument) at construction; a change arrives through a reload."""
+    c = CertCoordinator(MagicMock(), _make_entry(tls_warn_days=tls_warn_days), threshold_days=threshold_days)
 
-    Note: ``DataUpdateCoordinator.async_update_listeners`` is a SYNC
-    method (despite the ``async_`` prefix) that schedules callbacks
-    via ``self._listeners`` — not a coroutine. The production code
-    (``cert_coordinator.async_set_threshold``) calls it without
-    ``await``, so we mock it with ``MagicMock()`` (not ``AsyncMock()``).
-    """
-    c = CertCoordinator(MagicMock(), _make_entry())
-    c.async_update_listeners = MagicMock()  # type: ignore[method-assign]
-
-    await c.async_set_threshold(7)
-
-    assert c.threshold_days == 7
-    assert c.async_update_listeners.call_count == 1
-
-
-async def test_get_threshold_returns_current_value() -> None:
-    """Read accessor mirrors the stored ``threshold_days``."""
-    c = CertCoordinator(MagicMock(), _make_entry(tls_warn_days=21))
-    assert c.get_threshold() == c.threshold_days
-    assert c.get_threshold() == 21
-
-    await c.async_set_threshold(5)
-    assert c.get_threshold() == 5
+    assert c.threshold_days == expected
+    # No accessor other than the attribute itself.
+    assert [name for name in dir(CertCoordinator) if "threshold" in name] == []
 
 
 # ---------------------------------------------------------------------------
