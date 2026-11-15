@@ -70,13 +70,14 @@ local history (M1).
 
 | Gate | Result |
 |---|---|
-| `uv run pytest -q` (coverage gate `fail_under = 99`) | 1152 passed; total coverage 99.29 % |
+| `uv run pytest -q` (coverage gate `fail_under = 99`) | 1180 passed; total coverage 99.31 % (after review fixes CR-01, WR-01..WR-04) |
 | `ruff check` / `ruff format --check` / `mypy --strict` | clean |
-| Minimum HA 2026.11.0 (`make test-min-ha`, hashed lock `.github/requirements-min-ha.txt`) | 1152 passed; coverage gate reached (99.29 %) |
+| Minimum HA 2026.11.0 (`make test-min-ha`, hashed lock `.github/requirements-min-ha.txt`) | 1180 passed; coverage gate reached (99.31 %) |
 | `uvx pre-commit run --all-files` | all 13 hooks passed |
-| hassfest (`make hassfest`, throwaway container, HA 2026.11.1 image) | `Integrations: 1`, `Invalid integrations: 0` |
+| hassfest (`make hassfest`, throwaway container, HA 2026.11.1 image, re-run after pinning by digest) | `Integrations: 1`, `Invalid integrations: 0` |
 | hacs/action (10 checks, category `integration`, no `ignore`) | **pending — proven by the first PR run of validate.yml (HACS job)**. Not run locally: it needs a GitHub token, and passing the user's credential to a container was declined (user decision). The overlay harness and the five repository-metadata checks (archived, description, issues, license, topics) were verified without a token. |
 | Visual check (throwaway HA 2026.11.0 + Traefik v3.7.19, de/en) | passed: brand images served byte-identical, config flow, options, repairs, device tree, states and icons, 0.3.0 -> 1.0.0 migration (08-VISUAL-CHECK.md) |
+| Post-execution code review (`08-REVIEW.md`) | 1 critical + 4 warnings fixed (`08-REVIEW-FIX.md`): local hacs/action no longer reads `gh auth token` (opt-in `HACS_ACTION_TOKEN`, image pinned by digest); diagnostics also blank regexp-compile errors that quote hidden values; probe mode falls back across all resolved addresses; hassfest image pinned by digest, tree mounted read-only; `uv.lock` committed and CI installs with `uv sync --locked`. 6 info findings remain open (`08-REVIEW-DISPOSITION.md`) |
 | Visual-check findings | F-01 cosmetic (long certificate names truncated in the device card, full name in tooltip); F-02 upstream (HA core logs `Invalid domain <domain>.<platform>` translation warnings after a system-language change; affects core integrations equally, nothing visible) — recorded in `.planning/phases/08-marketplace-release-readiness/deferred-items.md` |
 
 ## Planning files
