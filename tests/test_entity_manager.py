@@ -23,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant.common import async_fire_time_changed
 
+from custom_components.traefik_proxy.binary_sensor import TraefikCertExpiringBinarySensor
 from custom_components.traefik_proxy.const import (
     CONF_PER_ITEM_ENTITIES,
     DOMAIN,
@@ -31,6 +32,7 @@ from custom_components.traefik_proxy.const import (
     UID_ROUTERS_PROBLEM,
     UID_SERVICES_PROBLEM,
 )
+from custom_components.traefik_proxy.entity import cert_hosts
 from custom_components.traefik_proxy.entity_manager import (
     CERT_EXPIRING,
     CERT_EXPIRY,
@@ -40,6 +42,7 @@ from custom_components.traefik_proxy.entity_manager import (
     KindSpec,
     TraefikEntityManager,
 )
+from custom_components.traefik_proxy.sensor import TraefikCertExpirySensor
 from tests.conftest import (
     FIXTURE_VERSIONS,
     MOCK_URL,
@@ -336,6 +339,33 @@ def test_kind_spec_unique_id_round_trip() -> None:
     assert ROUTERS.key_of("entry2", unique_id) is None
     assert ROUTERS.key_of("entry1", "entry1_http_service_file-ok@file") is None
     assert ROUTERS.key_of("entry1", "entry1_http_router_") is None
+
+
+@pytest.mark.parametrize(
+    ("spec", "entity_class"),
+    [
+        pytest.param(CERT_EXPIRY, TraefikCertExpirySensor, id="expiry"),
+        pytest.param(CERT_EXPIRING, TraefikCertExpiringBinarySensor, id="expiring"),
+    ],
+)
+@pytest.mark.parametrize("host", ["secure.example.com", "Mixed.Example.com"])
+def test_cert_factory_unique_id_round_trips_through_key_of(spec: KindSpec, entity_class: Any, host: str) -> None:
+    """A cert entity built for a key has the unique_id whose key is that key; ``cert_hosts`` keeps the data keys.
+
+    The cert coordinator is the only place that normalises hosts, so an orphan
+    key that is not lowercase still rebuilds the orphan's own unique_id.
+    """
+    coordinator = MagicMock()
+    coordinator.data = {host: MagicMock()}
+    entry = MagicMock()
+    entry.entry_id = "entry1"
+    entry.runtime_data.cert_coordinator = coordinator
+
+    entity = entity_class(entry, host)
+
+    assert entity.unique_id == spec.unique_id("entry1", host)
+    assert spec.key_of("entry1", entity.unique_id) == host
+    assert cert_hosts(coordinator) == {host}
 
 
 # ---------------------------------------------------------------------------
