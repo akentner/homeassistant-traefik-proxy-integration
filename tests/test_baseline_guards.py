@@ -1,24 +1,39 @@
-"""Regression guards for the Home Assistant 2026.11.0 baseline (FLOW-08).
+"""Regression guards for the Home Assistant 2026.11.0 baseline and for release hygiene.
 
-Phase 7 raised the minimum Home Assistant to 2026.11.0 and removed everything
-that existed only for older releases. These filesystem/AST checks mirror the
-acceptance greps of plans 07-01, 07-02 and 07-03, so a regression fails the
-suite instead of waiting for a manual grep:
+Baseline (FLOW-08): Phase 7 raised the minimum Home Assistant to 2026.11.0 and
+removed everything that existed only for older releases. These filesystem/AST
+checks mirror the acceptance greps of plans 07-01, 07-02 and 07-03, so a
+regression fails the suite instead of waiting for a manual grep:
 
 * 07-01: no import shim or test helper for releases before the minimum.
 * 07-02: shipped code reads no attribute private to an HA base class.
 * 07-03: no code path or comment for releases before the minimum.
 
-They need no Home Assistant fixture and read no planning docs (PR branches are
-cut without .planning/). This file is excluded from the text scans.
+Release hygiene (REL-04, REL-06):
+
+* Shipped code carries no planning references (decision IDs, phase or plan
+  numbers, planning paths, spike notes), and no shipped file or document
+  links to the developer docs at developers.home-assistant.io.
+* Every Python file compiles with SyntaxWarning turned into an error. pytest
+  caches bytecode, and a cached ``.pyc`` never warns again, so this compiles
+  the sources themselves.
+* No test sleeps for a literal second or more; tests advance frozen time.
+
+Each detector also checks itself against planted samples, so a guard cannot
+pass vacuously. They need no Home Assistant fixture and read no planning docs
+(PR branches are cut without .planning/). This file is excluded from the text
+scans.
 """
 
 from __future__ import annotations
 
 import ast
 import re
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "custom_components" / "traefik_proxy"
@@ -50,6 +65,22 @@ PRIVATE_BASE_ATTRS = frozenset(
 # Old minimum release (07-01/07-02/07-03 acceptance greps).
 OLD_RELEASE = re.compile(rb"2026\.3")
 OLDER_HA_WORDING = re.compile(rb"older home assistant", re.IGNORECASE)
+# Planning references that must not ship (REL-06). The decision-ID alternative
+# starts at a word boundary, so text such as "valid-1" does not match.
+PLANNING_REFS = re.compile(
+    rb"CONTEXT\.md|PITFALLS|\bD-[0-9]|BLOCKER|Phase [0-9]|\.planning/|\.claude/|spike|Plan [0-9]{2}-[0-9]{2}",
+    re.IGNORECASE,
+)
+# Shipped text files scanned for planning references; brand images are binary.
+PLANNING_SCAN_SUFFIXES = frozenset({".py", ".json"})
+# Developer docs moved; links point at contributors.home-assistant.io instead.
+DEVELOPER_DOCS = re.compile(rb"developers\.home-assistant\.io", re.IGNORECASE)
+BINARY_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico"})
+# Call names of a real sleep, and the shortest literal delay (seconds) that counts as one.
+SLEEP_CALLS = frozenset({"asyncio.sleep", "time.sleep", "sleep"})
+LONG_SLEEP_SECONDS = 1
+# Capture script polling a live Traefik container; pytest never collects it.
+SLEEP_EXCLUDED = ROOT / "tests" / "traefik"
 
 
 def _files(*dirs: Path) -> Iterator[Path]:
@@ -180,3 +211,114 @@ def test_no_text_for_releases_before_the_minimum() -> None:
     assert not hits, f"reference to Home Assistant 2026.3: {hits}"
     hits = _grep(OLDER_HA_WORDING, *_files(PACKAGE.parent))
     assert not hits, f"code justified by older Home Assistant releases: {hits}"
+
+
+def _planning_refs(text: bytes) -> list[bytes]:
+    """Return the planning references in ``text``."""
+    return [match.group(0) for match in PLANNING_REFS.finditer(text)]
+
+
+def test_planning_reference_detector_is_not_vacuous() -> None:
+    """Each alternative of the planning-reference pattern flags its sample; product wording passes."""
+    samples = [
+        b"see CONTEXT.md",
+        b"PITFALLS section",
+        b"default (D-12)",
+        b"a blocker",
+        b"Phase 3 adds it",
+        b"from .planning/STATE.md",
+        b"in .claude/skills",
+        b"the spike's default",
+        b"Plan 02-02 fills these in",
+    ]
+    for sample in samples:
+        assert _planning_refs(sample), sample
+    for clean in (b"valid-1", b"disabled-2", b"phase out", b"plan 2", b"the 6 h cadence"):
+        assert not _planning_refs(clean), clean
+
+
+def test_shipped_code_has_no_planning_references() -> None:
+    """REL-06: no .py or .json file of the integration names decisions, phases, plans or planning paths."""
+    hits = _grep(PLANNING_REFS, *(path for path in _files(PACKAGE) if path.suffix in PLANNING_SCAN_SUFFIXES))
+    assert not hits, f"planning reference in shipped code: {hits}"
+
+
+def test_developer_doc_links_point_at_contributors() -> None:
+    """No shipped file or document links to developers.home-assistant.io (use contributors.home-assistant.io)."""
+    assert DEVELOPER_DOCS.search(b"https://developers.home-assistant.io/docs/creating_integration_manifest")
+    assert not DEVELOPER_DOCS.search(b"https://contributors.home-assistant.io/docs/creating_integration_manifest")
+    documents = [path for path in (ROOT / "README.md", ROOT / "CHANGELOG.md") if path.is_file()]
+    dirs = [path for path in (PACKAGE, ROOT / "docs") if path.is_dir()]
+    candidates = [*documents, *(path for path in _files(*dirs) if path.suffix.lower() not in BINARY_SUFFIXES)]
+    assert ROOT / "README.md" in candidates
+    hits = _grep(DEVELOPER_DOCS, *candidates)
+    assert not hits, f"link to the old developer docs: {hits}"
+
+
+def _compile_strict(source: bytes, filename: str) -> None:
+    """Compile UTF-8 ``source`` with SyntaxWarning as an error (Python reports it as a SyntaxError)."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", SyntaxWarning)
+        compile(source.decode("utf-8"), filename, "exec", dont_inherit=True)
+
+
+def test_no_syntax_warning_on_compile() -> None:
+    """REL-04: every .py under custom_components/, tests/ and scripts/ compiles without a SyntaxWarning."""
+    bad = rb'pattern = "\d+"' + b"\n"
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", SyntaxWarning)
+        compile(bad.decode("utf-8"), "<self-check>", "exec", dont_inherit=True)
+    assert [warning.category for warning in caught] == [SyntaxWarning]
+    with pytest.raises(SyntaxError, match="invalid escape sequence"):
+        _compile_strict(bad, "<self-check>")
+
+    offenders: list[str] = []
+    paths = list(_python_files(PACKAGE.parent, ROOT / "tests", ROOT / "scripts"))
+    assert PACKAGE / "__init__.py" in paths
+    for path in paths:
+        try:
+            _compile_strict(path.read_bytes(), str(path))
+        except SyntaxError as err:
+            offenders.append(f"{path.relative_to(ROOT)}:{err.lineno}: {err.msg}")
+    assert not offenders, f"SyntaxWarning on compile: {offenders}"
+
+
+def _call_name(func: ast.expr) -> str | None:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+        return f"{func.value.id}.{func.attr}"
+    return None
+
+
+def _long_sleeps(tree: ast.AST) -> list[ast.Call]:
+    """Return the sleep calls in ``tree`` whose delay is a numeric literal of a second or more."""
+    calls: list[ast.Call] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or _call_name(node.func) not in SLEEP_CALLS:
+            continue
+        delay = node.args[0] if node.args else next((kw.value for kw in node.keywords if kw.arg == "delay"), None)
+        if (
+            isinstance(delay, ast.Constant)
+            and isinstance(delay.value, int | float)
+            and not isinstance(delay.value, bool)
+            and delay.value >= LONG_SLEEP_SECONDS
+        ):
+            calls.append(node)
+    return calls
+
+
+def test_no_real_multi_second_sleep_in_tests() -> None:
+    """REL-04: no test sleeps a literal second or more; tests advance frozen time instead."""
+    planted = ast.parse("async def f():\n    await asyncio.sleep(1)\n    time.sleep(2.5)\n    sleep(delay=3)\n")
+    assert len(_long_sleeps(planted)) == 3
+    short = ast.parse("async def f():\n    await asyncio.sleep(0)\n    await asyncio.sleep(0.2)\n    time.sleep(x)\n")
+    assert _long_sleeps(short) == []
+
+    offenders = [
+        _where(path, call)
+        for path in _python_files(ROOT / "tests")
+        if not path.is_relative_to(SLEEP_EXCLUDED)
+        for call in _long_sleeps(_parse(path))
+    ]
+    assert not offenders, f"real sleep of a second or more in a test: {offenders}"
