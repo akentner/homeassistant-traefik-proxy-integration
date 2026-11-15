@@ -1,8 +1,8 @@
 """Binary sensor entities for the Traefik integration.
 
-The platform provides the router, service and middleware problem aggregates on
-the main device and one certificate-expiring binary sensor per host of the cert
-data on the Certificates device.
+The platform provides the router, service, middleware and certificate problem
+aggregates on the main device and one certificate-expiring binary sensor per
+host of the cert data on the Certificates device.
 """
 
 from __future__ import annotations
@@ -21,8 +21,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import MAX_PROBLEM_NAMES, UID_MIDDLEWARES_PROBLEM, UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM
-from .entity import TraefikCertEntity, TraefikEntity, cert_hosts
+from .cert_coordinator import CertProblem
+from .const import (
+    MAX_PROBLEM_NAMES,
+    UID_CERTIFICATES_PROBLEM,
+    UID_MIDDLEWARES_PROBLEM,
+    UID_ROUTERS_PROBLEM,
+    UID_SERVICES_PROBLEM,
+)
+from .entity import TraefikCertCoordinatorEntity, TraefikCertEntity, TraefikEntity, cert_hosts
 from .entity_manager import CERT_EXPIRING
 from .models import TraefikSnapshot
 
@@ -73,12 +80,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up the Traefik binary sensors of a config entry.
 
-    Adds the three problem aggregates (one each per entry, enabled by default;
+    Adds the router, service and middleware problem aggregates and the
+    certificate problem aggregate (one each per entry, enabled by default;
     they fall to off when nothing is wrong) and registers the
     certificate-expiring kind with the entity manager: one binary sensor per
     host of the cert data, independent of the per-item option.
     """
-    async_add_entities([TraefikProblemBinarySensor(entry, description) for description in PROBLEM_SENSORS])
+    async_add_entities(
+        [
+            *(TraefikProblemBinarySensor(entry, description) for description in PROBLEM_SENSORS),
+            TraefikCertificatesProblemBinarySensor(entry),
+        ]
+    )
 
     cert_coordinator = entry.runtime_data.cert_coordinator
     entry.runtime_data.entity_manager.async_add_kind(
@@ -114,6 +127,53 @@ class TraefikProblemBinarySensor(TraefikEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         problems = self._problems()
         return {"problems": list(problems[:MAX_PROBLEM_NAMES]), "problem_count": len(problems)}
+
+
+class TraefikCertificatesProblemBinarySensor(TraefikCertCoordinatorEntity, BinarySensorEntity):
+    """On while at least one host of the cert data has a certificate problem.
+
+    Evaluates ``HostCertState.problem`` with the live threshold for every
+    host, the method the per-host ``certificate_expiring`` sensor uses, so
+    the aggregate is on exactly when at least one of those is on.
+    Attributes: ``problems`` (sorted hosts, at most ``MAX_PROBLEM_NAMES``),
+    ``problem_count`` (all of them) and ``reasons`` (problem per listed
+    host). Unavailable when the last cert cycle failed.
+    """
+
+    _attr_translation_key = "certificates_problem"
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_registry_enabled_default = True
+
+    def __init__(self, entry: TraefikProxyConfigEntry) -> None:
+        super().__init__(entry, f"{entry.entry_id}_{UID_CERTIFICATES_PROBLEM}")
+
+    def _problems(self) -> tuple[tuple[str, CertProblem], ...]:
+        """Return the sorted (host, problem) pairs of every host with a problem."""
+        threshold = self.coordinator.threshold_days
+        now = dt_util.utcnow()
+        pairs: list[tuple[str, CertProblem]] = []
+        for host, state in sorted((self.coordinator.data or {}).items()):
+            problem = state.problem(threshold, now)
+            if problem is not None:
+                pairs.append((host, problem))
+        return tuple(pairs)
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self._problems())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        problems = self._problems()
+        listed = problems[:MAX_PROBLEM_NAMES]
+        return {
+            "problems": [host for host, _ in listed],
+            "problem_count": len(problems),
+            "reasons": {host: problem.value for host, problem in listed},
+        }
+
+    def _state_token(self) -> object:
+        return self._problems()
 
 
 class TraefikCertExpiringBinarySensor(TraefikCertEntity, BinarySensorEntity):

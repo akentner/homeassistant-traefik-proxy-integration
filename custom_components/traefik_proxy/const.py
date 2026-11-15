@@ -41,6 +41,8 @@ MAX_PROBLEM_NAMES: Final = 50
 UID_ROUTERS_PROBLEM: Final = "diagnostics_any_router_failing"
 UID_SERVICES_PROBLEM: Final = "diagnostics_any_service_failing"
 UID_MIDDLEWARES_PROBLEM: Final = "diagnostics_any_middleware_failing"
+# Unique_id suffix of the certificate problem aggregate (new in 1.0, no historical form).
+UID_CERTIFICATES_PROBLEM: Final = "certificates_problem"
 
 # Clamps for Options Flow (Phase 2 — Plan 02-02 fills these in).
 # MIN_SCAN_INTERVAL/MAX_SCAN_INTERVAL bound the scan-interval knob

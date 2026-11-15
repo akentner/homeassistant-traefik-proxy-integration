@@ -74,6 +74,13 @@
           "on": "mdi:lock-alert",
           "off": "mdi:lock-check"
         }
+      },
+      "certificates_problem": {
+        "default": "mdi:lock-check",
+        "state": {
+          "on": "mdi:lock-alert",
+          "off": "mdi:lock-check"
+        }
       }
     },
     "button": {

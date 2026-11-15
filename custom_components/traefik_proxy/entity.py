@@ -290,11 +290,22 @@ def cert_hosts(coordinator: CertCoordinator) -> set[str]:
     return {host.lower() for host in coordinator.data or {}}
 
 
-class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
+class TraefikCertCoordinatorEntity(_TraefikEntityBase[CertCoordinator]):
+    """Entity that listens to the cert coordinator; on the main device by default.
+
+    Cert cycles, threshold changes and day-boundary fires notify only the
+    cert coordinator's listeners. Available while the last cert cycle
+    succeeded.
+    """
+
+    def __init__(self, entry: TraefikProxyConfigEntry, unique_id: str) -> None:
+        super().__init__(entry.runtime_data.cert_coordinator, entry, unique_id)
+
+
+class TraefikCertEntity(TraefikCertCoordinatorEntity):
     """Entity for the certificate of one TLS host; holds only the host.
 
-    Listens to the cert coordinator, because cert cycles and threshold
-    changes notify only its listeners. Available while the last cert cycle
+    On the Certificates device. Available while the last cert cycle
     succeeded and the host is in the cert data, also when its probe failed;
     a host absent from the cert data (missing) is unavailable. Days until
     expiry are computed from the clock at read time.
@@ -306,7 +317,7 @@ class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
 
     def __init__(self, entry: TraefikProxyConfigEntry, host: str) -> None:
         host = host.lower()
-        super().__init__(entry.runtime_data.cert_coordinator, entry, self._spec.unique_id(entry.entry_id, host))
+        super().__init__(entry, self._spec.unique_id(entry.entry_id, host))
         self._host = host
         self._attr_translation_placeholders = {"host": host}
 

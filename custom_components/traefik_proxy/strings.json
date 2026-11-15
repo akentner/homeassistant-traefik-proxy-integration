@@ -133,6 +133,9 @@
       "middlewares_problem": {
         "name": "Middleware problems"
       },
+      "certificates_problem": {
+        "name": "Certificate problems"
+      },
       "certificate_expiring": {
         "name": "{host} expiring"
       }

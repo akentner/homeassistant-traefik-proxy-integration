@@ -65,6 +65,9 @@
       "middlewares_problem": {
         "name": "Middleware-Probleme"
       },
+      "certificates_problem": {
+        "name": "Zertifikatsprobleme"
+      },
       "certificate_expiring": {
         "name": "{host} läuft ab"
       }
