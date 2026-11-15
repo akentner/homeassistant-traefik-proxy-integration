@@ -223,6 +223,10 @@
     "entities_migrated": {
       "title": "Traefik-Entitäten wurden ersetzt",
       "description": "Die Traefik-Integration „{entry_title}“ wurde aktualisiert. Router-Binärsensoren wurden durch Router-Sensoren mit neuen Entitäts-IDs ersetzt (Zustände: aktiviert, Warnung, Fehler, deaktiviert, fehlt). Der Knopf und der Dienst zum Neuladen wurden entfernt, weil Traefik keine Reload-API hat; nutze stattdessen den Knopf „Jetzt aktualisieren“. {removed_count} alte Entitäten wurden entfernt. Passe Automationen, Skripte und Dashboards an, die sie verwendet haben, und schließe danach diesen Hinweis."
+    },
+    "insecure_credentials": {
+      "title": "Traefik-Zugangsdaten werden unverschlüsselt gesendet",
+      "description": "Die Traefik-Integration „{entry_title}“ verbindet sich über unverschlüsseltes HTTP mit der Traefik-API und sendet ihre Zugangsdaten (Benutzername und Passwort oder Token) im Klartext, sodass jeder auf dem Netzwerkweg sie mitlesen kann. Öffne die Integration, wähle „Neu konfigurieren“ und stelle die URL auf HTTPS um oder entferne die Authentifizierung. Dieser Hinweis erscheint nach jedem Neustart oder Neuladen wieder, solange HTTP mit Zugangsdaten verwendet wird."
     }
   }
 }

@@ -5,9 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from typing import Any, Final
+from urllib.parse import urlsplit
 
 from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
-from homeassistant.core import HomeAssistant, split_entity_id
+from homeassistant.core import HomeAssistant, callback, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 
@@ -51,6 +52,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Repair issue raised once when the 1.2 migration removed replaced entities (D-19).
 ISSUE_ENTITIES_MIGRATED: Final = "entities_migrated"
+# Repair issue raised while a loaded entry sends credentials over plain HTTP.
+ISSUE_INSECURE_CREDENTIALS: Final = "insecure_credentials"
 # unique_id suffix of the 0.3.0 reload button, removed by the 1.2 migration.
 _LEGACY_RELOAD_BUTTON_SUFFIX: Final = "diagnostics_reload"
 # Maps the disabled_by of a removed 0.3.0 router binary sensor to the one its
@@ -71,6 +74,36 @@ _ROUTER_REPLACEMENT_DISABLED_BY: Final[dict[er.RegistryEntryDisabler, er.Registr
 
 def _issue_id(entry_id: str) -> str:
     return f"{ISSUE_ENTITIES_MIGRATED}_{entry_id}"
+
+
+def _insecure_issue_id(entry_id: str) -> str:
+    return f"{ISSUE_INSECURE_CREDENTIALS}_{entry_id}"
+
+
+@callback
+def _async_check_insecure_credentials(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
+    """Raise the insecure_credentials issue while the entry sends credentials over http, else delete it.
+
+    The issue is bound to the entry and deleted again when the entry unloads,
+    so every setup evaluates the current URL and auth type.
+    """
+    issue_id = _insecure_issue_id(entry.entry_id)
+    uses_http = urlsplit(str(entry.data.get(CONF_URL, ""))).scheme == "http"
+    has_credentials = entry.data.get(CONF_AUTH_TYPE, AuthMode.none) != AuthMode.none
+    if uses_http and has_credentials:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            config_entry_id=entry.entry_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_INSECURE_CREDENTIALS,
+            translation_placeholders={"entry_title": entry.title},
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+    entry.async_on_unload(lambda: ir.async_delete_issue(hass, DOMAIN, issue_id))
 
 
 def _migrated_entry_data(data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -293,6 +326,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     7. Remove the entry's 0.3.0 per-category devices that no entity
        references any more, and keep the main device's ``sw_version``
        following the Traefik version.
+    8. Raise the ``insecure_credentials`` repair issue when the URL uses
+       plain HTTP and the entry has credentials, otherwise delete it. Unload
+       deletes it, so a reload re-evaluates it (and resets a user's ignore).
     """
     client = build_api_client(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
@@ -332,6 +368,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     async_remove_legacy_devices(hass, entry)
     entry.async_on_unload(async_track_sw_version(hass, entry, main.id))
 
+    _async_check_insecure_credentials(hass, entry)
+
     _LOGGER.debug(
         "Traefik integration ready: entry_id=%s, scan_interval=%ss",
         entry.entry_id,
@@ -353,7 +391,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry
 async def async_remove_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
     """Delete the data the entry keeps outside the registries: its missing-since Store.
 
-    The migration repair issue is bound to the entry, so Home Assistant deletes
-    it when the entry is removed (unload keeps it).
+    Both repair issues are bound to the entry, so Home Assistant deletes them
+    when the entry is removed (unload keeps the migration issue).
     """
     await async_remove_missing_store(hass, entry.entry_id)
