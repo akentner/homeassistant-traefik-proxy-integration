@@ -1,4 +1,6 @@
-.PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity clean help
+.PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity hassfest clean help
+
+HASSFEST_IMG ?= ghcr.io/home-assistant/hassfest:latest
 
 help:  ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -42,6 +44,9 @@ typecheck:  ## Run mypy --strict.
 
 hassfest-sanity:  ## Run local hassfest-style sanity checks (no docker).
 	uv run python scripts/hassfest_checks.py all
+
+hassfest:  ## Run hassfest exactly like home-assistant/actions/hassfest (throwaway container).
+	docker run --rm --pull always -v "$(CURDIR)":/github/workspace $(HASSFEST_IMG)
 
 clean:  ## Remove caches and build artefacts.
 	@find . -name __pycache__ -prune -exec rm -rf {} +
