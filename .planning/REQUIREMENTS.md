@@ -327,7 +327,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 - [x] **REL-05**: CI runs on push, PR, nightly schedule and manual dispatch,
       includes the test job against HA 2026.11.x added in Phase 7, and pins all actions by tag or
       SHA. (H-05, M9, M24)
-- [ ] **REL-06**: Shipped code contains no planning references (CONTEXT.md,
+- [x] **REL-06**: Shipped code contains no planning references (CONTEXT.md,
       PITFALLS, D-xx, BLOCKER, phase/plan numbers, `.planning/`, `.claude/`
       paths); CLAUDE.md stack section and skill routing match the
       `traefik_proxy` domain and the renamed skill; developer-doc links point
@@ -480,7 +480,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REL-03 | Phase 8 | Complete |
 | REL-04 | Phase 8 | Complete |
 | REL-05 | Phase 8 | Complete |
-| REL-06 | Phase 8 | Pending |
+| REL-06 | Phase 8 | Complete |
 | REL-07 | Phase 8 | Pending |
 | REL-08 | Phase 8 | Pending |
 
