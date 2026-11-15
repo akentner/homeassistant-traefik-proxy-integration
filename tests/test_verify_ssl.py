@@ -7,7 +7,7 @@ Covers:
 - (b) options False, then reconfigure True: data, options and runtime client
   all end up True; the reconfigure form defaults to the effective value.
 - (c) options form defaults to the effective value (data-only entry).
-- (d) options change reaches the running client without a reload.
+- (d) an options change reloads the entry; the new client uses the new value.
 - (e) reauth probe uses the effective value.
 """
 
@@ -125,14 +125,12 @@ async def test_options_form_defaults_to_effective_value(hass, aioclient_mock) ->
     assert result["data_schema"]({})[CONF_VERIFY_SSL] is False
 
 
-async def test_options_change_reaches_running_client(hass, aioclient_mock) -> None:
-    """(d) An options verify_ssl change rebuilds the one client without a reload."""
+async def test_options_change_reloads_with_new_client(hass, aioclient_mock) -> None:
+    """(d) An options verify_ssl change reloads the entry; the new runtime's one client uses it."""
     stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
     entry = _make_entry(verify_ssl=True)
     await _setup_entry(hass, entry)
     runtime = entry.runtime_data
-    old_client = runtime.client
-    assert runtime.coordinator.client is runtime.client
     assert runtime.client._verify_ssl is True
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
@@ -141,15 +139,16 @@ async def test_options_change_reaches_running_client(hass, aioclient_mock) -> No
         {CONF_SCAN_INTERVAL: 30, CONF_VERIFY_SSL: False, CONF_TLS_WARN_DAYS: 14},
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done()
+    # The reload is scheduled; the first cert cycle is an entry background task.
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.state is ConfigEntryState.LOADED
-    # Same runtime container (no reload), new client, and the coordinator
-    # uses exactly that client (no drift between the two).
-    assert entry.runtime_data is runtime
-    assert runtime.client is not old_client
-    assert runtime.client._verify_ssl is False
-    assert runtime.coordinator.client is runtime.client
+    assert entry.options[CONF_VERIFY_SSL] is False
+    # A new runtime from the reload, whose coordinator uses exactly its client.
+    reloaded = entry.runtime_data
+    assert reloaded is not runtime
+    assert reloaded.client._verify_ssl is False
+    assert reloaded.coordinator.client is reloaded.client
 
 
 async def test_reauth_probe_uses_effective_value(hass, aioclient_mock) -> None:

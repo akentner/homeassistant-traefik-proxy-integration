@@ -8,8 +8,9 @@ Covers:
 - with two loaded entries a press refreshes only its own entry's two
   coordinators (D-17, A-09, S-08)
 - setup, refreshes and a real press send only GET requests to Traefik (ENT-07)
-- the options update listener stays registered once across reloads, runs once
-  per options change and is removed on unload (ENT-09)
+- no config-entry update listener exists after setup or a reload; a bare
+  options update changes nothing at runtime, the options flow reloads the
+  entry (D-16, FLOW-02)
 """
 
 from __future__ import annotations
@@ -22,15 +23,20 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import EntityCategory
+from homeassistant.const import CONF_TOKEN, EntityCategory
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 import custom_components.traefik_proxy as integration
-from custom_components.traefik_proxy.const import CONF_API_KEY, CONF_SCAN_INTERVAL, CONF_URL, CONF_VERIFY_SSL, DOMAIN
-from custom_components.traefik_proxy.coordinator import build_api_client
+from custom_components.traefik_proxy.const import (
+    CONF_SCAN_INTERVAL,
+    CONF_TLS_WARN_DAYS,
+    CONF_URL,
+    CONF_VERIFY_SSL,
+    DOMAIN,
+)
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
-from tests.conftest import entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
+from tests.conftest import AUTH_TYPE, entity_id_for, make_traefik_entry, setup_traefik_entry, stub_traefik
 
 SECOND_URL = "https://traefik2.example.com:8080"
 
@@ -94,8 +100,8 @@ async def test_press_refreshes_only_own_entry(hass, aioclient_mock, mock_tls_pro
     """Pressing entry A's button refreshes A's two coordinators once each and B's not at all."""
     entry_a = await setup_traefik_entry(hass, aioclient_mock)
     entry_b = make_traefik_entry(
-        data={CONF_URL: SECOND_URL, CONF_API_KEY: "k2", CONF_VERIFY_SSL: True},
-        unique_id="traefik2.example.com",
+        data={CONF_URL: SECOND_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "k2"},
+        unique_id="traefik2.example.com:8080",
     )
     stub_traefik(aioclient_mock, base_url=SECOND_URL)
     entry_b.add_to_hass(hass)
@@ -148,25 +154,43 @@ async def test_only_get_requests_reach_traefik(hass, aioclient_mock, mock_tls_pr
     assert methods == {"GET"}
 
 
-async def test_update_listener_registered_once_across_reloads(hass, aioclient_mock, mock_tls_probe) -> None:  # type: ignore[no-untyped-def]
-    """One update listener after setup and reload, one run per options change, none after unload."""
-    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(minor_version=2))
-    assert len(entry.update_listeners) == 1
+async def test_no_update_listener_options_flow_reloads(  # type: ignore[no-untyped-def]
+    hass, aioclient_mock, mock_tls_probe, caplog: pytest.LogCaptureFixture
+) -> None:
+    """No update listener exists; a bare options update keeps the entry running, the options flow reloads it."""
+    caplog.set_level(logging.DEBUG)
+    entry = await setup_traefik_entry(hass, aioclient_mock)
+    assert entry.update_listeners == []
 
     assert await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.state is ConfigEntryState.LOADED
-    assert len(entry.update_listeners) == 1
+    assert entry.update_listeners == []
 
-    with patch("custom_components.traefik_proxy.build_api_client", wraps=build_api_client) as spy:
-        hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 45})
-        await hass.async_block_till_done()
-    assert spy.call_count == 1
-    assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=45)
+    # Without a listener nothing reacts to a bare options update.
+    runtime = entry.runtime_data
+    hass.config_entries.async_update_entry(entry, options={CONF_SCAN_INTERVAL: 45})
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.runtime_data is runtime
+    assert runtime.coordinator.update_interval == timedelta(seconds=15)
+
+    # The options flow saves changed options and Home Assistant reloads the entry.
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 60, CONF_VERIFY_SSL: True, CONF_TLS_WARN_DAYS: 14}
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is not runtime
+    assert entry.runtime_data.coordinator.update_interval == timedelta(seconds=60)
+    assert entry.update_listeners == []
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert len(entry.update_listeners) == 0
+    assert entry.update_listeners == []
+    messages = [record.getMessage() for record in caplog.records]
+    assert not [m for m in messages if "Detected that custom integration 'traefik_proxy'" in m]
+    assert not [m for m in messages if "update listeners should not be used" in m]
 
 
 async def test_setup_and_unload_return_none(  # type: ignore[no-untyped-def]

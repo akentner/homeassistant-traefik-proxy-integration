@@ -1,8 +1,9 @@
 """HA-state propagation and lifecycle of the TLS certificate entities after a full setup.
 
 The cert entities must follow the cert coordinator: a cert cycle, a
-threshold change and a ``tls_warn_days`` options change reach
-``hass.states`` without any change of the main Traefik snapshot. The main
+threshold change and a ``tls_warn_days`` options change (through the reload
+of the options form) reach ``hass.states`` without any change of the main
+Traefik snapshot. The main
 coordinator keeps ``always_update=False``, so these tests fail whenever a
 cert entity only listens to the main coordinator.
 
@@ -31,6 +32,7 @@ import pytest
 from cryptography.x509.verification import Store
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -41,6 +43,7 @@ from pytest_homeassistant.common import MockConfigEntry, async_fire_time_changed
 from custom_components.traefik_proxy.cert_coordinator import HostCertState
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
+    CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
@@ -129,6 +132,19 @@ async def _setup(hass: HomeAssistant, aioclient_mock: Any, *, api_key: str = "k"
     await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.state is ConfigEntryState.LOADED
     return entry
+
+
+# The options form's fields with their defaults for an entry without options.
+_OPTIONS: dict[str, Any] = {CONF_SCAN_INTERVAL: 15, CONF_VERIFY_SSL: True, CONF_TLS_WARN_DAYS: 14}
+
+
+async def _save_options(hass: HomeAssistant, entry: MockConfigEntry, user_input: dict[str, Any]) -> None:
+    """Save ``user_input`` in the options form and wait for the reload and its first cert cycle."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.state is ConfigEntryState.LOADED
 
 
 def _expiring(hass: HomeAssistant, entry: MockConfigEntry, host: str = HOST) -> str:
@@ -239,17 +255,18 @@ async def test_threshold_change_reaches_state_at_the_boundary(
 async def test_tls_warn_days_option_reaches_state(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock
 ) -> None:
-    """Changing ``tls_warn_days`` in the options turns the alarm on."""
+    """Saving ``tls_warn_days`` in the options form reloads the entry and turns the alarm on."""
     entry = await _setup(hass, aioclient_mock)
     expiring = _expiring(hass, entry)
     assert _state(hass, expiring).state == "off"
 
-    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_TLS_WARN_DAYS: 30})
-    await hass.async_block_till_done()
+    await _save_options(hass, entry, {**_OPTIONS, CONF_TLS_WARN_DAYS: 30})
 
+    assert entry.runtime_data.cert_coordinator.threshold_days == 30
     state = _state(hass, expiring)
     assert state.state == "on"
     assert state.attributes["threshold_days"] == 30
+    assert state.attributes["days_until_expiry"] == 30
 
 
 async def test_cert_availability_follows_cert_coordinator_only(
@@ -343,7 +360,7 @@ async def test_cert_notifications_do_not_grow_listeners(
 async def test_known_cert_hosts_are_never_added_again(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Cert cycles, a threshold change and an options change add no entity a second time."""
+    """Cert cycles, a threshold change and the reload of an options change add no entity a second time."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
     # 2 kind listeners + 4 certificate entities + the aggregate.
@@ -354,11 +371,15 @@ async def test_known_cert_hosts_are_never_added_again(
         await hass.async_block_till_done()
     await cert_coordinator.async_set_threshold(7)
     await hass.async_block_till_done()
-    hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_TLS_WARN_DAYS: 30})
-    await hass.async_block_till_done()
+    assert len(cert_coordinator._listeners) == 7
+
+    # The options change reloads the entry: a new cert coordinator, the same entities.
+    await _save_options(hass, entry, {**_OPTIONS, CONF_TLS_WARN_DAYS: 30})
 
     assert DUPLICATE_ID_MESSAGE not in caplog.text
-    assert len(cert_coordinator._listeners) == 7
+    reloaded = entry.runtime_data.cert_coordinator
+    assert reloaded is not cert_coordinator
+    assert len(reloaded._listeners) == 7
     assert _state(hass, _expiring(hass, entry)).state == "on"
 
 
