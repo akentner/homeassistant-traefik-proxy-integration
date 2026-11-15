@@ -7,8 +7,9 @@ name: Validate
 # SHA pin freezes only the action wrapper: both run a moving upstream image
 # (ghcr.io/home-assistant/hassfest:latest, ghcr.io/hacs/action:main), so the
 # validator code can change between runs without a commit here. Every job
-# runs with `permissions: {}`. `make hassfest` / `make hacs-action` pin those
-# images by digest for local runs. Dev dependencies come from the committed
+# runs with `permissions: {}`, and every checkout sets persist-credentials to
+# false because no job runs git operations with the token. `make hassfest` /
+# `make hacs-action` pin those images by digest for local runs. Dev dependencies come from the committed
 # uv.lock: `uv sync --locked`, and UV_LOCKED makes every `uv run` refuse a
 # stale lock (the Makefile exports the same variable).
 on:
@@ -31,6 +32,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -55,6 +58,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -74,6 +79,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
@@ -95,6 +102,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # No version tag exists upstream; pinned to the master commit of that date.
       # The pin freezes the wrapper only; it runs ghcr.io/home-assistant/hassfest:latest.
@@ -106,6 +115,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The token comes from the action's github_token input default.
       # The pin freezes the wrapper only; it runs ghcr.io/hacs/action:main.
