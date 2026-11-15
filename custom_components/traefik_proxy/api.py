@@ -190,6 +190,11 @@ class TraefikProxyApiClient:
         self._paginated = False
         self._rawdata_probe_due = False
 
+    @property
+    def paginated(self) -> bool:
+        """Return True while the client reads the paginated list endpoints because /api/rawdata answered 404."""
+        return self._paginated
+
     async def _request(self, path: str, params: dict[str, int] | None = None) -> tuple[Any, str | None]:
         """GET ``path`` and return the decoded JSON payload and the raw ``X-Next-Page`` header."""
         url = f"{self._base_url}{path}"

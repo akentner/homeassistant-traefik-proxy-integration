@@ -303,6 +303,15 @@ class TraefikEntityManager:
         return kind.missing.get(key) if kind is not None else None
 
     @callback
+    def missing_map(self) -> MissingData:
+        """Return every missing-since time as ``{kind: {key: ISO-8601}}``.
+
+        Includes the stored times of kinds not registered yet; a registered
+        kind's own map wins over a stored one.
+        """
+        return _serialize_missing({**self._stored, **{name: kind.missing for name, kind in self._kinds.items()}})
+
+    @callback
     def _async_kind_updated(self, name: str) -> None:
         """Reconcile one kind with the latest coordinator data."""
         kind = self._kinds[name]
@@ -363,9 +372,7 @@ class TraefikEntityManager:
         """Persist the missing-since times when they differ from the last write."""
         if self._store is None:
             return
-        data = _serialize_missing(
-            {**self._stored, **{name: kind.missing for name, kind in self._kinds.items()}},
-        )
+        data = self.missing_map()
         if data == self._saved:
             return
         self._saved = data
