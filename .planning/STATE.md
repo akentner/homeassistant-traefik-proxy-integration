@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
 status: executing
-stopped_at: Phase 05 complete, ready to plan Phase 06
-last_updated: "2026-11-15T07:56:04.954Z"
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-11-15T08:04:30.534Z"
 last_activity: 2026-11-15
-last_activity_desc: Phase 05 complete, transitioned to Phase 06
-state_head: 316a3bc240bc5cad79cceba4e3d4f87501381ad3
+last_activity_desc: Phase 06 execution started
+state_head: 3850a6914631040d260aa123766ba32c35e5707c
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 28
+  completed_plans: 29
 milestone_name: milestone
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-07-05)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 05 — Entity model + lifecycle
+**Current focus:** Phase 06 — Certificates
 
 ## Current Position
 
-Phase: 06 (Certificates) — READY TO EXECUTE
-Plan: Not started
+Phase: 06 (Certificates) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-11-15 — Phase 05 complete, transitioned to Phase 06
+Last activity: 2026-11-15 — Phase 06 execution started
 
 Progress: [██████░░░░] 63% (3 of 8 phases)
 
@@ -93,6 +93,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 05 P06 | 13min | 1 tasks | 9 files |
 | Phase 05 P07 | 14min | 3 tasks | 11 files |
 | Phase 05 P08 | 8min | 3 tasks | 6 files |
+| Phase 06 P01 | 10min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -169,6 +170,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: Disabled 0.3.0 router binary sensors are replaced by disabled router sensors (USER->USER, DEVICE->USER, INTEGRATION->INTEGRATION) seeded with the old object id; name/area/icon not carried over
 - [Phase 05]: 05-08: Update listener registered via entry.async_on_unload(entry.add_update_listener(...))
 - [Phase 05]: 05-08: _async_remove_device_if_unreferenced is the single device-removal path in entity.py (per-item off and legacy cleanup)
+- [Phase 06]: 06-01: HostHeader is not Host; negated !Host() skipped; normalize_host (IDNA A-label, charset, empty labels rejected) for rule names and tls.domains
+- [Phase 06]: 06-01: cert host set capped at MAX_CERT_HOSTS=200 (first 200 sorted), one WARNING per cycle with counts only
 
 ### Pending Todos
 
@@ -210,7 +213,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-14T22:57:35.327Z
-Stopped at: Phase 05 complete, ready to plan Phase 06
+Last session: 2026-11-15T08:04:30.398Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

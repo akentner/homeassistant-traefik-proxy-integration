@@ -408,11 +408,11 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 7 plans in 6 waves
+**Plans**: 1/7 plans executed in 6 waves
 
 Plans:
 **Wave 1**
-- [ ] 06-01-PLAN.md — `rules.py` `extract_hosts`/`normalize_host` (v2 multi-argument, v3 `||`, no regex/SNI/wildcard/negated names) for the cert host set; cap at 200 hosts with one warning (CERT-03)
+- [x] 06-01-PLAN.md — `rules.py` `extract_hosts`/`normalize_host` (v2 multi-argument, v3 `||`, no regex/SNI/wildcard/negated names) for the cert host set; cap at 200 hosts with one warning (CERT-03)
 - [ ] 06-02-PLAN.md — `/api/certificates` client + `TraefikCertificate` model + strict parser; test stubs serve the endpoint (clock-rebased v3.7 capture, v2.11 404); fixed capture dates only under frozen time (CERT-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -539,7 +539,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 3. TLS Certificate Expiry | 3/3 | Complete   | 2026-07-06 |
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
-| 6. Certificates | 0/TBD | Not started | - |
+| 6. Certificates | 1/7 | In Progress | - |
 | 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
