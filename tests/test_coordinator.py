@@ -18,6 +18,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy import api
+from custom_components.traefik_proxy import coordinator as coordinator_module
 from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import (
     CONF_API_KEY,
@@ -538,8 +539,9 @@ async def test_request_budget_matrix(
 
     # (15) A page fails every 50 minutes for almost five hours, so every
     # recovery re-checks the version inside the interval. The probe keeps its
-    # own hourly clock: it still runs once per hour, the first one an hour
-    # after the switch, and never in a failing or recovering cycle.
+    # own hourly clock: probes stay at least one hour apart and are not
+    # postponed by failures. (The edges off this schedule are pinned by the
+    # test_rawdata_probe_* tests below.)
     def stub_pages(*, failing: bool = False) -> None:
         aioclient_mock.clear_requests()
         if failing:
@@ -600,6 +602,145 @@ async def test_request_budget_matrix(
 
     # (20) Steady: one rawdata request per cycle.
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
+
+
+def _page_paths(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Set the client's page size to the v3.7 capture and return every page path in request order."""
+    index = load_fixture("v3.7", "pages/index.json")
+    monkeypatch.setattr(api, "DEFAULT_PAGE_SIZE", index["per_page"])
+    return [f"/api/http/{kind}" for kind in ("routers", "services", "middlewares") for _page in index[kind]]
+
+
+def test_rawdata_probe_interval_is_one_hour() -> None:
+    """The rawdata probe has an interval of its own, independent of the version re-check."""
+    assert getattr(coordinator_module, "RAWDATA_PROBE_INTERVAL", None) == timedelta(hours=1)
+
+
+async def test_rawdata_probe_cadence_ignores_version_recheck_interval(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """A 10-minute version re-check does not make the paginated client probe rawdata more than once an hour."""
+    monkeypatch.setattr(coordinator_module, "VERSION_RECHECK_INTERVAL", timedelta(minutes=10))
+    pages = _page_paths(monkeypatch)
+    stub_traefik_paginated(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+
+    probe_minutes: list[int] = []
+    for minute in range(10, 130, 10):
+        freezer.tick(timedelta(minutes=10))
+        paths = await _refresh_paths(hass, aioclient_mock, coordinator)
+        if "/api/rawdata" in paths:
+            probe_minutes.append(minute)
+            assert paths == ["/api/version", "/api/rawdata", *pages], minute
+        else:
+            assert paths == ["/api/version", *pages], minute
+    assert probe_minutes == [60, 120]
+
+
+async def test_rawdata_probe_after_off_grid_switch(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """A switch 30 minutes off the probe grid gets its first probe at the next grid tick, 30 minutes later."""
+    # Keep the version re-check out of the way: only the probe clock is due at minute 60.
+    monkeypatch.setattr(coordinator_module, "VERSION_RECHECK_INTERVAL", timedelta(hours=2))
+    pages = _page_paths(monkeypatch)
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+
+    freezer.tick(timedelta(minutes=30))
+    aioclient_mock.clear_requests()
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", *pages]
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == pages
+
+    freezer.tick(timedelta(minutes=30))
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", *pages]
+    assert coordinator.last_update_success is True
+
+
+async def _probe_due_in_failing_cycle(
+    hass, aioclient_mock, freezer, monkeypatch
+) -> tuple[TraefikProxyCoordinator, list[str], datetime]:  # type: ignore[no-untyped-def]
+    """Paginated setup, then a probe-due cycle whose version re-check answers 500.
+
+    Returns the coordinator, the page paths and the probe clock before the failing cycle.
+    """
+    pages = _page_paths(monkeypatch)
+    stub_traefik_paginated(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    clock = coordinator._probe_clock
+
+    freezer.tick(timedelta(hours=1))
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=500)
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version"]
+    assert coordinator.last_update_success is False
+    return coordinator, pages, clock
+
+
+async def test_rawdata_probe_due_in_failing_cycle_is_not_consumed(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """A probe due in a cycle whose version re-check fails: only /api/version, nothing armed, clock unchanged."""
+    coordinator, _pages, clock = await _probe_due_in_failing_cycle(hass, aioclient_mock, freezer, monkeypatch)
+
+    assert coordinator.client._rawdata_probe_due is False
+    assert coordinator._probe_clock == clock
+
+
+async def test_rawdata_probe_due_runs_in_recovering_cycle(
+    hass, aioclient_mock, freezer, monkeypatch: pytest.MonkeyPatch, mock_tls_probe
+) -> None:
+    """The cycle after the failure re-checks the version, probes rawdata and reads the pages."""
+    coordinator, pages, clock = await _probe_due_in_failing_cycle(hass, aioclient_mock, freezer, monkeypatch)
+
+    aioclient_mock.clear_requests()
+    stub_traefik_paginated(aioclient_mock)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/version", "/api/rawdata", *pages]
+    assert coordinator.last_update_success is True
+    assert coordinator._probe_clock == clock + timedelta(hours=1)
+
+
+_SWITCHED = "switched to the paginated list endpoints"
+
+
+def _switch_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.levelno == logging.DEBUG and _SWITCHED in r.getMessage()]
+
+
+async def test_committed_paginated_switch_is_logged_once(
+    hass, aioclient_mock, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, mock_tls_probe
+) -> None:
+    """The switch to the pages logs one debug line once the list endpoints answered."""
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+    pages = _page_paths(monkeypatch)
+    stub_traefik_paginated(aioclient_mock)
+    entry = await _setup_entry(hass)
+
+    assert await _refresh_paths(hass, aioclient_mock, entry.runtime_data.coordinator) == pages
+    assert len(_switch_records(caplog)) == 1
+
+
+async def test_failing_fallback_logs_no_switch(
+    hass, aioclient_mock, caplog: pytest.LogCaptureFixture, mock_tls_probe
+) -> None:
+    """Rawdata and the first page both fail: the cycle fails without a switch line."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+    caplog.set_level(logging.DEBUG, logger=api.__name__)
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(f"{MOCK_URL}/api/rawdata", status=404)
+    aioclient_mock.get(f"{MOCK_URL}/api/http/routers", status=404)
+    assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata", "/api/http/routers"]
+    assert coordinator.last_update_success is False
+    assert _switch_records(caplog) == []
+    assert any("trying the paginated list endpoints" in r.getMessage() for r in caplog.records)
 
 
 # The request path that fails in each step of _stub_failing_step.
