@@ -47,6 +47,21 @@ jobs:
       - name: Pytest with coverage
         run: uv run pytest tests/ -v --cov
 
+  test-min-ha:
+    name: Tests (minimum HA 2026.11.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v5
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Install the minimum Home Assistant test stack
+        run: |
+          uv venv --python 3.14 .venv-min-ha
+          uv pip install --python .venv-min-ha/bin/python "pytest-homeassistant==2026.11.0" "pytest-cov>=7.0.0"
+      - name: Pytest against HA 2026.11.0
+        run: .venv-min-ha/bin/python -m pytest -q -o addopts="-p no:respx" tests
+
   hassfest:
     runs-on: ubuntu-latest
     steps:
