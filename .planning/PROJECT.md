@@ -58,29 +58,45 @@ and which TLS certificates are expiring soon.
       expiring / expired / probe_failed / not_found, plus the
       `certificates_problem` aggregate.)_
 
+- [x] **CORE-01**: User can configure the integration via the Home Assistant
+      config flow by providing the Traefik API URL and an API key (or bearer
+      token). _(Validated in Phase 1; refined in Phase 7 — auth selector
+      none / basic / bearer, reauth and reconfigure flows.)_
+- [x] **CORE-03**: The integration connects to the Traefik API over HTTP.
+      _(Validated in Phase 1; refined in Phase 4 — one `/api/rawdata` request
+      per cycle, paginated `/api/http/*` endpoints only as the 404 fallback.)_
+- [x] **CFG-01**: User can override the API base URL, TLS verification, scan
+      interval, and certificate warning threshold from integration options.
+      _(Validated in Phase 1; refined in Phase 7 — `OptionsFlowWithReload`,
+      configurable entity grace period.)_
+- [x] **DOCS-01**: A `README.md` documents install via HACS and manual,
+      configuration options, and example dashboards / automations.
+      _(Validated in Phase 1; rewritten for the Marketplace in Phase 8,
+      REL-03.)_
+- [x] **TEST-01**: Unit tests cover the Traefik API client (parsing, error
+      paths) and the entity state derivation logic. _(Validated in Phase 1;
+      Phase 8: 1180 tests, coverage gate 99 % on the minimum HA 2026.11.0
+      stack too.)_
+- [x] **REL-01..08**: Marketplace and release readiness — manifest category,
+      brand, README/CHANGELOG, CI and tooling, no planning references, local
+      hassfest plus hacs/action 10/10 in the first PR CI run, branch pushed
+      with Draft PR #2. _(Validated in Phase 8.)_
+
 ### Active
 
 <!-- Current scope. Building toward these. Hypotheses until shipped. -->
 
-- [ ] **CORE-01**: User can configure the integration via the Home Assistant
-      config flow by providing the Traefik API URL and an API key (or bearer
-      token).
-- [ ] **CORE-02**: User can alternatively configure the integration by editing
-      `configuration.yaml`, for users who prefer YAML / pinned releases.
-- [ ] **CORE-03**: The integration connects to the Traefik API over HTTP using
-      the `/api/entrypoints`, `/api/http/routers`, `/api/http/services`, and
-      `/api/http/middlewares` endpoints.
-- [ ] **CFG-01**: User can override the API base URL, TLS verification, scan
-      interval, and certificate warning threshold from integration options.
-- [ ] **DOCS-01**: A `README.md` documents install via HACS and manual,
-      configuration options, and example dashboards / automations.
-- [ ] **TEST-01**: Unit tests cover the Traefik API client (parsing, error
-      paths) and the entity state derivation logic.
+None — milestone v1.0 scope is shipped on `feat/marketplace-polish`. The
+release itself (merge, CHANGELOG date, tag `v1.0.0`, GitHub release,
+`hacs/default` PR) is the user's action.
 
 ### Out of Scope
 
 <!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
 
+- **CORE-02: YAML configuration (`configuration.yaml`)** — dropped (CFG-02):
+  the YAML path never worked and was removed in Phase 7 (FLOW-07); setup is
+  UI-only.
 - **Mutating Traefik configuration files on disk** — Traefik's dynamic
   configuration is intentionally external; this integration only reads
   state, it does not write files.
@@ -143,6 +159,8 @@ integration only reads it. All endpoints return JSON.
 | Per-router / per-cert entities | Maps cleanly to HA entity model; users can build dashboards on top | — Pending |
 | `aiohttp` over `requests` | Async, matches HA Core's loop, no thread-pool | — Pending |
 | Certificate not covering its host = problem (`not_found`) in both sources | Traefik serves its ~1-year default certificate to uncovered hosts; reporting it as healthy would hide the failure (D-03/R-1, review CR-01) | ✓ Phase 6 |
+| Keep the Traefik Proxy logo lockup (`logo.png` / `dark_logo.png`) | User decision 2026-11-16 (A3/A8); README and `docs/BRAND.md` state that the Traefik Labs trademark guidelines were not reviewed and no permission is claimed | ✓ Phase 8 |
+| Prove hacs/action in the PR CI run, not locally | The validators need a GitHub token; agents never run `make hacs-action` (M43) | ✓ Phase 8 — run 43769962201, All (10) checks passed |
 
 ## Evolution
 
@@ -162,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-11-15 after Phase 6 completion — TLS-01/02 validated (refined by CERT-01..05); certificate source is `/api/certificates` (Traefik ≥ 3.7) or a threadless SNI probe.*
+*Last updated: 2026-11-16 after Phase 8 completion — milestone v1.0 scope shipped on `feat/marketplace-polish` (Draft PR #2, CI green incl. hacs/action 10/10); logo lockup kept (A3/A8); release steps remain the user's.*

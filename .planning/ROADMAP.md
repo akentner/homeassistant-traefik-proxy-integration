@@ -45,7 +45,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Config flow, HA 2026.11 baseline, observability** — auth (completed 2026-11-15)
       selector + entry migration, minimum HA 2026.11.0 + 2026.11 APIs, grace-period option, `OptionsFlowWithReload`, reauth/reconfigure
       helpers, `host:port` unique_id, diagnostics, repairs, en/de translations
-- [ ] **Phase 8: Marketplace + release readiness** — manifest categories, brand
+- [x] **Phase 8: Marketplace + release readiness** — manifest categories, brand (completed 2026-11-16)
       re-export, README/CHANGELOG, CI + tooling fixes, planning-reference sweep,
       version 1.0.0, local validation, Draft PR
 
@@ -562,7 +562,7 @@ tag and catalog PR themselves remain the user's action.
      `.planning/`; `feat/marketplace-polish` is pushed and a **Draft PR** to
      `main` is open — no tag, release or `hacs/default` PR is created by the
      assistant (U1, M8). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 13/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
+**Plans**: 13/13 plans complete in 8 waves (executed sequentially in the worktree, W55)
 
 Plans:
 **Wave 1**
@@ -615,7 +615,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
 | 7. Config flow, HA 2026.11 baseline, observability | 9/9 | Complete    | 2026-11-15 |
-| 8. Marketplace + release readiness | 13/13 | In Progress | - |
+| 8. Marketplace + release readiness | 13/13 | Complete    | 2026-11-16 |
 
 **Coverage:**
 

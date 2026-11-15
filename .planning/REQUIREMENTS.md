@@ -333,10 +333,10 @@ Requirements for initial release. Each maps to a roadmap phase.
       paths); CLAUDE.md stack section and skill routing match the
       `traefik_proxy` domain and the renamed skill; developer-doc links point
       at contributors.home-assistant.io. (A-19, H-07, H-08, research §6 Q7)
-- [ ] **REL-07**: Local hassfest and `hacs/action` (no `ignore`) pass;
+- [x] **REL-07**: Local hassfest and `hacs/action` (no `ignore`) pass;
       release notes and the `hacs/default` PR text are drafted in `.planning/`.
       (research §2, M8)
-- [ ] **REL-08**: `feat/marketplace-polish` is pushed and a Draft PR to `main`
+- [x] **REL-08**: `feat/marketplace-polish` is pushed and a Draft PR to `main`
       is open; no tag, release or `hacs/default` PR is created by the assistant.
       (U1)
 
@@ -482,11 +482,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REL-04 | Phase 8 | Complete |
 | REL-05 | Phase 8 | Complete |
 | REL-06 | Phase 8 | Complete |
-| REL-07 | Phase 8 | Pending (first PR CI run, M43) |
-| REL-08 | Phase 8 | Pending |
+| REL-07 | Phase 8 | Complete (hacs/action via first PR CI run 43769962201, M43) |
+| REL-08 | Phase 8 | Complete |
 
 **Coverage:**
-- v1 requirements: 87 rows — 78 active (76 complete, 2 pending) + 9 superseded/dropped
+- v1 requirements: 87 rows — 78 active (78 complete, 0 pending) + 9 superseded/dropped
 - Mapped to phases: 78 / 78 active
 - Unmapped: 0 ✓
 
@@ -507,4 +507,4 @@ exactly one phase (A-15 is split into its client and flow halves).
 
 ---
 *Requirements defined: 2026-07-05*
-*Last updated: 2026-11-15 — 08-12: ENT-09 names the 2026.11 `config_entry_id` repair API, Probatio row reflects Phase 7, coverage footer recounted*
+*Last updated: 2026-11-16 — Phase 8 complete: REL-07 (hacs/action 10/10 in PR CI run 43769962201) and REL-08 (Draft PR #2) closed*

@@ -1,19 +1,19 @@
 ---
 gsd_state_version: "1.0"
 milestone: v1.0
-current_phase: 08
-current_phase_name: Marketplace + release readiness
-status: verifying
-stopped_at: Completed 08-13-PLAN.md
-last_updated: "2026-11-15T21:34:05.667Z"
-last_activity: 2026-11-15
-last_activity_desc: Phase 08 execution started
-state_head: cfa2871211a6f773adf159b109b13151efb65847
+current_phase: 8
+status: completed
+stopped_at: Phase 8 complete — all phases complete
+last_updated: "2026-11-15T23:02:29.744Z"
+last_activity: 2026-11-16
+last_activity_desc: Phase 8 complete
+state_head: 2268660f0fb4c6f96c9c87edd1fd102568d904d0
 progress:
   total_phases: 8
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 57
   completed_plans: 57
+  percent: 100
 milestone_name: milestone
 ---
 
@@ -21,27 +21,27 @@ milestone_name: milestone
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-11-15)
+See: .planning/PROJECT.md (updated 2026-11-16)
 
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 08 — Marketplace + release readiness
+**Current focus:** Milestone v1.0 — all 8 phases complete; release steps (merge, CHANGELOG date, tag v1.0.0, release, hacs/default PR) are the user's
 
 ## Current Position
 
-Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 13 of 13
-Status: Phase complete — ready for verification
-Last activity: 2026-11-15 — Phase 08 execution started
+Phase: 8
+Plan: Not started
+Status: All phases complete
+Last activity: 2026-11-16 — Phase 8 complete
 
-Progress: [█████████░] 88% (6 of 8 phases)
+Progress: [██████████] 100% (8 of 8 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 42
+- Total plans completed: 57
 - Average duration: 13m
 - Total execution time: 1.7 hours
 
@@ -57,6 +57,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | 05 | 8 | - | - |
 | 06 | 7 | - | - |
 | 07 | 9 | - | - |
+| 8 | 13 | - | - |
 
 **Recent Trend:**
 
@@ -271,6 +272,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-11: project skill renamed to spike-findings-homeassistant-traefik-proxy-integration; tls.py is authoritative over the spike
 - [Phase 08]: 08-12: Phase 4 WR-06/WR-07/IN-03/IN-06 skipped (accepted for 1.0.0, no runtime effect); every other open Phase 4-6 finding closed with a commit pointer; REL-07 traceability stays Pending (first PR CI run, M43)
 - [Phase 08]: 08-13: REL-07 hacs/action stays pending the first PR CI run; drafts state it, hacs/default data read anonymously
+- [Phase 08]: UAT: first Draft-PR CI run 43769962201 green (5 jobs, hacs/action All (10) checks passed) closes REL-07; Draft PR #2 opened by the manager closes REL-08
+- [Phase 08]: UAT: user decision 2026-11-16 keeps logo.png/dark_logo.png as shipped (A3/A8 resolved, no icon-only fallback); optional local hacs/action run skipped by user choice (covered by CI)
 
 ### Pending Todos
 
@@ -293,7 +296,7 @@ None yet.
   is correct — only the footer is stale. Cosmetic; not a coverage gap.
   Phase 03 closed out TEST-04 — only DIAG-04 + DIST-04/05 + DOCS-02/03/04
   remain pending in Phase 4.
-- 08-08/REL-07: make hacs-action (official hacs/action validators, All 10 checks + negative control) needs the user's GitHub token; agent run denied by the permission classifier. User runs make hacs-action or allows it; 08-13 reruns it.
+- [Phase 8 → release] Before tagging v1.0.0: merge Draft PR #2, set the CHANGELOG 1.0.0 date, tag, publish the release, then the hacs/default PR (all user actions). Open info-level review items IN-01..IN-06 (08-REVIEW-DISPOSITION.md) can be triaged before or after 1.0.0; `/gsd-secure-phase 8` has not run (no 08-SECURITY.md).
 
 ### Quick Tasks Completed
 
@@ -316,7 +319,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T21:34:05.431Z
-Stopped at: Completed 08-13-PLAN.md
+Last session: 2026-11-15T23:05:00Z
+Stopped at: Phase 8 complete — all phases complete
 Resume file: None
-Next: /gsd-plan-phase 6
+Next: milestone v1.0 close-out (`/gsd-audit-milestone`, `/gsd-complete-milestone`) after the user's merge and release — not started
