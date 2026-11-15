@@ -52,9 +52,9 @@
           "url": "Address of the Traefik API with scheme (http or https), host and port, for example the address of the Traefik dashboard without the /dashboard/ path.",
           "verify_ssl": "Turn off only for a self-signed certificate on the Traefik API.",
           "auth_type": "How the Traefik API is protected: no authentication, basic auth or a bearer token checked by a forwardAuth middleware.",
-          "username": "Leave empty to keep the stored username while the authentication type stays the same.",
-          "password": "Leave empty to keep the stored password while the authentication type stays the same.",
-          "token": "Leave empty to keep the stored token while the authentication type stays the same."
+          "username": "Leave empty to keep the stored username while the address (scheme, host and port) and the authentication type stay the same.",
+          "password": "Leave empty to keep the stored password while the address (scheme, host and port) and the authentication type stay the same.",
+          "token": "Leave empty to keep the stored token while the address (scheme, host and port) and the authentication type stay the same."
         }
       }
     },

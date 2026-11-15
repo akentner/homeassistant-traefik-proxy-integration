@@ -9,7 +9,8 @@
   credentials for the stored URL when Traefik rejected the stored ones.
 - :meth:`TraefikProxyConfigFlow.async_step_reconfigure` changes URL, TLS
   verification and credentials of an existing entry. Secrets are never sent to
-  the form; with an unchanged auth type an empty secret keeps the stored one.
+  the form; with an unchanged auth type, scheme and host:port an empty secret
+  keeps the stored one.
 - :class:`TraefikProxyOptionsFlow` holds the polling and certificate options;
   saving changed options reloads the entry.
 
@@ -24,7 +25,7 @@ import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import probatio as vol
 from homeassistant import data_entry_flow
@@ -282,7 +283,7 @@ def _collect_credentials(
     """Return the credentials of ``auth_type`` from the form and the field errors.
 
     A missing or empty field falls back to ``stored`` when given (reconfigure
-    with an unchanged auth type) and is otherwise ``required``. Complete
+    with an unchanged auth type and target) and is otherwise ``required``. Complete
     credentials ``Auth`` rejects (a ':' or control character in the username,
     a control character in a secret) mark that field ``invalid_auth``.
     """
@@ -305,6 +306,19 @@ def _collect_credentials(
     except ValueError:
         errors[_rejected_field(mode, credentials)] = "invalid_auth"
     return credentials, errors
+
+
+def _same_target(old_url: str, new_url: str) -> bool:
+    """Return whether ``new_url`` reaches the stored target: same scheme and same host:port.
+
+    Only then may reconfigure fall back to a stored credential; a new host, a
+    new port or a switch to plain HTTP needs the credentials entered again. A
+    stored URL without a usable host and port is never the same target.
+    """
+    try:
+        return urlsplit(old_url).scheme == urlsplit(new_url).scheme and url_unique_id(old_url) == url_unique_id(new_url)
+    except ValueError:
+        return False
 
 
 def _entry_data(url: str, verify_ssl: bool, auth_type: str, credentials: Mapping[str, str]) -> dict[str, Any]:
@@ -473,9 +487,10 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         """Change URL, TLS verification and credentials of an existing entry.
 
         The URL and the effective TLS verification are pre-filled; secrets are
-        not. With an unchanged auth type an empty or omitted credential keeps
-        the stored one (for the probe and storage); a changed auth type needs
-        its own credentials, and none removes them. A host:port owned by
+        not. With an unchanged auth type, scheme and host:port an empty or
+        omitted credential keeps the stored one (for the probe and storage); a
+        changed auth type or target needs its credentials entered again, and
+        none removes them. A host:port owned by
         another entry aborts with ``already_configured`` before any request.
         The unique_id follows the new host:port; a title that is the old host
         or the default name follows the new host, a user-chosen title stays.
@@ -497,7 +512,12 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                     if other.entry_id != entry.entry_id and other.unique_id == unique_id:
                         return self.async_abort(reason="already_configured")
                 auth_type = user_input.get(CONF_AUTH_TYPE, stored_auth)
-                stored = entry.data if auth_type == entry.data.get(CONF_AUTH_TYPE) else None
+                # Stored credentials go only to the target they were entered
+                # for: same scheme, same host:port and same auth type.
+                keep_stored = auth_type == entry.data.get(CONF_AUTH_TYPE) and _same_target(
+                    entry.data.get(CONF_URL, ""), url
+                )
+                stored = entry.data if keep_stored else None
                 credentials, errors = _collect_credentials(user_input, auth_type, stored)
             if not errors:
                 verify_ssl = user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)

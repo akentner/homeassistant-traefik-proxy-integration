@@ -103,7 +103,8 @@ async def test_unload_deletes_issue_and_setup_raises_it_again(hass: HomeAssistan
 @pytest.mark.parametrize(
     "submitted",
     [
-        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer"},
+        # A new scheme needs the token entered again (WR-01).
+        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "repair-token"},
         {CONF_URL: HTTP_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"},
     ],
     ids=["to-https", "to-none"],

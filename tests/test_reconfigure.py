@@ -318,3 +318,72 @@ async def test_reconfigure_redirect_shows_redirect_error(hass, aioclient_mock) -
     assert dict(entry.data) == before
     assert aioclient_mock.call_count == 1
     assert not [call for call in aioclient_mock.mock_calls if "intruder.example.org" in str(call[1])]
+
+
+# ----------------------- stored secrets stay with their target (WR-01) -----------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://traefik-new.example.com:8080", id="changed-host"),
+        pytest.param("https://traefik.example.com:9443", id="changed-port"),
+        pytest.param("http://traefik.example.com:8080", id="https-to-http"),
+    ],
+)
+async def test_changed_target_requires_secret_again(hass, aioclient_mock, url: str) -> None:
+    """A new scheme or host:port never receives the stored token: the empty field is required, nothing is sent."""
+    stub_traefik(aioclient_mock, base_url=url, rawdata={})
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: url, AUTH_TYPE: "bearer", CONF_TOKEN: ""})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_TOKEN: "required"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+async def test_changed_host_requires_basic_credentials_again(hass, aioclient_mock) -> None:
+    """Basic auth to a new host needs username and password again; the stored ones are not sent."""
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {CONF_URL: NEW_URL, AUTH_TYPE: "basic"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_USERNAME: "required", CONF_PASSWORD: "required"}
+    assert aioclient_mock.call_count == 0
+
+
+async def test_same_target_with_explicit_default_port_keeps_stored_token(hass, aioclient_mock) -> None:
+    """Spelling out the default port is the same host:port, so the stored token is still used."""
+    stub_traefik(aioclient_mock, base_url="https://traefik.example.com:443", rawdata={})
+    entry = make_traefik_entry(
+        data={CONF_URL: "https://traefik.example.com", CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: SECRET}
+    )
+
+    result = await _reconfigure(hass, entry, {CONF_URL: "https://traefik.example.com:443", AUTH_TYPE: "bearer"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_TOKEN] == SECRET
+    assert _probe_auth(aioclient_mock) == f"Bearer {SECRET}"
+
+
+async def test_unusable_stored_url_requires_secret_again(hass, aioclient_mock) -> None:
+    """A stored URL without a usable host:port is never the same target; the token must be entered again."""
+    entry = make_traefik_entry(
+        data={
+            CONF_URL: "https://traefik.example.com:99999",
+            CONF_VERIFY_SSL: True,
+            AUTH_TYPE: "bearer",
+            CONF_TOKEN: SECRET,
+        }
+    )
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_TOKEN: "required"}
+    assert aioclient_mock.call_count == 0

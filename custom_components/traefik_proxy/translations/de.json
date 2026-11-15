@@ -52,9 +52,9 @@
           "url": "Adresse der Traefik-API mit Schema (http oder https), Host und Port, zum Beispiel die Adresse des Traefik-Dashboards ohne den Pfad /dashboard/.",
           "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
           "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
-          "username": "Lass das Feld leer, um den gespeicherten Benutzernamen zu behalten, solange die Authentifizierung gleich bleibt.",
-          "password": "Lass das Feld leer, um das gespeicherte Passwort zu behalten, solange die Authentifizierung gleich bleibt.",
-          "token": "Lass das Feld leer, um das gespeicherte Token zu behalten, solange die Authentifizierung gleich bleibt."
+          "username": "Lass das Feld leer, um den gespeicherten Benutzernamen zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben.",
+          "password": "Lass das Feld leer, um das gespeicherte Passwort zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben.",
+          "token": "Lass das Feld leer, um das gespeicherte Token zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben."
         }
       }
     },
