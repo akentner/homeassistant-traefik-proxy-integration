@@ -210,7 +210,9 @@ Every release tag gets an entry, also when it has no user-visible change.
 
 - Diagnostics redact user name, password, token, credentials in the URL and the
   values of header and query matchers in router rules, also in router errors
-  that repeat the rule.
+  that repeat the rule. A router error that may quote such a value elsewhere
+  (for example the regexp error of an invalid `HeaderRegexp`) is redacted
+  whole.
 - Redirects are never followed, so credentials never reach a redirect target.
 - Credentials are never logged; error chains of an invalid URL contain neither
   the URL nor credentials.

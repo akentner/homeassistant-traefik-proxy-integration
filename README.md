@@ -334,7 +334,9 @@ downloads the entry settings, the polling status, the parsed Traefik state, the
 certificate state per host and the items marked missing. User name, password,
 token and any credentials in the URL are redacted, and the values of `Header`,
 `HeaderRegexp`, `Query` and similar matchers in router rules are replaced by
-`**REDACTED**`. Review the file before you attach it to an issue.
+`**REDACTED**`. A router error that may quote such a value (for example an
+invalid `HeaderRegexp` pattern) is replaced as a whole. Review the file before
+you attach it to an issue.
 
 ### Debug logging
 

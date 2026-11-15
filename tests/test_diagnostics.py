@@ -15,8 +15,9 @@ from pytest_homeassistant.components.diagnostics import get_diagnostics_for_conf
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.cert_coordinator import CertSource
 from custom_components.traefik_proxy.const import CONF_URL, CONF_VERIFY_SSL
-from custom_components.traefik_proxy.diagnostics import _jsonable, _safe_url
+from custom_components.traefik_proxy.diagnostics import _jsonable, _redact_error, _safe_url
 from custom_components.traefik_proxy.entity_manager import ROUTERS
+from custom_components.traefik_proxy.rules import redact_rule, rule_secret_values
 from tests.conftest import (
     AUTH_TYPE,
     MOCK_URL,
@@ -176,6 +177,58 @@ async def test_diagnostics_redact_router_errors_that_repeat_the_rule(
     state = hass.states.get(entity_id_for(hass, ROUTERS.domain, ROUTERS.unique_id(entry.entry_id, SECRET_ROUTER)))
     assert state is not None
     assert state.attributes["errors"] == rawdata["routers"][SECRET_ROUTER]["error"]
+
+
+async def test_diagnostics_redact_regexp_errors_that_quote_a_header_value(
+    hass: HomeAssistant, hass_client: Any, aioclient_mock: Any
+) -> None:
+    """A Go regexp error quotes a HeaderRegexp value without a matcher call; the error is redacted whole."""
+    rule = "Host(`a.example.com`) && HeaderRegexp(`X-Api-Key`, `^s3cr3t-(`)"
+    rawdata = rawdata_copy()
+    rawdata["routers"][SECRET_ROUTER]["rule"] = rule
+    rawdata["routers"][SECRET_ROUTER]["error"] = [
+        f"error while adding rule {rule}: compiling HeaderRegexp matcher: "
+        "error parsing regexp: missing closing ): `^s3cr3t-(`",
+    ]
+    entry = await setup_traefik_entry(hass, aioclient_mock, _bearer_entry(), rawdata=rawdata)
+
+    diag = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diag["snapshot"]["routers"][SECRET_ROUTER]["errors"] == [REDACTED]
+    assert "s3cr3t" not in json.dumps(diag)
+    state = hass.states.get(entity_id_for(hass, ROUTERS.domain, ROUTERS.unique_id(entry.entry_id, SECRET_ROUTER)))
+    assert state is not None
+    assert state.attributes["errors"] == rawdata["routers"][SECRET_ROUTER]["error"]
+
+
+HOST_RULE = "Host(`a.example.com`)"
+
+
+@pytest.mark.parametrize(
+    ("error", "rule", "expected"),
+    [
+        # a rule with a secret value: quoted text outside the rule is redacted whole
+        ("invalid character class range: `z-a`", SECRET_RULE, REDACTED),
+        ('the service "api@docker" does not exist', SECRET_RULE, REDACTED),
+        # ... and so is the bare value
+        (f"value {HEADER_SECRET} rejected", SECRET_RULE, REDACTED),
+        # an unquoted error without the value keeps the redacted rule
+        (f"rule {SECRET_RULE} failed", SECRET_RULE, f"rule {SECRET_RULE.replace(HEADER_SECRET, REDACTED)} failed"),
+        ("service not found", SECRET_RULE, "service not found"),
+        # a rule without secret values keeps quoted text
+        ('the service "api@docker" does not exist', HOST_RULE, 'the service "api@docker" does not exist'),
+        (f"rule {HOST_RULE}: bad", HOST_RULE, f"rule {HOST_RULE}: bad"),
+        # a matcher call outside the rule is redacted whole, also without secret values
+        ("matcher Header(`A`, `x`) is invalid", HOST_RULE, REDACTED),
+        # an unparsable rule: its secrets are unknown, every error is redacted whole
+        ("service not found", "Header(`X-Key`, s3cr3t)", REDACTED),
+        # no rule: nothing to leak
+        ('the service "api@docker" does not exist', "", 'the service "api@docker" does not exist'),
+    ],
+)
+def test_redact_error_fails_closed(error: str, rule: str, expected: str) -> None:
+    """Router errors that may carry a header or query value are redacted whole."""
+    assert _redact_error(error, rule, redact_rule(rule), rule_secret_values(rule)) == expected
 
 
 async def test_diagnostics_report_paginated_client(

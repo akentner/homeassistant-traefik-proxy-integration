@@ -208,6 +208,32 @@ def test_redact_rule_keeps_a_whitespace_only_rule() -> None:
     assert rules.redact_rule("  ") == "  "
 
 
+@pytest.mark.parametrize(
+    ("rule", "expected"),
+    [
+        ("Host(`a.example.com`) && HeaderRegexp(`X-Api-Key`, `^s3cr3t-(`)", frozenset({"^s3cr3t-("})),
+        ("Headers(`X-A`, `one`) || Header(`X-B`, `two`)", frozenset({"one", "two"})),
+        # v2 query: the value of every key=value pair; a literal without "=" whole
+        ("Query(`token=abc`, `x=1`)", frozenset({"abc", "1"})),
+        # v3 query: the value argument; a key-only query has none
+        ("QueryRegexp(`key`, `^v`)", frozenset({"^v"})),
+        ("Query(`mobile`)", frozenset()),
+        # double-quoted literal: its raw content
+        ('Header("K", "v\\"q")', frozenset({'v\\"q'})),
+        # no secret-bearing matcher, empty rule
+        ("Host(`a.example.com`) && PathPrefix(`/api`)", frozenset()),
+        ("", frozenset()),
+        ("  ", frozenset()),
+        # unparsable: unknown secrets
+        ("Heder(`X`, `y`)", None),
+        ("Header(`X`, `y`", None),
+    ],
+)
+def test_rule_secret_values(rule: str, expected: frozenset[str] | None) -> None:
+    """The unquoted values redact_rule hides are returned; an unparsable rule gives None."""
+    assert rules.rule_secret_values(rule) == expected
+
+
 # Secrets are digit runs; everything else in the generated rules is digit-free,
 # so a run of four digits in the output can only come from a secret.
 _SECRET_DIGITS = re.compile(r"\d{4}")

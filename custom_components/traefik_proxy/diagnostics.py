@@ -5,6 +5,7 @@ certificate state per host and the missing-since times of vanished items.
 Only parsed models are dumped, never a raw API payload. Credentials are
 redacted, the URL loses any userinfo, and router rules lose the values of
 their header and query matchers, also where a router error repeats the rule.
+A router error that may quote such a value elsewhere is redacted whole.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from homeassistant.core import HomeAssistant
 from .const import CONF_API_KEY, CONF_URL
 from .coordinator import split_url_userinfo
 from .data import TraefikProxyConfigEntry
-from .rules import has_matcher_call, redact_rule
+from .rules import has_matcher_call, redact_rule, rule_secret_values
 
 TO_REDACT: Final = {CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME, CONF_API_KEY, "users", "authorization"}
 
@@ -55,15 +56,32 @@ def _safe_url(url: Any) -> Any:
         return REDACTED
 
 
-def _redact_error(error: str, rule: str, redacted_rule: str) -> str:
+def _may_quote_a_secret(segment: str, secrets: frozenset[str]) -> bool:
+    """Return True when ``segment`` holds a secret value or any quoted text.
+
+    Traefik and Go quote a rule value without a matcher call, for example
+    ``error parsing regexp: missing closing ): `<value>```, and may quote
+    only a fragment of it, so any backtick or double quote counts.
+    """
+    return "`" in segment or '"' in segment or any(value in segment for value in secrets)
+
+
+def _redact_error(error: str, rule: str, redacted_rule: str, secrets: frozenset[str] | None) -> str:
     """Return a router error with the raw rule replaced by its redacted form.
 
-    Traefik may also quote a fragment or a normalized form of the rule, so
-    an error that still holds a matcher call outside the verbatim rule is
-    redacted as a whole.
+    ``secrets`` are the values ``redacted_rule`` hides (None: the rule is
+    unparsable and its secrets are unknown). Fails closed: the error is
+    redacted as a whole when the rule is unparsable, when text outside the
+    verbatim rule holds a matcher call (Traefik may quote a fragment or a
+    normalized form of the rule), or, for a rule with hidden values, when
+    that text holds one of them or any quoted text.
     """
+    if secrets is None:
+        return REDACTED
     segments = error.split(rule) if rule.strip() else [error]
     if any(has_matcher_call(segment) for segment in segments):
+        return REDACTED
+    if secrets and any(_may_quote_a_secret(segment, secrets) for segment in segments):
         return REDACTED
     return redacted_rule.join(segments)
 
@@ -73,8 +91,9 @@ def _redact_router_rules(snapshot: dict[str, Any]) -> dict[str, Any]:
     for router in snapshot["routers"].values():
         rule = router["rule"]
         redacted_rule = redact_rule(rule)
+        secrets = rule_secret_values(rule)
         router["rule"] = redacted_rule
-        router["errors"] = [_redact_error(error, rule, redacted_rule) for error in router["errors"]]
+        router["errors"] = [_redact_error(error, rule, redacted_rule, secrets) for error in router["errors"]]
     return snapshot
 
 

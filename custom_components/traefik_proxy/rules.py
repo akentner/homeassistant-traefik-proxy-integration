@@ -8,7 +8,8 @@ patterns, and every name goes through :func:`normalize_host`.
 
 :func:`redact_rule` hides the values of header and query matchers, which
 may carry tokens or keys, while the rest of the rule stays readable. A rule
-it cannot parse is redacted as a whole.
+it cannot parse is redacted as a whole. :func:`rule_secret_values` returns
+the values it hides, so text that quotes them elsewhere can be detected.
 
 Supported rule shapes:
 
@@ -181,13 +182,26 @@ def _redacted_arguments(matcher: str, arguments: list[str]) -> list[str]:
     raise _UnparsableRuleError
 
 
-def _redact_tokens(tokens: list[tuple[str, str]]) -> str:
+def _hidden_value(literal: str, redacted: str) -> str | None:
+    """Return the part of ``literal`` that ``redacted`` hides, or None when it hides nothing."""
+    if literal == redacted:
+        return None
+    content = literal[1:-1]
+    key, separator, value = content.partition("=")
+    if separator and redacted == f"{literal[0]}{key}={_REDACTED}{literal[0]}":
+        return value
+    return content
+
+
+def _redact_tokens(tokens: list[tuple[str, str]]) -> tuple[str, frozenset[str]]:
     """Rebuild a rule from its tokens with matcher values redacted; raise on a grammar violation.
 
-    Outside a matcher call only ``&&``, ``||``, ``!`` and parentheses may
-    occur. A matcher call is a name, ``(``, one or more literals separated by
-    ``,``, and ``)``. Whitespace may stand between any two tokens and is kept.
+    Returns the redacted rule and the unquoted values it hides. Outside a
+    matcher call only ``&&``, ``||``, ``!`` and parentheses may occur. A
+    matcher call is a name, ``(``, one or more literals separated by ``,``,
+    and ``)``. Whitespace may stand between any two tokens and is kept.
     """
+    hidden: set[str] = set()
     parts = [text for _, text in tokens]
     significant = [index for index, (kind, _) in enumerate(tokens) if kind != "space"]
     position = 0
@@ -218,8 +232,11 @@ def _redact_tokens(tokens: list[tuple[str, str]]) -> str:
                 raise _UnparsableRuleError
         redacted = _redacted_arguments(text.lower(), [parts[slot] for slot in slots])
         for slot, argument in zip(slots, redacted, strict=True):
+            value = _hidden_value(parts[slot], argument)
+            if value:
+                hidden.add(value)
             parts[slot] = argument
-    return "".join(parts)
+    return "".join(parts), frozenset(hidden)
 
 
 def has_matcher_call(text: str) -> bool:
@@ -241,9 +258,25 @@ def redact_rule(rule: str) -> str:
     if not rule.strip():
         return rule
     try:
-        return _redact_tokens(_tokenize(rule))
+        return _redact_tokens(_tokenize(rule))[0]
     except _UnparsableRuleError:
         return _REDACTED
 
 
-__all__ = ["extract_hosts", "has_matcher_call", "normalize_host", "redact_rule"]
+def rule_secret_values(rule: str) -> frozenset[str] | None:
+    """Return the unquoted values that :func:`redact_rule` hides, or None when the rule is unparsable.
+
+    For a v2 ``Query(`key=value`)`` the value without its key is returned.
+    An empty or whitespace-only rule hides nothing. A rule that
+    :func:`redact_rule` redacts as a whole gives None: its secrets are
+    unknown. Empty values are left out. Never raises.
+    """
+    if not rule.strip():
+        return frozenset()
+    try:
+        return _redact_tokens(_tokenize(rule))[1]
+    except _UnparsableRuleError:
+        return None
+
+
+__all__ = ["extract_hosts", "has_matcher_call", "normalize_host", "redact_rule", "rule_secret_values"]
