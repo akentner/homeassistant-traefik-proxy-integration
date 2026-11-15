@@ -18,6 +18,7 @@ import asyncio
 import inspect
 import re
 import socket
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -52,7 +53,7 @@ from custom_components.traefik_proxy.tls import (
     match_certificate,
 )
 from tests.certgen import Issued, make_ca, make_intermediate, make_leaf, make_self_signed, write_pem
-from tests.conftest import TlsServerStarter
+from tests.conftest import TlsServer, TlsServerStarter, wall_clock_watchdog
 
 # ---------------------------------------------------------------------------
 # ``_hostname_matches_san`` — RFC 6125 §6.4.3 wildcard + case + bare-apex.
@@ -772,3 +773,54 @@ def test_match_certificate_never_returns_nameless_certificate() -> None:
     nameless = _api_cert()
     assert match_certificate("a.example.com", [nameless]) is None
     assert match_certificate("", [nameless]) is None
+
+
+# ---------------------------------------------------------------------------
+# Test infrastructure: wall-clock bounds under a frozen loop clock
+# ---------------------------------------------------------------------------
+
+
+def _run_in_own_loop(coro: Any) -> None:
+    """Run ``coro`` in a fresh event loop on its own thread, so cancelling its tasks cannot touch the test loop."""
+    thread = threading.Thread(target=asyncio.run, args=(coro,), daemon=True)
+    thread.start()
+    thread.join(5)
+    assert not thread.is_alive(), "the watchdog did not end the hang"
+
+
+def test_wall_clock_watchdog_cancels_a_hang_under_frozen_loop_clock(freezer: Any) -> None:
+    """Under ``freezer`` an asyncio timeout never expires; the watchdog cancels the hang after wall-clock time."""
+    outcome: list[str] = []
+
+    async def _hang() -> None:
+        with wall_clock_watchdog(asyncio.get_running_loop(), 0.2) as fired:
+            try:
+                async with asyncio.timeout(1):  # the loop clock is frozen: never expires
+                    await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                outcome.append("fired" if fired.is_set() else "not fired")
+
+    _run_in_own_loop(_hang())
+    assert outcome == ["fired"]
+
+
+def test_wall_clock_watchdog_stays_quiet_when_the_block_finishes() -> None:
+    """A block that finishes in time is not cancelled, and the watchdog never fires afterwards."""
+    outcome: list[bool] = []
+
+    async def _quick() -> None:
+        with wall_clock_watchdog(asyncio.get_running_loop(), 0.2) as fired:
+            await asyncio.sleep(0)
+        await asyncio.sleep(0.4)
+        outcome.append(fired.is_set())
+
+    _run_in_own_loop(_quick())
+    assert outcome == [False]
+
+
+async def test_wait_connections_is_bounded_by_wall_clock_time(freezer: Any) -> None:
+    """``wait_connections`` gives up after its wall-clock limit, not after a fixed number of loop turns."""
+    server = TlsServer()
+    with pytest.raises(AssertionError, match="expected 1 finished connections"):
+        await server.wait_connections(1, limit=0.2)
+    assert server.received == []

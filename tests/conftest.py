@@ -8,6 +8,7 @@ import copy
 import json
 import ssl
 import sys
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -351,20 +352,61 @@ class TlsServer:
     port: int = 0
     received: list[bytes] = field(default_factory=list)
 
-    async def wait_connections(self, count: int) -> None:
-        """Yield to the loop until ``count`` connections have finished.
+    async def wait_connections(self, count: int, *, limit: float = 10.0) -> None:
+        """Yield to the loop until ``count`` connections have finished, for at most ``limit`` seconds.
 
         Uses ``asyncio.sleep(0)`` only, so it also works under ``freezer``
-        (the loop clock is frozen there and timed sleeps never return).
+        (the loop clock is frozen there and timed sleeps never return). The
+        limit is wall-clock time measured by a thread timer, which the frozen
+        clock does not affect.
         """
-        for _ in range(10_000):
-            if len(self.received) >= count:
-                return
-            await asyncio.sleep(0)
+        deadline = threading.Event()
+        timer = threading.Timer(limit, deadline.set)
+        timer.daemon = True
+        timer.start()
+        try:
+            while not deadline.is_set():
+                if len(self.received) >= count:
+                    return
+                await asyncio.sleep(0)
+        finally:
+            timer.cancel()
         raise AssertionError(f"expected {count} finished connections, got {len(self.received)}")
 
 
 type TlsServerStarter = Callable[..., Awaitable[TlsServer]]
+
+# Wall-clock limit of one test that uses ``tls_server``.
+TLS_TEST_WALL_CLOCK_LIMIT = 60.0
+
+
+@contextlib.contextmanager
+def wall_clock_watchdog(loop: asyncio.AbstractEventLoop, seconds: float) -> Iterator[threading.Event]:
+    """Cancel every task of ``loop`` when the block runs longer than ``seconds`` of wall-clock time.
+
+    Under ``freezer`` the loop clock stands still, so ``asyncio.timeout``
+    never expires and a stalled handshake would hang the test for ever. A
+    thread timer is not affected by the frozen clock; when it fires, every
+    task of ``loop`` is cancelled from the loop thread and the yielded event
+    is set, so the test fails instead of hanging.
+    """
+    fired = threading.Event()
+
+    def _cancel_all() -> None:
+        for task in asyncio.all_tasks(loop):
+            task.cancel()
+
+    def _fire() -> None:
+        fired.set()
+        loop.call_soon_threadsafe(_cancel_all)
+
+    timer = threading.Timer(seconds, _fire)
+    timer.daemon = True
+    timer.start()
+    try:
+        yield fired
+    finally:
+        timer.cancel()
 
 
 @pytest_asyncio.fixture
@@ -377,7 +419,9 @@ async def tls_server(socket_enabled: None) -> AsyncIterator[TlsServerStarter]:
     context is built per entry up front and the SNI callback only assigns
     ``sslobj.context`` (never load a chain inside the callback). Every
     connection is read until EOF and its bytes appended to ``received``.
-    Teardown closes every started server.
+    Teardown closes every started server. A test that runs longer than
+    ``TLS_TEST_WALL_CLOCK_LIMIT`` seconds of wall-clock time is cancelled
+    and failed (:func:`wall_clock_watchdog`), also under ``freezer``.
     """
     assert socket_enabled is None  # consumed for fixture propagation
     servers: list[asyncio.Server] = []
@@ -415,8 +459,11 @@ async def tls_server(socket_enabled: None) -> AsyncIterator[TlsServerStarter]:
         record.port = server.sockets[0].getsockname()[1]
         return record
 
-    yield start
+    with wall_clock_watchdog(asyncio.get_running_loop(), TLS_TEST_WALL_CLOCK_LIMIT) as fired:
+        yield start
     for server in servers:
         server.close()
         server.close_clients()
+    if fired.is_set():
+        pytest.fail(f"test exceeded the tls_server wall-clock limit of {TLS_TEST_WALL_CLOCK_LIMIT} s")
         await server.wait_closed()
