@@ -57,10 +57,16 @@ restart (see D-16).
   API mode each host is mapped to the API certificate that covers it (exact
   SAN/CN match preferred over a single-label wildcard match per D-12; among
   equal matches the latest `not_after` wins). Every entity exposes a `source`
-  attribute (`api` | `probe`). How hosts without a covering API certificate
-  are treated (problem `not_found` vs. probing them) is decided from research
-  question R-1; default if R-1 stays inconclusive: probe those hosts (hybrid,
-  `source=probe` on them).
+  attribute (`api` | `probe`). Matching uses `sans ∪ {commonName}` (Traefik's
+  own SNI matching uses the CN too). **Resolved by research R-1:** a host
+  without a covering API certificate is **not probed** — it is reported
+  immediately as a problem with `reason=not_found` (`source=api`, no
+  certificate). Reason: `/api/certificates` lists every certificate of the
+  default store incl. ACME and file-provider certificates and only omits the
+  generated `TRAEFIK DEFAULT CERT`; an uncovered host is served the default
+  certificate (≈1 year valid), which a hybrid probe would show as healthy.
+  `not_found` does not wait for the failure count (a pending ACME order shows
+  `not_found` until the next cycle or "Refresh now" — note in SUMMARY).
 - **D-04:** Cert cycle cadence stays `DEFAULT_TLS_CERT_COOLDOWN` (6 h) for both
   sources; the "Refresh now" button and `homeassistant.update_entity` keep
   refreshing the cert coordinator (W23).
@@ -141,7 +147,7 @@ restart (see D-16).
 - **D-15:** `certificate_expiring` (per host, PROBLEM, enabled by default):
   **on** with `reason` = `expired` (days < 0), `probe_failed` (≥
   `CERT_FAILURES_FOR_PROBLEM = 2` consecutive failed probes),
-  `not_found` (only if D-03/R-1 chooses that), or `expiring` (days ≤
+  `not_found` (API mode, D-03), or `expiring` (days ≤
   threshold); precedence in that order. **off** with `reason: None`. Unknown
   (`None`) only while there is no certificate yet and fewer than 2 failures.
   Cert entities are **available** whenever the last cert cycle succeeded and
@@ -185,6 +191,24 @@ restart (see D-16).
   visible changes") for the Phase 8 CHANGELOG: `last_error` values (`ssl` now
   reachable), problem-on instead of unavailable, live days, `verified` /
   `source` / `reason` attributes, new aggregate.
+
+- **D-23:** (from research pitfall 8) `__init__.py` no longer converts a failed
+  cert first refresh into a fake success (`async_set_updated_data({})`): a
+  failed first cert cycle stays a failed cycle (cert entities unavailable,
+  consistent with D-02) and must not mark registry-restored hosts `missing`.
+  Setup still never raises `ConfigEntryNotReady` because of certificates.
+  Retry cadence after a failed cycle is Claude's discretion (normal interval
+  or a shorter retry), stated in the plan.
+- **D-24:** (research R-3) `verified` in probe mode = offline verification
+  with `cryptography.x509.verification`: `PolicyBuilder().store(store)
+  .time(dt_util.utcnow()).build_server_verifier(x509.DNSName(sni))
+  .verify(leaf, intermediates)` on the DER chain from
+  `ssl_object.get_unverified_chain()`; any `VerificationError` → `False`.
+  Trust anchors from `homeassistant.util.ssl.client_context()
+  .get_ca_certs(binary_form=True)` (memory only, pre-built by HA), loaded
+  once with the serial-0 `CryptographyDeprecationWarning` suppressed and
+  `ValueError` roots skipped; test seam `trust_store: Store | None`. An IP
+  literal SNI host → `verified=False` unless research notes say otherwise.
 
 ### Claude's Discretion
 - Internal shape of the per-host state (dataclass names), where the shared
