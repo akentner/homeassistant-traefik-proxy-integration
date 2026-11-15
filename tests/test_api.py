@@ -17,6 +17,7 @@ import ast
 import asyncio
 import base64
 import logging
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -24,12 +25,21 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.test_util.aiohttp import AiohttpClientMockResponse
 
 from custom_components.traefik_proxy import api
 from custom_components.traefik_proxy.api import TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
 from custom_components.traefik_proxy.models import parse_certificates, parse_entrypoints, parse_rawdata, parse_version
-from tests.conftest import MOCK_URL, load_fixture, stub_traefik_paginated
+from tests.conftest import (
+    CERT_FIXTURE_NOW,
+    MOCK_URL,
+    STUB_CERT_VALIDITY,
+    frozen_v37_certificates,
+    load_fixture,
+    stub_traefik,
+    stub_traefik_paginated,
+)
 
 API_PATH = Path(__file__).parent.parent / "custom_components" / "traefik_proxy" / "api.py"
 VERSION_PATH = "/api/version"
@@ -654,6 +664,159 @@ async def test_certificates_capture_flows_through_the_client(hass, aioclient_moc
     url = aioclient_mock.mock_calls[0][1]
     assert url.path == CERTIFICATES_PATH
     assert dict(url.query) == {"per_page": "7", "page": "1"}
+
+
+def _certificate_item(common_name: str) -> dict[str, Any]:
+    return {
+        "commonName": common_name,
+        "sans": [common_name],
+        "notAfter": "2030-01-02T03:04:05Z",
+        "notBefore": "2029-10-04T03:04:05Z",
+        "serialNumber": "1",
+        "status": "enabled",
+    }
+
+
+@pytest.mark.parametrize("mode", ["basic", "bearer"])
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [
+        (404, api.TraefikProxyNotFoundError),
+        (401, api.TraefikProxyAuthError),
+        (403, api.TraefikProxyAuthError),
+        (500, TraefikProxyApiError),
+    ],
+)
+async def test_certificates_status_maps_to_taxonomy(
+    hass, aioclient_mock, mode: str, status: int, error: type[Exception]
+) -> None:
+    """Non-2xx answers map to the existing taxonomy; the text names only path and status."""
+    aioclient_mock.get(f"{MOCK_URL}{CERTIFICATES_PATH}", status=status)
+
+    with pytest.raises(TraefikProxyApiError) as err:
+        await _client(hass, _auth(mode)).async_get_certificates()
+
+    assert type(err.value) is error
+    assert err.value.status == status
+    assert str(err.value) == f"{CERTIFICATES_PATH}: HTTP {status}"
+    assert MOCK_URL not in str(err.value)
+    for secret in _secret_forms():
+        assert secret not in str(err.value)
+
+
+@pytest.mark.parametrize("mode", ["basic", "bearer"])
+async def test_certificates_connection_error(hass, aioclient_mock, mode: str) -> None:
+    """A connection failure names only the path and the exception type."""
+    aioclient_mock.get(f"{MOCK_URL}{CERTIFICATES_PATH}", exc=aiohttp.ClientConnectionError())
+
+    with pytest.raises(api.TraefikProxyConnectionError) as err:
+        await _client(hass, _auth(mode)).async_get_certificates()
+
+    assert str(err.value) == f"{CERTIFICATES_PATH}: ClientConnectionError"
+    assert MOCK_URL not in str(err.value)
+    for secret in _secret_forms():
+        assert secret not in str(err.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param({"0": _certificate_item("a.example.com")}, id="dict-payload"),
+        pytest.param(["x"], id="string-item"),
+        pytest.param([{**_certificate_item("a.example.com"), "notAfter": None}], id="notAfter-null"),
+        pytest.param([{k: v for k, v in _certificate_item("a").items() if k != "notAfter"}], id="notAfter-missing"),
+        pytest.param([{**_certificate_item("a.example.com"), "notAfter": 123}], id="notAfter-int"),
+        pytest.param([{**_certificate_item("a.example.com"), "notAfter": "not-a-date"}], id="notAfter-unparsable"),
+        pytest.param([{**_certificate_item("a.example.com"), "notAfter": "2027-02-12T00:17:40"}], id="notAfter-naive"),
+        pytest.param([{k: v for k, v in _certificate_item("a").items() if k != "notBefore"}], id="notBefore-missing"),
+        pytest.param([{**_certificate_item("a.example.com"), "notBefore": 123}], id="notBefore-int"),
+        pytest.param([{**_certificate_item("a.example.com"), "notBefore": "x"}], id="notBefore-unparsable"),
+        pytest.param(
+            [{**_certificate_item("a.example.com"), "notBefore": "2026-11-13T00:17:40"}], id="notBefore-naive"
+        ),
+    ],
+)
+async def test_certificates_payload_errors(hass, aioclient_mock, payload: object) -> None:
+    """Every shape violation is a payload error; no certificate with a guessed expiry is returned."""
+    aioclient_mock.get(f"{MOCK_URL}{CERTIFICATES_PATH}", json=payload)
+
+    with pytest.raises(api.TraefikProxyPayloadError) as err:
+        await _client(hass).async_get_certificates()
+
+    assert str(err.value) == f"{CERTIFICATES_PATH}: unexpected payload shape"
+
+
+async def test_certificates_pagination_follows_x_next_page(hass, aioclient_mock) -> None:
+    """Two pages of one certificate each yield two certificates in page order, in two requests."""
+    for page, common_name in ((1, "a.example.com"), (2, "b.example.com")):
+        aioclient_mock.get(
+            f"{MOCK_URL}{CERTIFICATES_PATH}",
+            params={"per_page": 1, "page": page},
+            json=[_certificate_item(common_name)],
+            headers={"X-Next-Page": "2"},
+        )
+
+    certificates = await _client(hass, page_size=1).async_get_certificates()
+
+    assert [certificate.common_name for certificate in certificates] == ["a.example.com", "b.example.com"]
+    assert len(aioclient_mock.mock_calls) == 2
+
+
+STUB_NOW = datetime(2027, 2, 13, 12, 0, tzinfo=UTC)
+
+
+async def test_certificates_stub_v37_is_rebased_on_the_clock(hass, aioclient_mock, freezer) -> None:
+    """The default v3.7 stub serves the capture with dates relative to the clock at registration."""
+    freezer.move_to(STUB_NOW)
+    stub_traefik(aioclient_mock, version="v3.7")
+    capture = load_fixture("v3.7", "certificates.json")[0]
+
+    (certificate,) = await _client(hass).async_get_certificates()
+
+    now = dt_util.utcnow().replace(microsecond=0)
+    assert certificate.common_name == capture["commonName"]
+    assert certificate.sans == tuple(capture["sans"])
+    assert certificate.status == capture["status"]
+    assert certificate.not_before == now - timedelta(days=1)
+    assert certificate.not_after == now + STUB_CERT_VALIDITY
+
+
+async def test_certificates_stub_paginated_v37_is_rebased_on_the_clock(hass, aioclient_mock, freezer) -> None:
+    """The paginated stub serves the same re-based certificates."""
+    freezer.move_to(STUB_NOW)
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+
+    (certificate,) = await _client(hass).async_get_certificates()
+
+    assert certificate.not_after == STUB_NOW + STUB_CERT_VALIDITY
+
+
+@pytest.mark.parametrize("stub", [stub_traefik, stub_traefik_paginated])
+async def test_certificates_stub_v211_answers_404(hass, aioclient_mock, freezer, stub: Any) -> None:
+    """A capture without certificates.json (Traefik < 3.7) answers 404."""
+    freezer.move_to(STUB_NOW)
+    stub(aioclient_mock, version="v2.11")
+
+    with pytest.raises(api.TraefikProxyNotFoundError):
+        await _client(hass).async_get_certificates()
+
+
+async def test_certificates_stub_argument_replaces_payload(hass, aioclient_mock, freezer) -> None:
+    """An explicit certificates= payload replaces the capture."""
+    freezer.move_to(STUB_NOW)
+    stub_traefik(aioclient_mock, version="v3.7", certificates=[])
+
+    assert await _client(hass).async_get_certificates() == ()
+
+
+def test_certificates_frozen_v37_helper_returns_the_capture_under_frozen_time(freezer) -> None:
+    """The helper moves the clock to CERT_FIXTURE_NOW and returns the unmodified capture."""
+    certificates = frozen_v37_certificates(freezer)
+
+    assert dt_util.utcnow() == CERT_FIXTURE_NOW
+    assert certificates == load_fixture("v3.7", "certificates.json")
+    assert certificates[0]["notAfter"] == "2027-02-12T00:17:40Z"
+    assert (parse_certificates(certificates)[0].not_after - CERT_FIXTURE_NOW).days == 88
 
 
 def test_api_module_contains_no_assert_statements() -> None:

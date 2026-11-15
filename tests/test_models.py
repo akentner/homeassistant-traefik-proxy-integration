@@ -780,3 +780,64 @@ def test_certificate_offset_timestamp_is_converted_to_utc() -> None:
     assert certificate.not_after.tzinfo is UTC
     assert certificate.not_before == datetime(2029, 10, 4, 3, 4, 5, tzinfo=UTC)
     assert certificate.not_before.tzinfo is UTC
+
+
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        pytest.param({"0": _certificate_item()}, TypeError, id="dict-payload"),
+        pytest.param(["x"], TypeError, id="string-item"),
+        pytest.param([_certificate_item(notAfter=None)], KeyError, id="notAfter-missing"),
+        pytest.param([_certificate_item(notAfter=123)], TypeError, id="notAfter-int"),
+        pytest.param([_certificate_item(notAfter="not-a-date")], ValueError, id="notAfter-unparsable"),
+        pytest.param([_certificate_item(notAfter="2027-02-12T00:17:40")], ValueError, id="notAfter-naive"),
+        pytest.param([_certificate_item(notBefore=None)], KeyError, id="notBefore-missing"),
+        pytest.param([_certificate_item(notBefore=123)], TypeError, id="notBefore-int"),
+        pytest.param([_certificate_item(notBefore="not-a-date")], ValueError, id="notBefore-unparsable"),
+        pytest.param([_certificate_item(notBefore="2026-11-13T00:17:40")], ValueError, id="notBefore-naive"),
+    ],
+)
+def test_parse_certificates_shape_errors(payload: object, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        parse_certificates(payload)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "field", "expected"),
+    [
+        pytest.param({"issuerCN": None}, "issuer_cn", None, id="issuerCN-missing"),
+        pytest.param({"issuerCN": ""}, "issuer_cn", None, id="issuerCN-empty"),
+        pytest.param({"commonName": None}, "common_name", "", id="commonName-missing"),
+        pytest.param({"commonName": ""}, "common_name", "", id="commonName-empty"),
+        pytest.param({"sans": [1, "a.example.com", None]}, "sans", ("a.example.com",), id="sans-non-strings"),
+        pytest.param({"sans": "x"}, "sans", (), id="sans-not-a-list"),
+        pytest.param({"sans": None}, "sans", (), id="sans-missing"),
+        pytest.param({"status": None}, "status", None, id="status-missing"),
+        pytest.param({"serialNumber": None}, "serial_number", "", id="serialNumber-missing"),
+    ],
+)
+def test_certificate_optional_fields(overrides: dict[str, Any], field: str, expected: object) -> None:
+    (certificate,) = parse_certificates([_certificate_item(**overrides)])
+
+    assert getattr(certificate, field) == expected
+
+
+def test_certificates_are_not_deduplicated_and_keep_payload_order() -> None:
+    zeroed = "0" * 64
+    first = _certificate_item(name=zeroed, commonName="b.example.com")
+    second = _certificate_item(name=zeroed, commonName="a.example.com")
+
+    parsed = parse_certificates([first, second])
+
+    assert [certificate.common_name for certificate in parsed] == ["b.example.com", "a.example.com"]
+
+
+def test_parse_certificates_empty() -> None:
+    assert parse_certificates([]) == ()
+
+
+def test_certificate_is_frozen() -> None:
+    (certificate,) = parse_certificates([_certificate_item()])
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        certificate.common_name = "x"  # type: ignore[misc]
