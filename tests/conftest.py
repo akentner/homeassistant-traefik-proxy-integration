@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import AsyncIterator, Iterable, Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -20,6 +21,7 @@ import pytest_asyncio
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 # Ensure custom_components is importable from the project root
@@ -53,6 +55,13 @@ MOCK_URL = "https://traefik.example.com:8080"
 # Real Traefik captures (tests/traefik/capture.py), one directory per generation.
 FIXTURE_VERSIONS = ("v2.11", "v3.7")
 
+# 88 days before the notAfter (2027-02-12T00:17:40Z) of the v3.7 certificates capture.
+CERT_FIXTURE_NOW = datetime(2026, 11, 15, 12, 0, tzinfo=UTC)
+# Validity of the certificates the default stubs serve, counted from the clock.
+STUB_CERT_VALIDITY = timedelta(days=3650)
+
+_CERT_TIMESTAMP_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
 
 def load_fixture(version: str, name: str) -> Any:
     """Return the parsed JSON of a captured fixture file."""
@@ -73,6 +82,43 @@ def load_paginated(version: str, kind: str) -> tuple[list[Any], list[str | None]
         items.extend(load_fixture(version, f"pages/{page['file']}"))
         next_pages.append(page.get("x_next_page"))
     return items, next_pages
+
+
+def _rebased_certificates(version: str) -> list[dict[str, Any]] | None:
+    """Return a copy of the capture's certificates with dates relative to the clock.
+
+    ``notBefore`` becomes now - 1 day and ``notAfter`` now + ``STUB_CERT_VALIDITY``;
+    every other field is unchanged. None when the capture has no
+    certificates.json (Traefik < 3.7).
+    """
+    if not (FIXTURES_DIR / version / "certificates.json").exists():
+        return None
+    now = dt_util.utcnow()
+    certificates: list[dict[str, Any]] = copy.deepcopy(load_fixture(version, "certificates.json"))
+    for certificate in certificates:
+        certificate["notBefore"] = (now - timedelta(days=1)).strftime(_CERT_TIMESTAMP_FORMAT)
+        certificate["notAfter"] = (now + STUB_CERT_VALIDITY).strftime(_CERT_TIMESTAMP_FORMAT)
+    return certificates
+
+
+def _stub_certificates(aioclient_mock: Any, base_url: str, version: str, certificates: Any) -> None:
+    """Serve ``/api/certificates``: ``certificates`` when given, else the re-based capture, else 404."""
+    payload = certificates if certificates is not None else _rebased_certificates(version)
+    if payload is None:
+        aioclient_mock.get(f"{base_url}/api/certificates", status=404)
+    else:
+        aioclient_mock.get(f"{base_url}/api/certificates", json=payload)
+
+
+def frozen_v37_certificates(freezer: Any) -> list[dict[str, Any]]:
+    """Move the clock to ``CERT_FIXTURE_NOW`` and return the unmodified v3.7 certificates capture.
+
+    The only way an integration test gets the capture's fixed dates: the
+    default stubs serve them re-based on the clock.
+    """
+    freezer.move_to(CERT_FIXTURE_NOW)
+    certificates: list[dict[str, Any]] = load_fixture("v3.7", "certificates.json")
+    return certificates
 
 
 def make_snapshot(
@@ -116,13 +162,17 @@ def stub_traefik(
     rawdata: Any = None,
     version_payload: Any = None,
     entrypoints: Any = None,
+    certificates: Any = None,
 ) -> None:
-    """Serve a Traefik through ``/api/version``, ``/api/entrypoints`` and ``/api/rawdata``.
+    """Serve a Traefik through ``/api/version``, ``/api/entrypoints``, ``/api/rawdata`` and ``/api/certificates``.
 
     Each payload defaults to the capture of ``version``; an explicit value
-    replaces it (``rawdata={}`` is an empty Traefik). The first matching
-    mock wins, so a test overrides an endpoint by registering its own mock
-    before calling this helper.
+    replaces it (``rawdata={}`` is an empty Traefik). ``/api/certificates``
+    serves the capture's certificates re-based on the clock at registration
+    time (see ``_rebased_certificates``), so no default setup depends on the
+    wall clock; a capture without certificates.json (v2.11) answers 404.
+    The first matching mock wins, so a test overrides an endpoint by
+    registering its own mock before calling this helper.
     """
     payloads = {
         "version": version_payload if version_payload is not None else load_fixture(version, "version.json"),
@@ -131,6 +181,7 @@ def stub_traefik(
     }
     for name, payload in payloads.items():
         aioclient_mock.get(f"{base_url}/api/{name}", json=payload)
+    _stub_certificates(aioclient_mock, base_url, version, certificates)
 
 
 def stub_traefik_paginated(aioclient_mock: Any, *, version: str = "v3.7", base_url: str = MOCK_URL) -> None:
@@ -140,11 +191,13 @@ def stub_traefik_paginated(aioclient_mock: Any, *, version: str = "v3.7", base_u
     paginated fallback. Every list page is registered with its recorded
     ``per_page``/``page`` query and ``X-Next-Page`` header, so the client's
     page size must equal the index ``per_page`` (tests monkeypatch
-    ``api.DEFAULT_PAGE_SIZE``).
+    ``api.DEFAULT_PAGE_SIZE``). ``/api/certificates`` (one page, registered
+    without query) serves the re-based capture or 404, as in ``stub_traefik``.
     """
     aioclient_mock.get(f"{base_url}/api/rawdata", status=404)
     aioclient_mock.get(f"{base_url}/api/version", json=load_fixture(version, "version.json"))
     aioclient_mock.get(f"{base_url}/api/entrypoints", json=load_fixture(version, "entrypoints.json"))
+    _stub_certificates(aioclient_mock, base_url, version, None)
     index = load_fixture(version, "pages/index.json")
     per_page = index["per_page"]
     for kind in ("routers", "services", "middlewares"):
