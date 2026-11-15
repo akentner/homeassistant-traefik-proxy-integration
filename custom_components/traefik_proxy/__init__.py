@@ -149,6 +149,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 hass,
                 DOMAIN,
                 _issue_id(entry.entry_id),
+                config_entry_id=entry.entry_id,
                 is_fixable=False,
                 is_persistent=True,
                 severity=ir.IssueSeverity.WARNING,
@@ -205,8 +206,8 @@ async def _async_options_updated(hass: HomeAssistant, entry: TraefikProxyConfigE
         )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
-    """Set up Traefik from a config entry.
+async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
+    """Set up Traefik from a config entry; a failure raises, success returns None.
 
     Order matters:
 
@@ -283,24 +284,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         entry.entry_id,
         coordinator.update_interval.total_seconds() if coordinator.update_interval else 0.0,
     )
-    return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
     """Unload a Traefik config entry.
 
-    Unloads the platforms. Home Assistant then runs every callback the setup
-    registered through ``entry.async_on_unload`` (the update listener remover,
-    timers and coordinator listeners).
+    Unloads the platforms; a platform that fails to unload raises Home
+    Assistant's translated unload error. Home Assistant then runs every
+    callback the setup registered through ``entry.async_on_unload`` (the
+    update listener remover, timers and coordinator listeners).
     """
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
-    """Delete the data the entry keeps outside the registries.
+    """Delete the data the entry keeps outside the registries: its missing-since Store.
 
-    That is its missing-since Store and its migration repair issue, which
-    unload keeps (M34).
+    The migration repair issue is bound to the entry, so Home Assistant deletes
+    it when the entry is removed (unload keeps it).
     """
-    ir.async_delete_issue(hass, DOMAIN, _issue_id(entry.entry_id))
     await async_remove_missing_store(hass, entry.entry_id)

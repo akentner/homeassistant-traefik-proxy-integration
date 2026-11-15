@@ -265,6 +265,9 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         # False until the default store was built; the built store may be None.
         self._trust_store_ready = trust_store is not None
         self._unsub_day_boundary: CALLBACK_TYPE | None = None
+        # Set first in async_shutdown: a cycle that completes after shutdown
+        # started must not arm a new day-boundary timer.
+        self._stopping = False
         self._normal_interval = timedelta(seconds=update_interval_seconds)
         self._retry_interval = timedelta(seconds=CERT_RETRY_INTERVAL)
 
@@ -468,7 +471,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         if self._unsub_day_boundary is not None:
             self._unsub_day_boundary()
             self._unsub_day_boundary = None
-        if self._shutdown_requested:
+        if self._stopping:
             return
         now = dt_util.utcnow()
         changes = [when for state in states.values() if (when := state.next_day_change(now)) is not None]
@@ -485,7 +488,8 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         self._async_schedule_day_boundary(self.data or {})
 
     async def async_shutdown(self) -> None:
-        """Cancel the day-boundary timer, then shut the coordinator down."""
+        """Stop arming timers, cancel the day-boundary timer, then shut the coordinator down."""
+        self._stopping = True
         if self._unsub_day_boundary is not None:
             self._unsub_day_boundary()
             self._unsub_day_boundary = None
