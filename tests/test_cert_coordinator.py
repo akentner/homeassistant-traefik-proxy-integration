@@ -20,6 +20,7 @@ test stays hermetic — the real TLS handshake surface is exercised by
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -30,6 +31,7 @@ from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
 from custom_components.traefik_proxy.const import (
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
+    MAX_CERT_HOSTS,
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
@@ -587,3 +589,95 @@ async def test_full_setup_registers_cert_entities_for_alt_host(
     assert "alt.example.com" in probed
     entity_id_for(hass, CERT_EXPIRY.domain, CERT_EXPIRY.unique_id(entry.entry_id, "alt.example.com"))
     entity_id_for(hass, CERT_EXPIRING.domain, CERT_EXPIRING.unique_id(entry.entry_id, "alt.example.com"))
+
+
+# ---------------------------------------------------------------------------
+# Host limit (MAX_CERT_HOSTS)
+# ---------------------------------------------------------------------------
+
+_CERT_LOGGER = "custom_components.traefik_proxy.cert_coordinator"
+
+
+def _entry_with_hosts(count: int) -> MagicMock:
+    """Entry whose snapshot has ``count`` TLS routers, one distinct host each."""
+    entry = _make_entry()
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[{"name": f"r{i:03d}", "tls": {}, "rule": f"Host(`h{i:03d}.example.com`)"} for i in range(count)],
+    )
+    return entry
+
+
+def _cap_warnings(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == _CERT_LOGGER and r.levelno >= logging.WARNING]
+
+
+def test_max_cert_hosts_is_200() -> None:
+    """The host limit is a fixed constant of 200."""
+    assert MAX_CERT_HOSTS == 200
+
+
+@pytest.mark.parametrize("count", [199, 200])
+def test_collect_hosts_cap_not_reached(count: int, caplog: pytest.LogCaptureFixture) -> None:
+    """Up to the limit every host is kept and nothing is logged."""
+    caplog.set_level(logging.WARNING, logger=_CERT_LOGGER)
+    c = CertCoordinator(MagicMock(), _entry_with_hosts(count))
+    hosts = c._collect_hosts()
+    assert len(hosts) == count
+    assert hosts == tuple(sorted(hosts))
+    assert _cap_warnings(caplog) == []
+
+
+def test_collect_hosts_cap_201_drops_last_sorted(caplog: pytest.LogCaptureFixture) -> None:
+    """201 hosts keep the first 200 in sorted order and log one WARNING naming 1 dropped host."""
+    caplog.set_level(logging.WARNING, logger=_CERT_LOGGER)
+    c = CertCoordinator(MagicMock(), _entry_with_hosts(201))
+    hosts = c._collect_hosts()
+    assert len(hosts) == 200
+    assert hosts[0] == "h000.example.com"
+    assert hosts[-1] == "h199.example.com"
+    assert "h200.example.com" not in hosts
+    warnings = _cap_warnings(caplog)
+    assert len(warnings) == 1
+    assert warnings[0].args == (200, 1)
+
+
+async def test_cert_cycle_cap_250_probes_200(caplog: pytest.LogCaptureFixture) -> None:
+    """250 hosts lead to exactly 200 probes and one WARNING naming 50, without host names."""
+    caplog.set_level(logging.DEBUG, logger=_CERT_LOGGER)
+    c = CertCoordinator(MagicMock(), _entry_with_hosts(250))
+
+    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertError:
+        return _cert_error(host=host)
+
+    probe = AsyncMock(side_effect=fake_probe)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async", probe)
+        data = await c._async_update_data()
+
+    assert probe.call_count == 200
+    assert len(data) == 200
+    warnings = _cap_warnings(caplog)
+    assert len(warnings) == 1
+    assert warnings[0].args == (200, 50)
+    assert "50" in warnings[0].getMessage()
+    for record in caplog.records:
+        assert ".example.com" not in record.getMessage()
+
+
+async def test_cert_cycle_cap_warns_once_per_cycle(caplog: pytest.LogCaptureFixture) -> None:
+    """Two cycles over 250 hosts log exactly two WARNINGs."""
+    caplog.set_level(logging.WARNING, logger=_CERT_LOGGER)
+    c = CertCoordinator(MagicMock(), _entry_with_hosts(250))
+
+    async def fake_probe(host: str, port: int = 443, **_kwargs: object) -> CertError:
+        return _cert_error(host=host)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "custom_components.traefik_proxy.cert_coordinator.fetch_cert_info_async",
+            AsyncMock(side_effect=fake_probe),
+        )
+        await c._async_update_data()
+        await c._async_update_data()
+
+    assert len(_cap_warnings(caplog)) == 2
