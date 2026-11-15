@@ -58,9 +58,10 @@ ISSUE_INSECURE_CREDENTIALS: Final = "insecure_credentials"
 _LEGACY_RELOAD_BUTTON_SUFFIX: Final = "diagnostics_reload"
 # Maps the disabled_by of a removed 0.3.0 router binary sensor to the one its
 # router sensor replacement is created with.
-# - DEVICE becomes USER: the user disabled the old "HTTP Routers" device, which
-#   is removed after setup, and Home Assistant clears a DEVICE disabler on the
-#   next update of the enabled Routers sub-device.
+# - DEVICE becomes USER, but only while the old "HTTP Routers" device is
+#   actually disabled: that device is removed after setup, and Home Assistant
+#   clears a DEVICE disabler on the enabled Routers sub-device. A DEVICE
+#   disabler on an enabled legacy device is stale and is not carried over.
 # - INTEGRATION could only come from the entry's "disable new entities"
 #   preference and is kept as it is.
 # Enabled and CONFIG_ENTRY-disabled router binary sensors get no entry here:
@@ -74,6 +75,22 @@ _ROUTER_REPLACEMENT_DISABLED_BY: Final[dict[er.RegistryEntryDisabler, er.Registr
 
 def _issue_id(entry_id: str) -> str:
     return f"{ISSUE_ENTITIES_MIGRATED}_{entry_id}"
+
+
+@callback
+def _async_raise_migrated_issue(hass: HomeAssistant, entry: TraefikProxyConfigEntry, removed_count: str) -> None:
+    """Create or update the entry's persistent ``entities_migrated`` issue with its current title."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _issue_id(entry.entry_id),
+        config_entry_id=entry.entry_id,
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_ENTITIES_MIGRATED,
+        translation_placeholders={"entry_title": entry.title, "removed_count": removed_count},
+    )
 
 
 def _insecure_issue_id(entry_id: str) -> str:
@@ -182,16 +199,19 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     sensor with the same unique_id and the old object id (user- and
     device-disabled ones as user-disabled). A hidden router binary sensor is
     replaced the same way, and its replacement keeps the hidden state. Every
-    other entity of this entry that was disabled through one of its 0.3.0
-    devices becomes user-disabled. User-disabled entities stay disabled; no
-    surviving entity is renamed or re-IDed. A persistent repair issue explains
-    the change when anything was removed.
+    other entity of this entry that was disabled through one of its disabled
+    0.3.0 devices becomes user-disabled; a DEVICE disabler on an enabled
+    legacy device is stale and left to Home Assistant. User-disabled entities
+    stay disabled; no surviving entity is renamed or re-IDed. A persistent
+    repair issue explains the change when anything was removed; it is raised
+    after the last step, so it names the entry's final title.
 
     1.2 -> 1.3: the entry data names its auth type (none, basic or bearer)
     and carries only the credentials of that type; the unique_id becomes
     ``host:port`` unless another entry owns it, and the default title becomes
-    the host (a user-chosen title stays). Entity and device unique_ids are
-    entry_id-based and unchanged. The 1.1 -> 1.2 step runs first, so a 1.1
+    the host (a user-chosen title stays). An existing repair issue follows a
+    title change. Entity and device unique_ids are entry_id-based and
+    unchanged. The 1.1 -> 1.2 step runs first, so a 1.1
     entry reaches 1.3 in one setup. An entry from a newer major version fails
     (downgrade).
     """
@@ -204,25 +224,30 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
         )
         return False
 
+    removed = 0
     if entry.minor_version < 2:
         registry = er.async_get(hass)
+        # A DEVICE disabler only means "disabled through a device" while that
+        # device is disabled; on an enabled device it is stale.
+        disabled_legacy_device_ids = {device.id for device in async_legacy_devices(hass, entry) if device.disabled}
         router_prefix = f"{entry.entry_id}_{ROUTERS.prefix}"
         reload_unique_id = f"{entry.entry_id}_{_LEGACY_RELOAD_BUTTON_SUFFIX}"
         aggregate_unique_ids = {
             f"{entry.entry_id}_{suffix}"
             for suffix in (UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM, UID_MIDDLEWARES_PROBLEM)
         }
-        removed = 0
         # (unique_id, disabled_by, hidden_by, object_id) of each disabled or
         # hidden router to re-create
         replacements: list[tuple[str, er.RegistryEntryDisabler | None, er.RegistryEntryHider | None, str]] = []
         for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
             if reg_entry.domain == "binary_sensor" and reg_entry.unique_id.startswith(router_prefix):
-                mapped = (
-                    _ROUTER_REPLACEMENT_DISABLED_BY.get(reg_entry.disabled_by)
-                    if reg_entry.disabled_by is not None
-                    else None
-                )
+                old_disabled_by = reg_entry.disabled_by
+                if (
+                    old_disabled_by is er.RegistryEntryDisabler.DEVICE
+                    and reg_entry.device_id not in disabled_legacy_device_ids
+                ):
+                    old_disabled_by = None
+                mapped = _ROUTER_REPLACEMENT_DISABLED_BY.get(old_disabled_by) if old_disabled_by is not None else None
                 if mapped is not None or reg_entry.hidden_by is not None:
                     replacements.append(
                         (reg_entry.unique_id, mapped, reg_entry.hidden_by, split_entity_id(reg_entry.entity_id)[1])
@@ -238,12 +263,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 and reg_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
             ):
                 registry.async_update_entity(reg_entry.entity_id, disabled_by=None)
-        # An entity disabled through a 0.3.0 device moves to an enabled new
-        # device, and Home Assistant clears a DEVICE disabler on the next
-        # update of that device. Read again so removed entries are skipped.
-        legacy_device_ids = {device.id for device in async_legacy_devices(hass, entry)}
+        # An entity disabled through a disabled 0.3.0 device moves to an
+        # enabled new device, and Home Assistant clears a DEVICE disabler
+        # there, so it becomes user-disabled. A stale DEVICE disabler on an
+        # enabled legacy device is left for Home Assistant to clear. Read
+        # again so removed entries are skipped.
         for reg_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
-            if reg_entry.disabled_by is er.RegistryEntryDisabler.DEVICE and reg_entry.device_id in legacy_device_ids:
+            if (
+                reg_entry.disabled_by is er.RegistryEntryDisabler.DEVICE
+                and reg_entry.device_id in disabled_legacy_device_ids
+            ):
                 registry.async_update_entity(reg_entry.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
         # Only the disabled and hidden state and the object id carry over; the
         # platform attaches the replacement to its device when it adds the router.
@@ -258,18 +287,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 suggested_object_id=object_id,
             )
         hass.config_entries.async_update_entry(entry, minor_version=2)
-        if removed:
-            ir.async_create_issue(
-                hass,
-                DOMAIN,
-                _issue_id(entry.entry_id),
-                config_entry_id=entry.entry_id,
-                is_fixable=False,
-                is_persistent=True,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key=ISSUE_ENTITIES_MIGRATED,
-                translation_placeholders={"entry_title": entry.title, "removed_count": str(removed)},
-            )
         _LOGGER.debug(
             "Migrated Traefik entry %s to 1.2: %d entities removed, %d disabled or hidden routers re-created",
             entry.entry_id,
@@ -292,14 +309,21 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
             )
         url = str(new_data.get(CONF_URL, ""))
         new_unique_id = _migrated_unique_id(hass, entry, url) or entry.unique_id
-        title = entry.title
+        old_title = title = entry.title
         if title == DEFAULT_NAME:
             title = url_host(url) or title
         hass.config_entries.async_update_entry(
             entry, data=new_data, minor_version=3, unique_id=new_unique_id, title=title
         )
+        if title != old_title and not removed:
+            # An issue raised by an earlier 1.2 step still names the old title.
+            issue = ir.async_get(hass).async_get_issue(DOMAIN, _issue_id(entry.entry_id))
+            if issue is not None and issue.translation_placeholders:
+                _async_raise_migrated_issue(hass, entry, issue.translation_placeholders.get("removed_count", "0"))
         _LOGGER.debug("Migrated Traefik entry %s to 1.3: auth type %s", entry.entry_id, new_data[CONF_AUTH_TYPE])
 
+    if removed:
+        _async_raise_migrated_issue(hass, entry, str(removed))
     return True
 
 

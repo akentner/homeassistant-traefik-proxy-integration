@@ -223,7 +223,7 @@
   "issues": {
     "entities_migrated": {
       "title": "Traefik entities were replaced",
-      "description": "The Traefik integration \"{entry_title}\" was updated. Router binary sensors were replaced by router sensors with new entity IDs (states: enabled, warning, error, disabled, missing). The reload button and the reload service were removed because Traefik has no reload API; use the \"Refresh now\" button instead. {removed_count} old entities were removed. Update automations, scripts and dashboards that used them, then dismiss this notice."
+      "description": "The Traefik integration \"{entry_title}\" was updated. Router binary sensors were replaced by router sensors (states: enabled, warning, error, disabled, missing). Enabled, visible router sensors got new entity IDs; disabled or hidden router sensors keep their previous entity ID under the sensor domain (sensor.… instead of binary_sensor.…). The reload button and the reload service were removed because Traefik has no reload API; use the \"Refresh now\" button instead. {removed_count} old entities were removed. Update automations, scripts and dashboards that used them, then dismiss this notice."
     },
     "insecure_credentials": {
       "title": "Traefik credentials are sent unencrypted",
