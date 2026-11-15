@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-11-15T20:34:47.842Z"
+stopped_at: Completed 08-08-PLAN.md (hacs/action run blocked)
+last_updated: "2026-11-15T20:43:03.927Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: df061f4b438b441b7bc109caf87e09bc23ce0522
+state_head: c1297aca52136c0a6c1350e737c99f9b8a999c5b
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 51
+  completed_plans: 52
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -118,6 +118,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P05 | 6min | 2 tasks | 8 files |
 | Phase 08 P06 | 8min | 2 tasks | 25 files |
 | Phase 08 P07 | 5 min | 2 tasks | 5 files |
+| Phase 08 P08 | 7min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -255,6 +256,7 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: fail_under = 99 (measured 99.29 % line coverage on custom_components.traefik_proxy); partial pytest runs need --no-cov
 - [Phase 08]: 08-06: min-HA stack = hashed lock .github/requirements-min-ha.txt (123 pkgs) via make test-min-ha; pre-commit ruff/mypy as uv run local hooks (pre-commit 4.7.0 ephemeral)
 - [Phase 08]: 08-07: release check as tested script (tag via env/argv, one leading v stripped, exit 2 on usage error); every CI run: step = a Makefile command string; all actions SHA-pinned (hassfest pin comment is a branch date, DIST-04)
+- [Phase 08]: 08-08: hacs/action local run recorded as BLOCKED (permission classifier denied passing the gh token into the container); overlay proven on digest sha256:187499a0, hassfest passes
 
 ### Pending Todos
 
@@ -277,6 +279,7 @@ None yet.
   is correct — only the footer is stale. Cosmetic; not a coverage gap.
   Phase 03 closed out TEST-04 — only DIAG-04 + DIST-04/05 + DOCS-02/03/04
   remain pending in Phase 4.
+- 08-08/REL-07: make hacs-action (official hacs/action validators, All 10 checks + negative control) needs the user's GitHub token; agent run denied by the permission classifier. User runs make hacs-action or allows it; 08-13 reruns it.
 
 ### Quick Tasks Completed
 
@@ -299,7 +302,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T20:34:47.587Z
-Stopped at: Completed 08-07-PLAN.md
+Last session: 2026-11-15T20:43:03.703Z
+Stopped at: Completed 08-08-PLAN.md (hacs/action run blocked)
 Resume file: None
 Next: /gsd-plan-phase 6

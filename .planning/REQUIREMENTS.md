@@ -309,7 +309,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Marketplace + release readiness (REL) — Phase 8
 
-- [ ] **REL-01**: `manifest.json` has `categories:
+- [x] **REL-01**: `manifest.json` has `categories:
       ["computers_network.monitoring"]` (sorted keys) and version `1.0.0`;
       `hacs.json` keeps `homeassistant: 2026.11.0`. (research §2)
 - [ ] **REL-02**: Brand icons are re-exported trimmed and centred, `logo.png`
@@ -475,7 +475,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-06 | Phase 7 | Complete |
 | FLOW-07 | Phase 7 | Complete |
 | FLOW-08 | Phase 7 | Complete |
-| REL-01 | Phase 8 | Pending |
+| REL-01 | Phase 8 | Complete |
 | REL-02 | Phase 8 | Pending |
 | REL-03 | Phase 8 | Pending |
 | REL-04 | Phase 8 | Complete |
