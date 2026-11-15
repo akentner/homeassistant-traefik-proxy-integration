@@ -272,7 +272,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       and the `certificates_problem` aggregate (enabled by default) on with a
       `reason`, while the timestamp sensor keeps its last value. (U-09, U-10)
 
-### Config flow, HA 2026.12 compatibility, observability (FLOW) — Phase 7
+### Config flow, HA 2026.11 baseline, observability (FLOW) — Phase 7
 
 - [ ] **FLOW-01**: User, reauth and reconfigure steps offer an auth selector
       (none / basic / bearer) with `PASSWORD` selectors and per-field
@@ -280,8 +280,9 @@ Requirements for initial release. Each maps to a roadmap phase.
       data (token → bearer, empty → none); choosing "none" clears credentials.
       (U-03, U-11, S-03)
 - [ ] **FLOW-02**: No update listener remains; the options flow is an
-      `OptionsFlowWithReload` with `NumberSelector`s (units, box mode) and the
-      per-item-entities toggle. (A-17, S-01, U-12)
+      `OptionsFlowWithReload` with `NumberSelector`s (units, box mode), the
+      per-item-entities toggle and the missing-entity grace period (1–168 h,
+      default 24 h; I7). (A-17, S-01, U-12, W36)
 - [ ] **FLOW-03**: Reauth and reconfigure finish through
       `async_update_reload_and_abort`; the config-entry unique_id is
       `host:port` (migrated) and follows a reconfigure; the title is the host.
@@ -293,11 +294,18 @@ Requirements for initial release. Each maps to a roadmap phase.
       `exceptions` section in the translations. (research §4.2)
 - [ ] **FLOW-06**: A repair issue is raised for an `http://` URL combined with
       credentials and is deleted when resolved or when the entry unloads, using
-      only HA 2026.3 APIs (M4). (research §4.6)
+      the HA 2026.11 issue-registry API with `config_entry_id` (I1 supersedes
+      M4). (research §4.6)
 - [ ] **FLOW-07**: `strings.json`, the YAML step and its strings, and the dead
       code from audit A-18 are removed; `translations/en.json` is the single
       source and `translations/de.json` has full key parity (tested). (A-18,
       U-13, U-14, M7)
+
+- [ ] **FLOW-08**: The minimum Home Assistant is 2026.11.0 (`hacs.json`,
+      test floor, CI job pinned to 2026.11.0); sub-devices link through the
+      2026.11 device API instead of the registry workaround, repairs carry
+      `config_entry_id`, unload uses `async_unload_platforms_or_raise`, and no
+      private HA attribute is read. (I1, research §4.2/§4.6/§5)
 
 ### Marketplace + release readiness (REL) — Phase 8
 
@@ -468,6 +476,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-05 | Phase 7 | Pending |
 | FLOW-06 | Phase 7 | Pending |
 | FLOW-07 | Phase 7 | Pending |
+| FLOW-08 | Phase 7 | Pending |
 | REL-01 | Phase 8 | Pending |
 | REL-02 | Phase 8 | Pending |
 | REL-03 | Phase 8 | Pending |
@@ -478,8 +487,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REL-08 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 86 rows — 77 active (36 complete, 41 pending) + 9 superseded/dropped
-- Mapped to phases: 77 / 77 active
+- v1 requirements: 87 rows — 78 active (36 complete, 42 pending) + 9 superseded/dropped
+- Mapped to phases: 78 / 78 active
 - Unmapped: 0 ✓
 
 ## Audit traceability
@@ -493,7 +502,7 @@ exactly one phase (A-15 is split into its client and flow halves).
 | 4 — Data layer | A-05, A-06, A-10, A-11, A-15 (client: `TraefikProxyNotFoundError` + flow re-wired to it), A-16, P-01, P-02, H-11; research §4.2 `always_update=False`, `_async_setup` | DATA-01..07 |
 | 5 — Entity model + lifecycle | A-01, A-02, A-03, A-04, A-07, A-08, A-09, A-13, A-14, A-20, A-21, P-03, P-04, P-09, U-01, U-02, U-04, U-05, U-06, U-07, U-08, U-15, S-06, S-08; research §4.3 (has-entity-name, icon-translations, entity-category, parallel-updates, dynamic/stale devices, DeviceInfo kwargs only), §5 DeviceInfo dataclass / `DeviceEntry.config_entries` | ENT-01..10 |
 | 6 — Certificates | A-12, P-05, P-06, P-07, P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02 | CERT-01..05 |
-| 7 — Config flow / 2026.12 / observability | A-15 (flow: full error-path test matrix + translated `api_disabled` text), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..07, DIAG-04 |
+| 7 — Config flow / 2026.11 baseline / observability | A-15 (flow: full error-path test matrix + translated `api_disabled` text), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..08, DIAG-04 |
 | 8 — Marketplace + release | A-19, B-01, B-02, B-03, B-04, B-05, B-06, H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-08, H-09, H-10, H-12; research §2 (categories, CI triggers, release, catalog PR text, My-link badge), §3 brand, §4.6 `docs-*` rules + coverage gate, §6 Q1 (tag prefix), Q7 (doc URLs), Q8 (`info.md`) | REL-01..08, DIST-04, DOCS-02, DOCS-04 |
 | Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 2026.11-only APIs, `UNDEFINED`, `ATTR_*` constants — not used / not adopted (M4); §4.1 conditional form fields — would raise min HA | — |
 

@@ -13,7 +13,7 @@ stdlib TLS handshake), and finishes with quality polish, diagnostics redaction,
 and HACS publication. After the 2026-11 marketplace research and code audit,
 the remaining work was re-cut into Phases 4–8: fix the data layer against the
 real Traefik API, rebuild the entity lifecycle, redo certificates, modernise
-the flows for HA 2026.12, then ship 1.0.0 through the Marketplace.
+the flows on an HA 2026.11 baseline (2026.12-safe), then ship 1.0.0 through the Marketplace.
 
 ## Phases
 
@@ -42,8 +42,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Certificates** — `/api/certificates` on Traefik ≥ 3.7, async (completed 2026-11-15)
       threadless probe (CERT_NONE + DER parse) via the Traefik host with SNI,
       `rules.py`, live `days_left`, problem-on instead of unavailable
-- [ ] **Phase 7: Config flow, HA 2026.12 compatibility, observability** — auth
-      selector + entry migration, `OptionsFlowWithReload`, reauth/reconfigure
+- [ ] **Phase 7: Config flow, HA 2026.11 baseline, observability** — auth
+      selector + entry migration, minimum HA 2026.11.0 + 2026.11 APIs, grace-period option, `OptionsFlowWithReload`, reauth/reconfigure
       helpers, `host:port` unique_id, diagnostics, repairs, en/de translations
 - [ ] **Phase 8: Marketplace + release readiness** — manifest categories, brand
       re-export, README/CHANGELOG, CI + tooling fixes, planning-reference sweep,
@@ -57,7 +57,9 @@ the marketplace research and the code audit
 to exactly one phase in REQUIREMENTS.md → "Audit traceability". Cross-phase
 gates for Phases 4–8: `pytest`, `ruff check`, `ruff format --check` and
 `mypy --strict custom_components/traefik_proxy` stay green after every plan,
-and the minimum Home Assistant stays **2026.3.0** (no 2026.11-only APIs).
+and the minimum Home Assistant stays **2026.3.0** (no 2026.11-only APIs) up to
+Phase 6; Phase 7 raises it to **2026.11.0** (user decision I1) and from then on
+the gate runs against HA 2026.11.x.
 
 ## Phase Details
 
@@ -433,18 +435,23 @@ Plans:
 **Cross-cutting constraints:** <!-- gsd:generated -->
 - pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task (D-19)
 
-### Phase 7: Config flow, HA 2026.12 compatibility, observability
+### Phase 7: Config flow, HA 2026.11 baseline, observability
 
 **Goal**: Users can set up, re-authenticate and reconfigure the integration with
 the authentication Traefik deployments actually use (none / basic / bearer),
 options changes reload the entry without any update listener (HA 2026.12-safe),
 errors are translated and actionable, and support data is available as a
-redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
+redacted diagnostics download — fully in English and German, on HA 2026.11.0+
+(raised from 2026.3.0 by user decision I1, using the 2026.11 APIs instead of
+the 2026.3 workarounds).
 **Depends on**: Phase 6
-**Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, DIAG-04
+**Requirements**: FLOW-01, FLOW-02, FLOW-03, FLOW-04, FLOW-05, FLOW-06, FLOW-07, FLOW-08, DIAG-04
 **Audit items**: A-15 flow part, A-17, A-18, A-22, U-03, U-11..U-14, U-16, S-01..S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (§4.4 moot: services removed in Phase 5)
 **Carry-over (Phase 4 review, `04-REVIEW.md`)**: IN-01 (an http-to-https redirect drops the Authorization header and surfaces as `invalid_auth` / reauth instead of a clear "use https" error); IN-04 (a stored token the new `Auth` rejects fails setup instead of starting reauth); IN-08 (a stored entry with credentials in the URL plus a token retries setup forever and only shows "/api/version: ValueError"; the basic-auth selector and migration must move URL userinfo into the credential fields or raise a repair telling the user what to fix); IN-09 (`InvalidUrl(url)` in `config_flow.py` keeps the URL including its userinfo password in the exception args; raise it without the URL). WR-03 (update-listener leak) is already covered by SC2.
 **Carry-over (Phase 4 re-review, `04-REVIEW.md` @ 9ef58b3, M33)**: IN-10 (`_check_url_shape` lets `urlparse`'s `ValueError` escape: `http://[::1` aborts the user step with "Unknown error" and a traceback, and the reconfigure step hits it even earlier through `urlparse(...).hostname`; wrap the parse in `try/except ValueError: raise InvalidUrl from None` and run the shape check before computing the host in reconfigure).
+**Carry-over (user interview 2026-11-14)**: I1 (minimum HA 2026.11.0: `hacs.json`, `pyproject`/`uv.lock`, CI minimum job 2026.11.x, `ChildDeviceInfo` instead of the `via_device_id` registry workaround W33, repairs with `config_entry_id`, `async_unload_platforms_or_raise`, other 2026.11 APIs where sensible); I7 (missing-entity grace period becomes an option, 1 h – 7 days, default 24 h) together with the per-item field (W36); config entry `MINOR_VERSION` 2 → 3 (W44).
+**Carry-over (Phase 5 review, `05-REVIEW.md`)**: IN-02 (`de.json` lacks config/options/exceptions strings); IN-04 (per-item option has no options-form field).
+**Carry-over (Phase 6 review/verification, `06-REVIEW.md`, STATE)**: IN-01 (`CertCoordinator.get_threshold()` dead); IN-02 (literal `"tls_warn_days"` instead of `CONF_TLS_WARN_DAYS`); the WR-02 fix reads the private `DataUpdateCoordinator._shutdown_requested` — replace it with a public/own mechanism at the 2026.11 bump. Phase 4 deferred item W28 (`invalid_url` text does not mention URL credentials).
 **Success Criteria** (what must be TRUE):
 
   1. The user step offers an auth selector (none / basic username+password /
@@ -457,7 +464,8 @@ redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
      box mode) and the per-item-entities toggle; reauth and reconfigure finish
      via `async_update_reload_and_abort`, and reconfigure to a new host:port
      updates the entry unique_id; no HA `report_usage` warning is logged in
-     tests on HA 2026.10+.
+     tests on HA 2026.11+; the options form also offers the missing-entity grace
+     period (1–168 h, default 24 h), applied after the reload.
   3. Every config-flow error path (`invalid_auth`, `cannot_connect`,
      `api_disabled` on 404, `unknown`, `already_configured`) is covered by tests
      (config_flow.py 100 % line coverage); `ConfigEntryAuthFailed`,
@@ -467,8 +475,13 @@ redacted diagnostics download — fully in English and German, on HA 2026.3.0+.
      snapshot with password, token and username redacted (asserted by a test
      that searches the dump for the secret values); an `http://` URL combined
      with credentials raises a repair issue that disappears when fixed or when
-     the entry is unloaded/removed, using only APIs available in HA 2026.3.0.
-  5. `strings.json`, the YAML import step and its strings, and the dead code
+     the entry is unloaded/removed, using the HA 2026.11 issue-registry API
+     (`config_entry_id`).
+  5. `hacs.json` and the test floor require HA 2026.11.0, CI runs a test job
+     pinned to HA 2026.11.0, sub-devices link via the 2026.11 device API, every
+     repair carries `config_entry_id`, unload uses
+     `async_unload_platforms_or_raise`, and no private HA attribute is read.
+  6. `strings.json`, the YAML import step and its strings, and the dead code
      listed in audit A-18 are removed; `translations/en.json` is the single
      source and `translations/de.json` covers every key in it (key-parity test);
      hassfest translation validation passes. Tests, `ruff`, `mypy --strict` green.
@@ -507,7 +520,8 @@ tag and catalog PR themselves remain the user's action.
      and actually run; `pyproject.toml` coverage points at
      `custom_components.traefik_proxy` with a `fail_under` gate; the Makefile
      matches CI; CI runs on push, PR, nightly `schedule` and
-     `workflow_dispatch`, includes a test job pinned to HA 2026.3.x, pins every
+     `workflow_dispatch`, keeps the test job pinned to HA 2026.11.x added in
+     Phase 7, pins every
      action by tag or SHA, and a release workflow fails when the tag does not
      equal the manifest version; the suite has no `SyntaxWarning` and no real
      multi-second sleeps.
@@ -540,7 +554,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
-| 7. Config flow, HA 2026.12 compatibility, observability | 0/TBD | Not started | - |
+| 7. Config flow, HA 2026.11 baseline, observability | 0/TBD | Not started | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
 **Coverage:**
