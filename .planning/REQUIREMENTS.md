@@ -242,8 +242,9 @@ Requirements for initial release. Each maps to a roadmap phase.
       state icons; every platform sets `PARALLEL_UPDATES`. (U-02)
 - [x] **ENT-09**: Upgrading from 0.3.0 removes the old router/service
       `binary_sensor` and reload-button registry entries in a config-entry
-      migration and shows a non-fixable, persistent repair notice (HA 2026.3
-      API) that the user dismisses and that is deleted when the entry is
+      migration and shows a non-fixable, persistent repair notice (HA 2026.11
+      issue API bound to the entry via `config_entry_id=entry.entry_id`) that
+      the user dismisses and that Home Assistant deletes when the entry is
       removed (amended by M34: not deleted on unload).
 - [x] **ENT-10**: The option "create per-router/per-service entities"
       (default on) is honoured; when off, no per-router or per-service entity
@@ -387,7 +388,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | TCP/UDP router+service entities | PROJECT.md explicitly HTTP-only; TCP uses a different API surface |
 | Integration service actions (reload or otherwise) | The Traefik API is read-only; the "Refresh now" button covers manual refresh (M12). Research §4.4 (action-setup, response data, action exceptions, service translations) is therefore moot |
 | `quality_scale.yaml` / manifest `quality_scale` | hassfest skips it for custom integrations; IQS rules are used as a checklist only (M10) |
-| Probatio migration (`import probatio`) | `voluptuous` is aliased to Probatio since HA 2026.9 with no deprecation; no action needed (research §4.7) |
+| Probatio migration (`import probatio`) | Done in Phase 7: `config_flow.py` imports `probatio as vol` (HA aliases `voluptuous` to Probatio since 2026.9, research §4.7); nothing further planned |
 | Option "probe certificates via DNS" | Probing via the Traefik host with SNI is the only correct path behind CDNs/split DNS (M19); a DNS mode would re-introduce audit T-02 |
 
 ## Traceability
@@ -481,11 +482,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | REL-04 | Phase 8 | Complete |
 | REL-05 | Phase 8 | Complete |
 | REL-06 | Phase 8 | Complete |
-| REL-07 | Phase 8 | Pending |
+| REL-07 | Phase 8 | Pending (first PR CI run, M43) |
 | REL-08 | Phase 8 | Pending |
 
 **Coverage:**
-- v1 requirements: 87 rows — 78 active (36 complete, 42 pending) + 9 superseded/dropped
+- v1 requirements: 87 rows — 78 active (76 complete, 2 pending) + 9 superseded/dropped
 - Mapped to phases: 78 / 78 active
 - Unmapped: 0 ✓
 
@@ -502,8 +503,8 @@ exactly one phase (A-15 is split into its client and flow halves).
 | 6 — Certificates | A-12, P-05, P-06, P-07, P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02 | CERT-01..05 |
 | 7 — Config flow / 2026.11 baseline / observability | A-15 (flow: full error-path test matrix + translated `api_disabled` text), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..08, DIAG-04 |
 | 8 — Marketplace + release | A-19, B-01, B-02, B-03, B-04, B-05, B-06, H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-08, H-09, H-10, H-12; research §2 (categories, CI triggers, release, catalog PR text, My-link badge), §3 brand, §4.6 `docs-*` rules + coverage gate, §6 Q1 (tag prefix), Q7 (doc URLs), Q8 (`info.md`) | REL-01..08, DIST-04, DOCS-02, DOCS-04 |
-| Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 `UNDEFINED`, `ATTR_*` constants — not used (D-09) | — |
+| Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — adopted in Phase 7 (`import probatio as vol`); §5 `UNDEFINED`, `ATTR_*` constants — not used (D-09) | — |
 
 ---
 *Requirements defined: 2026-07-05*
-*Last updated: 2026-11-14 — milestone v1.0 restructured into Phases 4–8 (marketplace research + code audit)*
+*Last updated: 2026-11-15 — 08-12: ENT-09 names the 2026.11 `config_entry_id` repair API, Probatio row reflects Phase 7, coverage footer recounted*
