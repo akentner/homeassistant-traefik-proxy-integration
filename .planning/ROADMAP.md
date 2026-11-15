@@ -408,11 +408,30 @@ certificate is reported as a problem, never as "unavailable".
      `certificates_problem` aggregate (enabled by default) **on** with a
      `reason` attribute, while the timestamp sensor keeps its last known value
      and stays available. Tests, `ruff`, `mypy --strict` green.
-**Plans**: TBD
+**Plans**: 7 plans in 6 waves
 
 Plans:
+**Wave 1**
+- [ ] 06-01-PLAN.md — `rules.py` `extract_hosts`/`normalize_host` (v2 multi-argument, v3 `||`, no regex/SNI/wildcard/negated names) for the cert host set; cap at 200 hosts with one warning (CERT-03)
+- [ ] 06-02-PLAN.md — `/api/certificates` client + `TraefikCertificate` model + strict parser; test stubs serve the endpoint (clock-rebased v3.7 capture, v2.11 404); fixed capture dates only under frozen time (CERT-01)
 
-- [ ] TBD (run /gsd-plan-phase 6 to break down)
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 06-03-PLAN.md — Threadless CERT_NONE probe (`asyncio.open_connection`, SNI, DER via cryptography), offline `verified`, closed error set, single-label wildcard + API host mapping (CERT-02, CERT-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 06-04-PLAN.md — Atomic switch: per-host `HostCertState` from the threadless probe (connect host = Traefik host, SNI = router host), problem-on instead of unavailable with `reason`/`verified`/`source`, failure history, live days (CERT-02, CERT-05)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 06-05-PLAN.md — API-first cert cycle (`/api/certificates`, `not_found`, 404 probe fallback), HA trust anchors, TLS entrypoint port per host, real-handshake end-to-end, cancellation/overlap safety; blocking probe path and throttle dict deleted with grep gates (CERT-01, CERT-02, CERT-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 06-06-PLAN.md — Day-boundary timer (threshold/expiry/daily change without a probe); honest failed first cert cycle, restored hosts not stamped missing, 5-minute retry (CERT-05)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 06-07-PLAN.md — `certificates_problem` aggregate (enabled by default, hosts + reasons) and en/de `reason` texts (CERT-05)
+
+**Cross-cutting constraints:** <!-- gsd:generated -->
+- pytest, ruff check, ruff format --check, mypy --strict and the HA 2026.3.0 venv suite are green after every task (D-19)
 
 ### Phase 7: Config flow, HA 2026.12 compatibility, observability
 

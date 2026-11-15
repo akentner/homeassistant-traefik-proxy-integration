@@ -551,12 +551,14 @@ coordinator = CertCoordinator(hass, entry, trust_store=Store([test_root]))  # pr
 | A2 | Python sends no SNI for IP-literal `server_hostname` | P11 | IP hosts may map differently; LOW impact |
 | A3 | Traefik answers a `sniStrict` miss with a TLS alert that Python raises as `ssl.SSLError` (inferred from the Go comments in `tlsmanager.go:258-266`, not run) | R-3 table | Could surface as `ConnectionResetError` → `oserror`; both are failures counted toward `probe_failed` |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `not_found` require 2 consecutive cycles (like `probe_failed`)?**
    - Known: an ACME-pending new router shows `not_found` until the next cycle. Clients really get the default cert meanwhile.
    - Recommendation: no, report it immediately (truthful). The "Refresh now" button re-checks. Note it in the SUMMARY.
+   - **RESOLVED:** reported immediately, no failure count. Locked by CONTEXT D-03 ("`not_found` does not wait for the failure count") and D-15. Implemented in 06-05 Task 1 (API mode maps an uncovered host to `not_found`, no probe) on the `HostCertState.problem` precedence of 06-04; the SUMMARY records the pending-ACME behaviour as a user-visible change.
 2. **Fixture for the v2.11 404.** No `certificates.json` exists for v2.11 (the capture harness only fetches it for v3.7, `tests/traefik/capture.py:67,374`). Use `aioclient_mock` with `status=404` for `/api/certificates`. No re-capture needed.
+   - **RESOLVED:** no re-capture. 06-02 Task 2 makes `stub_traefik` / `stub_traefik_paginated` answer `/api/certificates` with the capture's `certificates.json` when it exists (v3.7) and HTTP 404 otherwise (v2.11); 06-05 Task 1 drives the source-selection tests with it (D-21).
 
 ## Environment Availability
 
