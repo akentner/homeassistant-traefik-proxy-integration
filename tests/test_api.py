@@ -192,7 +192,7 @@ async def test_status_maps_to_specific_error(hass, aioclient_mock, status: int, 
     assert str(err.value) == f"{VERSION_PATH}: HTTP {status}"
 
 
-@pytest.mark.parametrize("status", [400, 302, 500, 502, 503])
+@pytest.mark.parametrize("status", [400, 500, 502, 503])
 async def test_other_non_2xx_raise_base_error_with_status(hass, aioclient_mock, status: int) -> None:
     """Any other non-2xx status raises the base error, none of its subclasses."""
     aioclient_mock.get(f"{MOCK_URL}{VERSION_PATH}", status=status)
@@ -203,6 +203,44 @@ async def test_other_non_2xx_raise_base_error_with_status(hass, aioclient_mock, 
     assert type(err.value) is TraefikProxyApiError
     assert err.value.status == status
     assert str(err.value) == f"{VERSION_PATH}: HTTP {status}"
+
+
+REDIRECT_LOCATION = "https://intruder:hunter2@other.example.org/api"
+
+
+async def test_redirect_is_not_followed_and_hides_location(hass, aioclient_mock) -> None:
+    """A 302 raises the redirect error; the Location target is never contacted or named."""
+    aioclient_mock.get(f"{MOCK_URL}{VERSION_PATH}", status=302, headers={"Location": REDIRECT_LOCATION})
+
+    with pytest.raises(api.TraefikProxyRedirectError) as err:
+        await _client(hass, _auth("bearer")).async_get_version()
+
+    assert isinstance(err.value, api.TraefikProxyConnectionError)
+    assert str(err.value) == f"{VERSION_PATH}: HTTP 302"
+    assert err.value.status == 302
+    assert err.value.detail == "HTTP 302"
+    for text in (str(err.value), repr(err.value)):
+        for secret in ("other.example.org", "intruder", "hunter2"):
+            assert secret not in text
+    assert len(aioclient_mock.mock_calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "redirect"),
+    [(300, True), (302, True), (307, True), (399, True), (400, False)],
+)
+async def test_redirect_status_classification(hass, aioclient_mock, status: int, redirect: bool) -> None:
+    """300-399 raise the redirect error; 400 raises the plain base error."""
+    aioclient_mock.get(f"{MOCK_URL}{VERSION_PATH}", status=status)
+
+    with pytest.raises(TraefikProxyApiError) as err:
+        await _client(hass).async_get_version()
+
+    assert isinstance(err.value, api.TraefikProxyRedirectError) is redirect
+    if not redirect:
+        assert type(err.value) is TraefikProxyApiError
+    assert err.value.status == status
+    assert err.value.detail == f"HTTP {status}"
 
 
 def _connector_error() -> aiohttp.ClientConnectorError:
@@ -298,6 +336,7 @@ def test_taxonomy_hierarchy() -> None:
     ):
         assert issubclass(getattr(api, name), TraefikProxyApiError)
     assert issubclass(api.TraefikProxyInvalidUrlError, api.TraefikProxyConnectionError)
+    assert issubclass(api.TraefikProxyRedirectError, api.TraefikProxyConnectionError)
     assert not issubclass(api.TraefikProxyNotFoundError, TraefikProxyAuthError)
 
 
@@ -328,6 +367,7 @@ _ERROR_SCENARIOS = [
     pytest.param({"status": 401}, id="401"),
     pytest.param({"status": 404}, id="404"),
     pytest.param({"status": 500}, id="500"),
+    pytest.param({"status": 302, "headers": {"Location": USERINFO_URL}}, id="redirect"),
     pytest.param({"exc": aiohttp.ServerDisconnectedError()}, id="connection"),
     pytest.param({"exc": aiohttp.InvalidUrlClientError(USERINFO_URL)}, id="invalid-url"),
     pytest.param(
@@ -374,6 +414,22 @@ async def test_verify_ssl_false_reaches_every_request(hass, aioclient_mock) -> N
     assert session.get.call_count == len(aioclient_mock.mock_calls) > 3
     for call in session.get.call_args_list:
         assert call.kwargs["ssl"] is False
+
+
+async def test_every_request_disables_redirects(hass, aioclient_mock) -> None:
+    """allow_redirects=False is passed on every session.get call (D-23)."""
+    per_page = load_fixture("v3.7", "pages/index.json")["per_page"]
+    stub_traefik_paginated(aioclient_mock, version="v3.7")
+    session = MagicMock(wraps=async_get_clientsession(hass))
+    client = TraefikProxyApiClient(session, MOCK_URL, api.Auth(), page_size=per_page)
+
+    await client.async_get_version()
+    await client.async_get_entrypoints()
+    await client.async_get_state()
+
+    assert session.get.call_count == len(aioclient_mock.mock_calls) > 3
+    for call in session.get.call_args_list:
+        assert call.kwargs["allow_redirects"] is False
 
 
 async def test_verify_ssl_defaults_to_true(hass, aioclient_mock) -> None:

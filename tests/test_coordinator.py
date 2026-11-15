@@ -135,6 +135,21 @@ async def test_5xx_triggers_setup_retry(hass, aioclient_mock) -> None:
     assert entry.state is ConfigEntryState.SETUP_RETRY
 
 
+async def test_redirect_on_setup_retries_with_translation_key(hass, aioclient_mock) -> None:
+    """A 3xx on /api/version at setup => translated UpdateFailed => SETUP_RETRY with key 'redirect'."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=302, headers={"Location": "https://other.example.org/"})
+
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert result is False
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.error_reason_translation_key == "redirect"
+    assert len(aioclient_mock.mock_calls) == 1
+
+
 async def test_401_triggers_setup_error(hass, aioclient_mock) -> None:
     """TraefikProxyAuthError is mapped to ConfigEntryAuthFailed -> SETUP_ERROR."""
     aioclient_mock.get(f"{MOCK_URL}/api/version", status=401)
@@ -525,6 +540,10 @@ async def test_request_budget_matrix(
     assert await _refresh_paths(hass, aioclient_mock, coordinator) == ["/api/rawdata"]
 
 
+# The request path that fails in each step of _stub_failing_step.
+_STEP_PATHS = {"state": "/api/rawdata", "version": "/api/version", "entrypoints": "/api/entrypoints"}
+
+
 def _stub_failing_step(aioclient_mock, freezer, step: str, status: int) -> None:  # type: ignore[no-untyped-def]
     """Make one step of the next cycle answer ``status``; earlier steps are healthy and due."""
     aioclient_mock.clear_requests()
@@ -554,6 +573,9 @@ async def test_cycle_auth_error_starts_reauth(hass, aioclient_mock, freezer, moc
     await hass.async_block_till_done()
 
     assert coordinator.last_update_success is False
+    assert coordinator.last_exception is not None
+    assert getattr(coordinator.last_exception, "translation_key", None) == "auth_failed"
+    assert coordinator.last_exception.translation_placeholders == {"path": _STEP_PATHS[step]}
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert len(flows) == 1
     assert flows[0]["context"]["source"] == "reauth"
@@ -577,6 +599,25 @@ async def test_cycle_server_error_keeps_previous_snapshot(
     assert entry.state is ConfigEntryState.LOADED
     assert coordinator.last_update_success is False
     assert coordinator.data is previous
+    assert getattr(coordinator.last_exception, "translation_key", None) == "api_error"
+    assert coordinator.last_exception.translation_placeholders == {"path": _STEP_PATHS[step], "detail": "HTTP 500"}
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+
+
+async def test_cycle_redirect_keeps_entry_loaded(hass, aioclient_mock, freezer, mock_tls_probe) -> None:
+    """A 3xx on /api/rawdata in a later cycle => translated 'redirect' failure, entry stays loaded."""
+    stub_traefik(aioclient_mock)
+    entry = await _setup_entry(hass)
+    coordinator = entry.runtime_data.coordinator
+
+    _stub_failing_step(aioclient_mock, freezer, "state", 302)
+    await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert coordinator.last_update_success is False
+    assert getattr(coordinator.last_exception, "translation_key", None) == "redirect"
+    assert coordinator.last_exception.translation_placeholders == {"path": "/api/rawdata", "status": "302"}
     assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
 
 
