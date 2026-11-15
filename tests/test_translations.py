@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 
 from custom_components.traefik_proxy import binary_sensor, button, sensor
+from custom_components.traefik_proxy.api import AuthMode
 from custom_components.traefik_proxy.binary_sensor import PROBLEM_SENSORS, TraefikCertExpiringBinarySensor
 from custom_components.traefik_proxy.button import TraefikRefreshButton
 from custom_components.traefik_proxy.cert_coordinator import CertProblem
@@ -37,8 +38,6 @@ EN = PACKAGE / "translations" / "en.json"
 DE = PACKAGE / "translations" / "de.json"
 ICONS = PACKAGE / "icons.json"
 
-# Sections whose keys and placeholders de.json mirrors.
-PHASE_SECTIONS = ("config", "options", "selector", "exceptions", "device", "entity", "issues")
 # Modules whose Home Assistant exceptions must all be translated (D-25).
 EXCEPTION_MODULES = ("coordinator.py", "cert_coordinator.py", "__init__.py")
 HA_EXCEPTIONS = frozenset({"UpdateFailed", "ConfigEntryAuthFailed", "ConfigEntryNotReady", "ConfigEntryError"})
@@ -71,11 +70,6 @@ def _flatten(node: Any, prefix: str = "") -> dict[str, str]:
     for key, value in node.items():
         flat.update(_flatten(value, f"{prefix}.{key}" if prefix else key))
     return flat
-
-
-def _phase_strings(path: Path) -> dict[str, str]:
-    data = _load(path)
-    return {key: value for section in PHASE_SECTIONS for key, value in _flatten(data.get(section, {}), section).items()}
 
 
 def _placeholders(text: str) -> set[str]:
@@ -112,13 +106,84 @@ def test_english_texts_have_one_source() -> None:
     assert sorted(path.name for path in PACKAGE.glob("*.json")) == ["icons.json", "manifest.json"]
 
 
-def test_de_matches_en_keys_and_placeholders() -> None:
-    """de.json parses as UTF-8 JSON and mirrors en.json's keys and placeholders of every PHASE_SECTIONS section."""
-    en = _phase_strings(EN)
-    de = _phase_strings(DE)
-    assert set(de) == set(en)
+def test_de_has_exactly_the_keys_of_en() -> None:
+    """de.json carries exactly the keys of en.json, in both directions and in every section (D-28)."""
+    en = set(_flatten(_load(EN)))
+    de = set(_flatten(_load(DE)))
+    assert de == en, f"missing in de: {sorted(en - de)}; only in de: {sorted(de - en)}"
+
+
+def test_placeholders_match() -> None:
+    """Every German text uses the same {placeholders} as its English text."""
+    en = _flatten(_load(EN))
+    de = _flatten(_load(DE))
     for key, text in en.items():
-        assert _placeholders(de[key]) == _placeholders(text), key
+        assert _placeholders(de.get(key, "")) == _placeholders(text), key
+
+
+def test_every_field_has_label_and_description() -> None:
+    """Every config and options step labels and describes the same fields, in en and de."""
+    for path in (EN, DE):
+        data = _load(path)
+        for flow in ("config", "options"):
+            for step_id, step in data[flow]["step"].items():
+                where = f"{path.name}: {flow}.step.{step_id}"
+                assert set(step.get("data_description", {})) == set(step.get("data", {})), where
+
+
+def test_no_url_literals() -> None:
+    """No text in en.json or de.json contains a URL literal (hassfest rejects '://')."""
+    for path in (EN, DE):
+        for key, value in _flatten(_load(path)).items():
+            assert "://" not in value, f"{path.name}: {key}"
+
+
+def _issue_translation_keys() -> set[str]:
+    """Return the literal translation keys of every async_create_issue call in __init__.py.
+
+    A key given through a module-level string constant is resolved; any other
+    expression fails.
+    """
+    tree = ast.parse((PACKAGE / "__init__.py").read_text(encoding="utf-8"))
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            constants[node.target.id] = node.value.value
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else None
+        if name != "async_create_issue":
+            continue
+        key = {keyword.arg: keyword.value for keyword in node.keywords}.get("translation_key")
+        if isinstance(key, ast.Name):
+            assert key.id in constants, f"__init__.py:{node.lineno} unknown constant {key.id}"
+            keys.add(constants[key.id])
+        else:
+            assert isinstance(key, ast.Constant) and isinstance(key.value, str), f"__init__.py:{node.lineno}"
+            keys.add(key.value)
+    return keys
+
+
+def test_issue_keys_are_raised() -> None:
+    """The issue texts are exactly the issues the integration raises."""
+    issues = set(_load(EN)["issues"])
+    assert issues == {"entities_migrated", "insecure_credentials"}
+    assert _issue_translation_keys() == issues
+
+
+def test_auth_type_options_match_auth_modes() -> None:
+    """The auth type selector has one text per AuthMode, in en and de."""
+    for path in (EN, DE):
+        options = _load(path)["selector"]["auth_type"]["options"]
+        assert set(options) == {mode.value for mode in AuthMode}, path.name
 
 
 def _exception_name(node: ast.expr) -> str | None:
