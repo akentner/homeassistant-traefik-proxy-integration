@@ -78,3 +78,67 @@ the brand images the repository ships (REL-02).
 
 The helper scripts lived in the executor's scratch directory and were not committed.
 Tracer screenshot: `visual/en-10-integration-light.jpg` (51 KB).
+
+## Screenshots
+
+All shots: headless Chromium, viewport 1280x1200, JPEG q75, `visual/<lang>-<NN>-<slug>.jpg`.
+The frontend language was set through `localStorage.selectedLanguage`, the theme
+through `localStorage.selectedTheme` plus the browser colour scheme.
+
+Entity and device names are rendered by the Home Assistant **backend** in the
+system language (`config/core/update {"language": …}`), states and forms by the
+frontend in the user's language. The German shots were therefore taken with the
+HA system language set to `de` and the English shots with `en` (each followed by
+a container restart, so the registry names are re-translated); otherwise the
+device page would mix German UI chrome with English entity names. This is Home
+Assistant's design, not a finding.
+
+For every shot the page text (including shadow DOM and `label` / `placeholder` /
+`aria-label` / `title` attributes) was read and checked for `component.traefik_proxy.`
+and `[%key:`: **0 hits in all 24 shots of Task 2** (and in the two Task 3 shots, see
+"Migration"). Every image was also inspected by eye.
+
+| File | Language | Screen | What it shows |
+|---|---|---|---|
+| de-01-flow-auth-none.jpg | de | Add flow, auth none | "Mit Traefik verbinden": URL, "TLS-Zertifikat prüfen", radio list "Keine Authentifizierung" (selected) / "Basic Auth (Benutzername und Passwort)" / "Bearer-Token"; no credential fields |
+| de-02-flow-auth-basic.jpg | de | Add flow, auth basic | Basic selected; conditional fields "Benutzername" and "Passwort" (with reveal icon) appear |
+| de-03-flow-auth-bearer.jpg | de | Add flow, auth bearer | Bearer selected; only the "Bearer-Token" field is shown (empty, nothing typed) |
+| de-04-options.jpg | de | Options form | "Traefik-Optionen": Abfrageintervall 15 **s**, TLS-Zertifikat prüfen, Warnschwelle 14 **d**, "Entitäten für Router und Dienste anlegen", "Karenzzeit für fehlende Entitäten" 24 **h**, with ranges in the help texts |
+| de-05-repair-insecure-credentials.jpg | de | Repair dialog | "Traefik-Zugangsdaten werden unverschlüsselt gesendet", text names the entry „traefik-v3“ and the Reconfigure path |
+| de-06-device-main.jpg | de | Main device | "Traefik (traefik-v3)", Version 3.7.19, problem aggregates (Dienst-/Middleware-/Router-/Zertifikatsprobleme), Diagnose sensors, "Jetzt aktualisieren", "Verbundene Geräte": Traefik-Dienste / Traefik-Router / Traefik-Zertifikate (traefik-v3); light logo top right |
+| de-07-device-routers.jpg | de | Routers sub-device | "Verbunden über Traefik (traefik-v3)"; router sensors with states "Fehler" (alert icon) and "Aktiviert" (signpost icon) |
+| de-08-device-certificates.jpg | de | Certificates sub-device | per-host "… läuft ab" = OK (lock-check icon) and "… Ablauf" = "In 3 Monaten" (certificate icon) |
+| de-09-refresh-pressed.jpg | de | Refresh now after press | More-info of "Jetzt aktualisieren": "Vor 3 Sekunden", activity "Gedrückt" |
+| de-10-integration-light.jpg | de | Integration page, light | Brand icon, "Version 1.0.0", "Benutzerdefinierte Integration", entry `traefik-v3` with main + 3 sub-devices |
+| de-11-integration-dark.jpg | de | Integration page, dark | Same page in the dark theme; the page header uses `icon.png` (HA shows no logo on this page) |
+| de-13-device-main-dark.jpg | de | Main device, dark | Device page in the dark theme: top right shows `dark_logo.png` (light lettering) — the D-28 dark logo in use |
+| en-01-flow-auth-none.jpg | en | Add flow, auth none | "Connect to Traefik", "No authentication" selected, no credential fields |
+| en-02-flow-auth-basic.jpg | en | Add flow, auth basic | "Basic auth (username and password)" selected; "Username" and "Password" fields shown |
+| en-03-flow-auth-bearer.jpg | en | Add flow, auth bearer | "Bearer token" selected; only the "Bearer token" field (empty) |
+| en-04-options.jpg | en | Options form | "Traefik options": Polling interval 15 s, Verify TLS certificate, Certificate warning threshold 14 d, "Create router and service entities", "Grace period for missing entities" 24 h |
+| en-05-repair-insecure-credentials.jpg | en | Repair dialog | "Traefik credentials are sent unencrypted", names "traefik-v3" |
+| en-06-device-main.jpg | en | Main device | Problem aggregates, diagnostics, "Refresh now", "Connected devices" with the three sub-devices |
+| en-07-device-routers.jpg | en | Routers sub-device | "Connected via Traefik (traefik-v3)"; "Error" / "Enabled" router states with icons |
+| en-08-device-certificates.jpg | en | Certificates sub-device | "… expiring" = OK, "… expiry" = "In 3 months" |
+| en-09-refresh-pressed.jpg | en | Refresh now after press | More-info: "3 seconds ago", activity "Pressed" |
+| en-10-integration-light.jpg | en | Integration page, light | Brand icon, "Version 1.0.0", "Custom integration", 4 services / 151 entities |
+| en-11-integration-dark.jpg | en | Integration page, dark | Dark theme of the same page |
+| en-13-device-main-dark.jpg | en | Main device, dark | Dark theme; `dark_logo.png` top right |
+
+Both add flows were closed with the dialog's close action; WS
+`config_entries/flow/progress` listed no open `traefik_proxy` flow afterwards, and
+no second entry was created. The options flow was also closed without submitting.
+
+## Findings
+
+| ID | Language | Screen | Finding | Cause | Resolution |
+|---|---|---|---|---|---|
+| F-01 | de, en | 08 certificates sub-device | Long certificate entity names ("www.secure.example.com expiring" / "… läuft ab") are cut with an ellipsis in the device page's Sensors card; the full name is in the tooltip, the activity list and more-info | cosmetic | listed |
+| F-02 | — (log) | system language change de | Switching the HA system language through `config/core/update` logged `WARNING homeassistant.helpers.translation: Failed to load integration for translation: Invalid domain <domain>.<platform>` for core and custom integrations alike (`backup.sensor`, `sun.sensor`, `traefik_proxy.sensor`, …); nothing visible, entity names were correct after the restart | upstream | deferred-items F-02 |
+
+No finding has a cause in this repository, so no `fix(08-09)` commit was needed.
+Observations that are Home Assistant's design and not findings: the unit symbols
+`s`, `d`, `h` in the options form are the language-neutral `UnitOfTime` symbols;
+the integration page shows the icon (not the logo) in both themes; on the main
+device the "Download diagnostics" action sits in the overflow menu because the
+device has a `configuration_url` ("Visit"), while the sub-devices show it inline.
