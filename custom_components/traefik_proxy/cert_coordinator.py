@@ -10,9 +10,11 @@ Traefik for its certificates (``GET /api/certificates``, Traefik >= 3.7):
   ``not_found`` and is never probed: a probe would read Traefik's default
   certificate and make a broken host look healthy.
 - When Traefik answers 404 (older versions), each host is probed once: a
-  TLS handshake to the Traefik host of the entry URL with the router host
-  as SNI name, at most ``TLS_SEMAPHORE`` handshakes at a time. Router
-  hostnames are never resolved through DNS.
+  TLS handshake to the Traefik host of the entry URL, on the TLS entrypoint
+  port of the host's routers, with the router host as SNI name, at most
+  ``TLS_SEMAPHORE`` handshakes at a time. Router hostnames are never
+  resolved through DNS. The presented chain is verified against Home
+  Assistant's own trust anchors (read from memory, never from disk).
 - Any other API error fails the cycle.
 
 The result is one :class:`HostCertState` per host of the current host set.
@@ -36,6 +38,7 @@ from cryptography.x509.verification import Store
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
+from homeassistant.util import ssl as ha_ssl
 
 from .api import TraefikProxyApiError, TraefikProxyNotFoundError
 from .const import (
@@ -46,17 +49,17 @@ from .const import (
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
-from .models import TraefikCertificate
+from .models import Router, TraefikCertificate, TraefikSnapshot
 from .rules import extract_hosts, normalize_host
-from .tls import ProbedCertificate, ProbeResult, async_probe_certificate, match_certificate
+from .tls import ProbedCertificate, ProbeResult, async_probe_certificate, build_trust_store, match_certificate
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
-# Port probed on the Traefik host.
-PROBE_PORT: Final = 443
+# Port probed when no TLS entrypoint port of a host's routers resolves.
+DEFAULT_PROBE_PORT: Final = 443
 # Consecutive failed probes after which a host is a problem.
 CERT_FAILURES_FOR_PROBLEM: Final = 2
 # ``error`` of a host the Traefik API reports no certificate for.
@@ -78,6 +81,52 @@ class CertProblem(StrEnum):
     PROBE_FAILED = "probe_failed"
     NOT_FOUND = "not_found"
     EXPIRING = "expiring"
+
+
+def entrypoint_port(address: str) -> int | None:
+    """Return the TCP port of a Traefik entrypoint address, or None.
+
+    Accepts ``:443``, ``0.0.0.0:443``, ``[::]:443`` and a trailing ``/tcp``.
+    UDP addresses, non-numeric ports and ports outside 1..65535 give None.
+    """
+    if address.endswith("/udp"):
+        return None
+    address = address.removesuffix("/tcp")
+    _, sep, port = address.rpartition(":")
+    if not sep or not port.isascii() or not port.isdigit():
+        return None
+    value = int(port)
+    return value if 1 <= value <= 65535 else None
+
+
+def _router_hosts(router: Router) -> set[str]:
+    """Return the normalized hostnames a TLS router contributes (empty without TLS).
+
+    The union of ``tls_domains[].main`` / ``sans`` and the literal
+    ``Host()`` names of the rule; names :func:`.rules.normalize_host`
+    rejects are skipped.
+    """
+    if not router.tls:
+        return set()
+    hosts: set[str] = set()
+    for domain in router.tls_domains:
+        for name in (domain.main, *domain.sans):
+            host = normalize_host(name) if name else None
+            if host is not None:
+                hosts.add(host)
+    hosts.update(extract_hosts(router.rule))
+    return hosts
+
+
+def _router_ports(router: Router, snapshot: TraefikSnapshot) -> set[int]:
+    """Return the TCP ports of a router's entry points (unknown names and UDP skipped)."""
+    ports: set[int] = set()
+    for name in router.entry_points:
+        entrypoint = snapshot.entrypoints.get(name)
+        port = entrypoint_port(entrypoint.address) if entrypoint is not None else None
+        if port is not None:
+            ports.add(port)
+    return ports
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,9 +184,11 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     Every cycle collects the sorted, normalized, capped TLS hosts of the
     main snapshot (:meth:`_collect_hosts`) and reads Traefik's certificate
     list. With the list, each host is mapped to its certificate
-    (:meth:`_api_states`); on a 404 each host is probed concurrently under
-    the semaphore (:meth:`_async_probe_states`). ``data`` maps each host to
-    its :class:`HostCertState`.
+    (:meth:`_api_states`); on a 404 each host is probed once, concurrently
+    under the semaphore, on its TLS entrypoint port (:meth:`_probe_ports`)
+    and against the trust store of :meth:`_get_trust_store`
+    (:meth:`_async_probe_states`). ``data`` maps each host to its
+    :class:`HostCertState`.
 
     Threshold changes (``tls_warn_days`` in the options) go through
     :meth:`async_set_threshold`, which notifies the listeners so the
@@ -159,8 +210,9 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
     ) -> None:
         """Construct the cert coordinator.
 
-        ``trust_store`` holds the roots a probed chain is verified against;
-        without one every probed certificate reports ``verified`` False.
+        ``trust_store`` holds the roots a probed chain is verified against.
+        Without one the first probe-mode cycle builds a store from Home
+        Assistant's trust anchors (:meth:`_get_trust_store`).
         """
         super().__init__(
             hass,
@@ -177,6 +229,8 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         self._sem = asyncio.Semaphore(sem)
         self._timeout = timeout
         self._trust_store = trust_store
+        # False until the default store was built; the built store may be None.
+        self._trust_store_ready = trust_store is not None
 
     async def _async_update_data(self) -> dict[str, HostCertState]:
         """Run one cert cycle over the current host set."""
@@ -239,20 +293,63 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
             raise UpdateFailed("The Traefik URL has no host to probe certificates at")
         return host
 
+    def _get_trust_store(self) -> Store | None:
+        """Return the store probed chains are verified against.
+
+        The ``trust_store`` given at construction, else a store built once
+        from the roots of Home Assistant's pre-built client context (an
+        in-memory read) and cached, None included.
+        """
+        if not self._trust_store_ready:
+            self._trust_store = build_trust_store(ha_ssl.client_context().get_ca_certs(binary_form=True))
+            self._trust_store_ready = True
+        return self._trust_store
+
+    def _probe_ports(self, hosts: Sequence[str]) -> dict[str, int]:
+        """Return the port each host is probed on.
+
+        The candidates of a host are the TLS entrypoint ports of every
+        router that carries it. 443 wins when it is a candidate, else the
+        lowest candidate; without any candidate the host is probed on 443.
+        """
+        snapshot = self.config_entry.runtime_data.coordinator.data
+        candidates: dict[str, set[int]] = {host: set() for host in hosts}
+        for router in snapshot.routers.values():
+            router_hosts = _router_hosts(router) & candidates.keys()
+            if not router_hosts:
+                continue
+            ports = _router_ports(router, snapshot)
+            for host in router_hosts:
+                candidates[host] |= ports
+        return {
+            host: DEFAULT_PROBE_PORT if not ports or DEFAULT_PROBE_PORT in ports else min(ports)
+            for host, ports in candidates.items()
+        }
+
     async def _async_probe_states(self, hosts: Sequence[str], now: datetime) -> dict[str, HostCertState]:
-        """Probe every host and return their states in host order."""
+        """Probe every host once on its port and return their states in host order.
+
+        The dict is built only after every probe returned, so a cancelled
+        cycle leaves ``data`` untouched.
+        """
         if not hosts:
             return {}
         connect_host = self._connect_host()
-        results = await asyncio.gather(*(self._async_probe_host(host, PROBE_PORT, connect_host, now) for host in hosts))
+        ports = self._probe_ports(hosts)
+        trust_store = self._get_trust_store()
+        results = await asyncio.gather(
+            *(self._async_probe_host(host, ports[host], connect_host, trust_store, now) for host in hosts)
+        )
         # Only hosts of this cycle's host set are kept; history comes from the last data.
         previous = self.data or {}
         return {
-            host: self._probe_state(host, PROBE_PORT, result, previous.get(host), now)
+            host: self._probe_state(host, ports[host], result, previous.get(host), now)
             for host, result in zip(hosts, results, strict=True)
         }
 
-    async def _async_probe_host(self, host: str, port: int, connect_host: str, now: datetime) -> ProbeResult:
+    async def _async_probe_host(
+        self, host: str, port: int, connect_host: str, trust_store: Store | None, now: datetime
+    ) -> ProbeResult:
         """Probe ``host`` (as SNI) at ``connect_host:port`` under the semaphore."""
         async with self._sem:
             return await async_probe_certificate(
@@ -260,7 +357,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
                 port,
                 host,
                 handshake_timeout=self._timeout,
-                trust_store=self._trust_store,
+                trust_store=trust_store,
                 now=now,
             )
 
@@ -330,14 +427,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         """
         hosts: set[str] = set()
         for router in self.config_entry.runtime_data.coordinator.data.routers.values():
-            if not router.tls:
-                continue
-            for domain in router.tls_domains:
-                for name in (domain.main, *domain.sans):
-                    host = normalize_host(name) if name else None
-                    if host is not None:
-                        hosts.add(host)
-            hosts.update(extract_hosts(router.rule))
+            hosts |= _router_hosts(router)
         ordered = sorted(hosts)
         if len(ordered) > MAX_CERT_HOSTS:
             _LOGGER.warning(
@@ -359,4 +449,5 @@ __all__ = [
     "CertProblem",
     "CertSource",
     "HostCertState",
+    "entrypoint_port",
 ]
