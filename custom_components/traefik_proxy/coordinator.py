@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
@@ -17,7 +17,14 @@ from homeassistant.helpers.update_coordinator import (
 )
 from homeassistant.util import dt as dt_util
 
-from .api import Auth, AuthMode, TraefikProxyApiClient, TraefikProxyApiError, TraefikProxyAuthError
+from .api import (
+    Auth,
+    AuthMode,
+    TraefikProxyApiClient,
+    TraefikProxyApiError,
+    TraefikProxyAuthError,
+    TraefikProxyRedirectError,
+)
 from .const import (
     CONF_API_KEY,
     CONF_SCAN_INTERVAL,
@@ -25,6 +32,7 @@ from .const import (
     CONF_VERIFY_SSL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_VERIFY_SSL,
+    DOMAIN,
 )
 from .models import Entrypoint, TraefikSnapshot, TraefikVersion
 
@@ -69,6 +77,32 @@ def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikPro
         base_url=entry.data[CONF_URL],
         auth=auth_from_entry_data(entry.data),
         verify_ssl=effective_verify_ssl(entry),
+    )
+
+
+def _translated_update_error(err: TraefikProxyApiError) -> HomeAssistantError:
+    """Map a client error to the translated Home Assistant exception to raise.
+
+    Placeholders carry only the request path, the HTTP status and the
+    client's non-secret detail, never ``str(err)``. Subclasses are checked
+    before their bases: a redirect is also a connection error.
+    """
+    if isinstance(err, TraefikProxyAuthError):
+        return ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="auth_failed",
+            translation_placeholders={"path": err.path},
+        )
+    if isinstance(err, TraefikProxyRedirectError):
+        return UpdateFailed(
+            translation_domain=DOMAIN,
+            translation_key="redirect",
+            translation_placeholders={"path": err.path, "status": str(err.status)},
+        )
+    return UpdateFailed(
+        translation_domain=DOMAIN,
+        translation_key="api_error",
+        translation_placeholders={"path": err.path, "detail": err.detail},
     )
 
 
@@ -126,10 +160,8 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
             self._version = await self.client.async_get_version()
             self._version_checked_at = self._probe_armed_at = dt_util.utcnow()
             self._entrypoints = await self.client.async_get_entrypoints()
-        except TraefikProxyAuthError as err:
-            raise ConfigEntryAuthFailed from err
         except TraefikProxyApiError as err:
-            raise UpdateFailed(str(err)) from err
+            raise _translated_update_error(err) from err
 
     def _version_due(self) -> bool:
         """Return whether this cycle re-reads /api/version.
@@ -155,10 +187,8 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
                 previous.start_date,
             ):
                 self._entrypoints = await self.client.async_get_entrypoints()
-        except TraefikProxyAuthError as err:
-            raise ConfigEntryAuthFailed from err
         except TraefikProxyApiError as err:
-            raise UpdateFailed(str(err)) from err
+            raise _translated_update_error(err) from err
         self._version = version
         self._version_checked_at = dt_util.utcnow()
 
@@ -175,10 +205,8 @@ class TraefikProxyCoordinator(DataUpdateCoordinator[TraefikSnapshot]):
             self._probe_armed_at = dt_util.utcnow()
         try:
             state = await self.client.async_get_state()
-        except TraefikProxyAuthError as err:
-            raise ConfigEntryAuthFailed from err
         except TraefikProxyApiError as err:
-            raise UpdateFailed(str(err)) from err
+            raise _translated_update_error(err) from err
         if self._version is None:
             raise UpdateFailed("Traefik version not available")
         return TraefikSnapshot.build(version=self._version, entrypoints=self._entrypoints, state=state)

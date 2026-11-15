@@ -111,6 +111,7 @@ class TraefikProxyApiError(Exception):
     def __init__(self, path: str, detail: str, *, status: int | None = None) -> None:
         super().__init__(f"{path}: {detail}")
         self.path = path
+        self.detail = detail
         self.status = status
 
 
@@ -124,6 +125,15 @@ class TraefikProxyNotFoundError(TraefikProxyApiError):
 
 class TraefikProxyConnectionError(TraefikProxyApiError):
     """The request failed below HTTP (connection, timeout, OS error)."""
+
+
+class TraefikProxyRedirectError(TraefikProxyConnectionError):
+    """Traefik answered 3xx.
+
+    The client never follows redirects: the Authorization header would
+    travel to whatever host the ``Location`` header names. The ``Location``
+    value is never read, so it cannot reach the message.
+    """
 
 
 class TraefikProxyInvalidUrlError(TraefikProxyConnectionError):
@@ -141,6 +151,8 @@ def _status_error(path: str, status: int) -> TraefikProxyApiError:
         return TraefikProxyAuthError(path, detail, status=status)
     if status == 404:
         return TraefikProxyNotFoundError(path, detail, status=status)
+    if 300 <= status < 400:
+        return TraefikProxyRedirectError(path, detail, status=status)
     return TraefikProxyApiError(path, detail, status=status)
 
 
@@ -188,6 +200,7 @@ class TraefikProxyApiClient:
                     params=params,
                     headers=self._auth.header(),
                     ssl=self._verify_ssl,
+                    allow_redirects=False,
                 ) as response:
                     _LOGGER.debug(
                         "path=%s page=%s status=%s",

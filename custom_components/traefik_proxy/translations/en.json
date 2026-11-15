@@ -65,6 +65,15 @@
   "exceptions": {
     "cert_unavailable": {
       "message": "TLS probe failed \u2014 {error}. See logbook for details."
+    },
+    "auth_failed": {
+      "message": "Traefik rejected the credentials for {path}. Enter them again in the re-authentication dialog."
+    },
+    "api_error": {
+      "message": "Reading {path} from the Traefik API failed: {detail}."
+    },
+    "redirect": {
+      "message": "The Traefik API redirected {path} (HTTP {status}). The integration does not follow redirects; enter the address Traefik redirects to (for example the HTTPS address) via Reconfigure."
     }
   },
   "device": {

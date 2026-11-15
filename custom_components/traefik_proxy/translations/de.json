@@ -1,4 +1,15 @@
 {
+  "exceptions": {
+    "auth_failed": {
+      "message": "Traefik hat die Zugangsdaten für {path} abgelehnt. Gib sie im Dialog zur erneuten Authentifizierung neu ein."
+    },
+    "api_error": {
+      "message": "Das Lesen von {path} aus der Traefik-API ist fehlgeschlagen: {detail}."
+    },
+    "redirect": {
+      "message": "Die Traefik-API hat {path} umgeleitet (HTTP {status}). Die Integration folgt keinen Umleitungen; gib über „Neu konfigurieren“ die Adresse ein, auf die Traefik umleitet (zum Beispiel die HTTPS-Adresse)."
+    }
+  },
   "device": {
     "main": {
       "name": "Traefik ({host})"
