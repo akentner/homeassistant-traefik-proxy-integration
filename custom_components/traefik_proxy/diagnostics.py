@@ -21,7 +21,7 @@ from homeassistant.core import HomeAssistant
 from .const import CONF_API_KEY, CONF_URL
 from .coordinator import split_url_userinfo
 from .data import TraefikProxyConfigEntry
-from .rules import redact_rule
+from .rules import has_matcher_call, redact_rule
 
 TO_REDACT: Final = {CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME, CONF_API_KEY, "users", "authorization"}
 
@@ -55,14 +55,26 @@ def _safe_url(url: Any) -> Any:
         return REDACTED
 
 
+def _redact_error(error: str, rule: str, redacted_rule: str) -> str:
+    """Return a router error with the raw rule replaced by its redacted form.
+
+    Traefik may also quote a fragment or a normalized form of the rule, so
+    an error that still holds a matcher call outside the verbatim rule is
+    redacted as a whole.
+    """
+    segments = error.split(rule) if rule.strip() else [error]
+    if any(has_matcher_call(segment) for segment in segments):
+        return REDACTED
+    return redacted_rule.join(segments)
+
+
 def _redact_router_rules(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Redact the rule of every router in a dumped snapshot, also where an error repeats it."""
+    """Redact the rule and the errors of every router in a dumped snapshot."""
     for router in snapshot["routers"].values():
         rule = router["rule"]
-        redacted = redact_rule(rule)
-        router["rule"] = redacted
-        if rule:
-            router["errors"] = [error.replace(rule, redacted) for error in router["errors"]]
+        redacted_rule = redact_rule(rule)
+        router["rule"] = redacted_rule
+        router["errors"] = [_redact_error(error, rule, redacted_rule) for error in router["errors"]]
     return snapshot
 
 

@@ -55,6 +55,7 @@ _SAFE_MATCHERS = frozenset(
 _HEADER_MATCHERS = frozenset({"header", "headerregexp", "headers", "headersregexp"})
 # v3: ``Query(key[, value])``; v2: ``Query(`key=value`, ...)``.
 _QUERY_MATCHERS = frozenset({"query", "queryregexp"})
+_MATCHERS = _SAFE_MATCHERS | _HEADER_MATCHERS | _QUERY_MATCHERS
 
 # One token of a rule. Every alternative starts with a distinct character
 # class, so a scan is linear in the rule length. A backtick literal cannot
@@ -66,6 +67,9 @@ _TOKEN = re.compile(
     r'|(?P<literal>`[^`]*`|"(?:[^"\\]|\\.)*")'
     r"|(?P<name>[A-Za-z][A-Za-z0-9]*)"
 )
+
+# A name followed by optional whitespace and ``(``, not preceded by a word character.
+_CALL = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z][A-Za-z0-9]*)\s*\(")
 
 
 def normalize_host(name: str) -> str | None:
@@ -218,6 +222,11 @@ def _redact_tokens(tokens: list[tuple[str, str]]) -> str:
     return "".join(parts)
 
 
+def has_matcher_call(text: str) -> bool:
+    """Return True when ``text`` contains a call of a known matcher, in any letter case."""
+    return any(call.group(1).lower() in _MATCHERS for call in _CALL.finditer(text))
+
+
 def redact_rule(rule: str) -> str:
     """Return ``rule`` with the values of header and query matchers replaced by ``**REDACTED**``.
 
@@ -237,4 +246,4 @@ def redact_rule(rule: str) -> str:
         return _REDACTED
 
 
-__all__ = ["extract_hosts", "normalize_host", "redact_rule"]
+__all__ = ["extract_hosts", "has_matcher_call", "normalize_host", "redact_rule"]
