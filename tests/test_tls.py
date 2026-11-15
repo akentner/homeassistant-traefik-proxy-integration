@@ -22,17 +22,25 @@ contract pins:
 
 from __future__ import annotations
 
+import asyncio
+import socket
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+import pytest_asyncio
 from cryptography import x509
 from cryptography.hazmat.primitives.serialization import Encoding
+from cryptography.utils import CryptographyDeprecationWarning
 from cryptography.x509.oid import ExtendedKeyUsageOID
+from cryptography.x509.verification import Store
 from homeassistant.util import dt as dt_util
+from homeassistant.util.ssl import client_context
 
 from custom_components.traefik_proxy.const import TLS_HANDSHAKE_TIMEOUT
 from custom_components.traefik_proxy.models import TraefikCertificate
@@ -41,6 +49,8 @@ from custom_components.traefik_proxy.tls import (
     CertError,
     CertInfo,
     ProbedCertificate,
+    ProbeError,
+    ProbeFailure,
     _fetch_cert_raw,
     _hostname_matches_san,
     _log_parse_failure_once,
@@ -506,3 +516,392 @@ async def test_probe_sni_routing_and_default_certificate(
     assert unknown.certificate.common_name == DEFAULT_HOST
     assert unknown.san_mismatch is True
     assert unknown.verified is False
+
+
+# ---------------------------------------------------------------------------
+# Verification matrix: real handshakes under frozen time.
+# ---------------------------------------------------------------------------
+
+
+async def _probe(port: int, sni: str, store: Store | None, *, now: datetime | None = None) -> ProbedCertificate:
+    result = await async_probe_certificate(
+        "127.0.0.1",
+        port,
+        sni,
+        handshake_timeout=5.0,
+        trust_store=store,
+        now=now if now is not None else dt_util.utcnow(),
+    )
+    assert isinstance(result, ProbedCertificate), result
+    return result
+
+
+async def test_probe_expired_leaf_is_read_unverified(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """An expired leaf from a trusted CA is read, with verified False."""
+    pki = _make_pki()
+    leaf = make_leaf(
+        [ROUTER_A], pki.intermediate, not_before=pki.now - timedelta(days=100), not_after=pki.now - timedelta(days=1)
+    )
+    server = await tls_server(_serve(tmp_path, pki, {ROUTER_A: leaf}), default=ROUTER_A)
+
+    result = await _probe(server.port, ROUTER_A, build_trust_store([pki.root_der]))
+
+    assert result.verified is False
+    assert result.san_mismatch is False
+    assert result.certificate.not_after == leaf[0].not_valid_after_utc
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_self_signed_leaf_is_read_unverified(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """A self-signed leaf is read, with verified False."""
+    pki = _make_pki()
+    leaf = make_self_signed([ROUTER_A], not_before=pki.now - timedelta(days=1), not_after=pki.now + timedelta(days=30))
+    certs = _serve(tmp_path, pki, {ROUTER_A: leaf}, with_intermediate=False)
+    server = await tls_server(certs, default=ROUTER_A)
+
+    result = await _probe(server.port, ROUTER_A, build_trust_store([pki.root_der]))
+
+    assert result.verified is False
+    assert result.certificate.issuer_cn == ROUTER_A
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_private_ca_not_in_store_is_unverified(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """A leaf from a private CA whose root is not trusted is read, with verified False."""
+    pki = _make_pki()
+    other_root = make_ca("Other Root", not_before=pki.now - timedelta(days=1), not_after=pki.now + timedelta(days=30))
+    server = await tls_server(_serve(tmp_path, pki, {ROUTER_A: _valid_leaf(pki, [ROUTER_A])}), default=ROUTER_A)
+
+    result = await _probe(server.port, ROUTER_A, build_trust_store([other_root[0].public_bytes(Encoding.DER)]))
+
+    assert result.verified is False
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_without_intermediate_is_unverified(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """A leaf served without its intermediate does not verify, even with the root trusted."""
+    pki = _make_pki()
+    certs = _serve(tmp_path, pki, {ROUTER_A: _valid_leaf(pki, [ROUTER_A])}, with_intermediate=False)
+    server = await tls_server(certs, default=ROUTER_A)
+
+    result = await _probe(server.port, ROUTER_A, build_trust_store([pki.root_der]))
+
+    assert result.verified is False
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_leaf_for_other_host_is_unverified_with_san_mismatch(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """A trusted leaf for another host is unverified and flagged as SAN mismatch."""
+    pki = _make_pki()
+    other = "other.example.test"
+    server = await tls_server(_serve(tmp_path, pki, {other: _valid_leaf(pki, [other])}), default=other)
+
+    result = await _probe(server.port, ROUTER_A, build_trust_store([pki.root_der]))
+
+    assert result.certificate.common_name == other
+    assert result.verified is False
+    assert result.san_mismatch is True
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_ip_san_with_ip_sni_is_verified(tls_server: TlsServerStarter, tmp_path: Path, freezer: Any) -> None:
+    """An IP-literal host is verified against an IP SAN."""
+    pki = _make_pki()
+    server = await tls_server(
+        _serve(tmp_path, pki, {"127.0.0.1": _valid_leaf(pki, ["127.0.0.1"])}), default="127.0.0.1"
+    )
+
+    result = await _probe(server.port, "127.0.0.1", build_trust_store([pki.root_der]))
+
+    assert result.certificate.sans == ("127.0.0.1",)
+    assert result.verified is True
+    assert result.san_mismatch is False
+    await server.wait_connections(1)
+    assert server.received == [b""]
+
+
+async def test_probe_verifies_at_given_time_after_not_after(
+    tls_server: TlsServerStarter, tmp_path: Path, freezer: Any
+) -> None:
+    """Verification uses ``now``: one second after notAfter the valid chain is unverified."""
+    pki = _make_pki()
+    leaf = _valid_leaf(pki, [ROUTER_A])
+    server = await tls_server(_serve(tmp_path, pki, {ROUTER_A: leaf}), default=ROUTER_A)
+    store = build_trust_store([pki.root_der])
+
+    current = await _probe(server.port, ROUTER_A, store)
+    later = await _probe(server.port, ROUTER_A, store, now=leaf[0].not_valid_after_utc + timedelta(seconds=1))
+
+    assert current.verified is True
+    assert later.verified is False
+
+
+async def test_probe_sends_no_bytes_after_handshake(tls_server: TlsServerStarter, tmp_path: Path, freezer: Any) -> None:
+    """Every probe connection closes without sending application data."""
+    pki = _make_pki()
+    certs = _serve(
+        tmp_path, pki, {ROUTER_A: _valid_leaf(pki, [ROUTER_A]), DEFAULT_HOST: _valid_leaf(pki, [DEFAULT_HOST])}
+    )
+    server = await tls_server(certs, default=DEFAULT_HOST)
+
+    for sni in (ROUTER_A, DEFAULT_HOST, "unknown.example.test"):
+        await _probe(server.port, sni, None)
+
+    await server.wait_connections(3)
+    assert server.received == [b"", b"", b""]
+
+
+# ---------------------------------------------------------------------------
+# Error classification (wall clock, no freezer).
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _TcpServer:
+    port: int
+    eof: asyncio.Event
+
+
+type _TcpServerStarter = Callable[
+    [Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]]], Awaitable[_TcpServer]
+]
+
+
+@pytest_asyncio.fixture
+async def tcp_server(socket_enabled: None) -> AsyncIterator[_TcpServerStarter]:
+    """Start plain TCP servers on 127.0.0.1 with a given handler; teardown closes them."""
+    assert socket_enabled is None  # consumed for fixture propagation
+    servers: list[asyncio.Server] = []
+
+    async def start(
+        handler: Callable[[asyncio.StreamReader, asyncio.StreamWriter], Awaitable[None]],
+    ) -> _TcpServer:
+        server = await asyncio.start_server(handler, "127.0.0.1", 0)
+        servers.append(server)
+        return _TcpServer(port=server.sockets[0].getsockname()[1], eof=asyncio.Event())
+
+    yield start
+    for server in servers:
+        server.close()
+        server.close_clients()
+        await server.wait_closed()
+
+
+async def _start_silent_server(tcp_server: _TcpServerStarter) -> _TcpServer:
+    """A TCP server that accepts, never answers and records EOF from the client."""
+    eof = asyncio.Event()
+
+    async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.read()
+        except OSError:
+            pass
+        finally:
+            eof.set()
+            writer.close()
+
+    server = await tcp_server(_handle)
+    server.eof = eof
+    return server
+
+
+async def _probe_failure(host: str, port: int, *, handshake_timeout: float = 5.0) -> ProbeFailure:
+    result = await async_probe_certificate(
+        host, port, ROUTER_A, handshake_timeout=handshake_timeout, trust_store=None, now=dt_util.utcnow()
+    )
+    assert isinstance(result, ProbeFailure), result
+    return result
+
+
+async def test_probe_plain_http_server_is_ssl_error(tcp_server: _TcpServerStarter) -> None:
+    """A server answering plain HTTP fails the handshake as ``ssl``, not ``oserror``."""
+
+    async def _http(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.read(1024)
+        writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+        await writer.drain()
+        writer.close()
+
+    server = await tcp_server(_http)
+
+    failure = await _probe_failure("127.0.0.1", server.port)
+
+    assert failure.error is ProbeError.SSL
+    assert failure.detail.startswith("SSL")
+
+
+async def test_probe_closed_port_is_refused(socket_enabled: None) -> None:
+    """A closed port on 127.0.0.1 is ``refused``."""
+    assert socket_enabled is None  # consumed for fixture propagation
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+
+    failure = await _probe_failure("127.0.0.1", port)
+
+    assert failure.error is ProbeError.REFUSED
+
+
+async def test_probe_hanging_server_is_timeout(tcp_server: _TcpServerStarter) -> None:
+    """A server that never answers the handshake is ``timeout`` within the handshake timeout."""
+    server = await _start_silent_server(tcp_server)
+    started = time.monotonic()
+
+    failure = await _probe_failure("127.0.0.1", server.port, handshake_timeout=0.3)
+
+    assert failure.error is ProbeError.TIMEOUT
+    assert time.monotonic() - started < 2.0
+
+
+async def test_probe_dns_failure_is_dns(socket_enabled: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``socket.gaierror`` from the loop's resolver is ``dns``."""
+    assert socket_enabled is None  # consumed for fixture propagation
+
+    async def _gaierror(*_args: object, **_kwargs: object) -> object:
+        raise socket.gaierror(-2, "Name or service not known (test stub)")
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", _gaierror)
+
+    failure = await _probe_failure("traefik.invalid", 443)
+
+    assert failure.error is ProbeError.DNS
+
+
+def _fake_writer(peer: bytes | None) -> MagicMock:
+    """A stream writer whose ssl_object presents ``peer`` as DER leaf."""
+    ssl_object = MagicMock()
+    ssl_object.getpeercert.return_value = peer
+    ssl_object.get_unverified_chain.return_value = None
+    writer = MagicMock()
+    writer.get_extra_info.return_value = ssl_object
+    writer.wait_closed = AsyncMock(return_value=None)
+    return writer
+
+
+def _patch_opener(
+    monkeypatch: pytest.MonkeyPatch, *, writer: MagicMock | None = None, exc: BaseException | None = None
+) -> None:
+    async def _open(*_args: object, **_kwargs: object) -> tuple[MagicMock, MagicMock]:
+        if exc is not None:
+            raise exc
+        assert writer is not None
+        return MagicMock(), writer
+
+    monkeypatch.setattr("custom_components.traefik_proxy.tls.asyncio.open_connection", _open)
+
+
+async def test_probe_empty_peer_certificate_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No peer certificate is ``empty``; the writer is still closed."""
+    writer = _fake_writer(None)
+    _patch_opener(monkeypatch, writer=writer)
+
+    failure = await _probe_failure("127.0.0.1", 443)
+
+    assert failure.error is ProbeError.EMPTY
+    writer.close.assert_called_once()
+    writer.wait_closed.assert_awaited_once()
+
+
+async def test_probe_non_der_peer_certificate_is_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Peer bytes that are not DER are ``parse``; the writer is still closed."""
+    writer = _fake_writer(b"not-der")
+    _patch_opener(monkeypatch, writer=writer)
+
+    failure = await _probe_failure("127.0.0.1", 443)
+
+    assert failure.error is ProbeError.PARSE
+    writer.close.assert_called_once()
+
+
+async def test_probe_unexpected_exception_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any other exception is ``unknown`` with its type name in ``detail``."""
+    _patch_opener(monkeypatch, exc=RuntimeError("boom"))
+
+    failure = await _probe_failure("127.0.0.1", 443)
+
+    assert failure.error is ProbeError.UNKNOWN
+    assert failure.detail == "RuntimeError: boom"
+
+
+async def test_probe_cancelled_error_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``asyncio.CancelledError`` is never swallowed."""
+    _patch_opener(monkeypatch, exc=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await async_probe_certificate(
+            "127.0.0.1", 443, ROUTER_A, handshake_timeout=5.0, trust_store=None, now=dt_util.utcnow()
+        )
+
+
+async def test_probe_aborts_transport_when_wait_closed_hangs(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wait_closed that never completes is bounded by the handshake timeout and followed by abort()."""
+    writer = _fake_writer(None)
+
+    async def _never() -> None:
+        await asyncio.Event().wait()
+
+    writer.wait_closed = _never
+    _patch_opener(monkeypatch, writer=writer)
+
+    # The outer bound turns an unbounded wait_closed into a test failure instead of a hang.
+    async with asyncio.timeout(0.3 + 1.0):
+        failure = await _probe_failure("127.0.0.1", 443, handshake_timeout=0.3)
+
+    assert failure.error is ProbeError.EMPTY
+    writer.transport.abort.assert_called_once()
+
+
+async def test_probe_cancelled_during_handshake_closes_connection(tcp_server: _TcpServerStarter) -> None:
+    """Cancelling a probe in a hanging handshake raises CancelledError and closes the connection."""
+    server = await _start_silent_server(tcp_server)
+    task = asyncio.create_task(
+        async_probe_certificate(
+            "127.0.0.1", server.port, ROUTER_A, handshake_timeout=5.0, trust_store=None, now=dt_util.utcnow()
+        )
+    )
+    await asyncio.sleep(0.2)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    async with asyncio.timeout(1.0):
+        await server.eof.wait()
+
+
+# ---------------------------------------------------------------------------
+# Trust store.
+# ---------------------------------------------------------------------------
+
+
+def test_build_trust_store_without_roots_is_none() -> None:
+    """No parsable root gives None (cryptography refuses an empty store)."""
+    assert build_trust_store([]) is None
+    assert build_trust_store([b"garbage"]) is None
+
+
+def test_build_trust_store_skips_unparsable_roots() -> None:
+    """A root that does not parse is skipped; the rest form the store."""
+    assert isinstance(build_trust_store([b"garbage", _make_pki().root_der]), Store)
+
+
+def test_build_trust_store_from_ha_roots_records_no_warning(recwarn: pytest.WarningsRecorder) -> None:
+    """HA's client-context roots build a store without a CryptographyDeprecationWarning."""
+    ders = client_context().get_ca_certs(binary_form=True)
+
+    assert isinstance(build_trust_store(ders), Store)
+    assert not [w for w in recwarn if issubclass(w.category, CryptographyDeprecationWarning)]
