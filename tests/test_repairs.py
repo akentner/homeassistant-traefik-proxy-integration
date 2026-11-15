@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -166,13 +167,27 @@ async def test_reconfigure_fix_deletes_issue(
 
 
 async def test_removal_leaves_no_issue(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    """Removing the entry leaves no issue of it behind."""
-    entry = await _setup(hass, aioclient_mock, HTTP_URL, BASIC)
-    assert _get_issue(hass, entry) is not None
+    """Removing the entry leaves no issue of it behind, through the issue's config_entry_id binding alone.
 
-    await hass.config_entries.async_remove(entry.entry_id)
+    The entry is in setup retry, so removing it never calls
+    ``async_unload_entry`` (which deletes the issue on a normal unload): only
+    Home Assistant's per-entry issue cleanup can delete it.
+    """
+    aioclient_mock.get(f"{HTTP_URL}/api/version", status=500)
+    entry = _entry(HTTP_URL, BASIC)
+    entry.add_to_hass(hass)
+    await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    issue = _get_issue(hass, entry)
+    assert issue is not None
+    assert issue.config_entry_id == entry.entry_id
 
+    with patch("custom_components.traefik_proxy.async_unload_entry") as unload:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+
+    unload.assert_not_called()
     assert _own_issues(hass) == []
 
 
