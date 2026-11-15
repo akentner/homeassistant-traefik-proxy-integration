@@ -23,12 +23,15 @@ contract pins:
 from __future__ import annotations
 
 import asyncio
+import inspect
+import re
 import socket
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import ModuleType
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +45,9 @@ from cryptography.x509.verification import Store
 from homeassistant.util import dt as dt_util
 from homeassistant.util.ssl import client_context
 
+from custom_components.traefik_proxy import cert_coordinator as cert_coordinator_module
+from custom_components.traefik_proxy import rules as rules_module
+from custom_components.traefik_proxy import tls as tls_module
 from custom_components.traefik_proxy.const import TLS_HANDSHAKE_TIMEOUT
 from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import (
@@ -372,6 +378,52 @@ async def test_mock_tls_server_sni_mismatch_detection(
 def test_notafter_formats_count_matches_spec() -> None:
     """Exactly 3 manual fallback formats — adding/removing changes the contract."""
     assert len(NOTAFTER_FORMATS) == 3
+
+
+# Names of the removed blocking probe path; none may come back.
+_REMOVED_NAMES = (
+    "DEFAULT_PORT",
+    "NOTAFTER_FORMATS",
+    "CertDict",
+    "CertError",
+    "CertInfo",
+    "is_error",
+    "parse_not_after",
+    "_format_rdn",
+    "_build_error",
+    "_open_tls_connection",
+    "_fetch_cert_raw",
+    "fetch_cert_info",
+    "fetch_cert_info_async",
+    "_log_parse_failure_once",
+    "_parse_log_cooldown",
+)
+# Thread offloading, blocking connects and CA / default-certificate loading.
+_FORBIDDEN_CALLS = re.compile(
+    r"to_thread|run_in_executor|create_connection|load_default_certs|load_verify_locations"
+    r"|create_default_context|set_default_verify_paths"
+)
+
+
+def test_blocking_probe_path_is_removed() -> None:
+    """Only the threadless probe remains in the tls module."""
+    assert [name for name in _REMOVED_NAMES if hasattr(tls_module, name)] == []
+
+
+@pytest.mark.parametrize("module", [tls_module, cert_coordinator_module], ids=["tls", "cert_coordinator"])
+def test_probe_modules_use_no_threads_or_blocking_calls(module: ModuleType) -> None:
+    """No thread, executor, blocking connect or CA loading in the probe modules."""
+    source = Path(inspect.getfile(module)).read_text(encoding="utf-8")
+    assert _FORBIDDEN_CALLS.findall(source) == []
+
+
+@pytest.mark.parametrize(
+    "module", [tls_module, cert_coordinator_module, rules_module], ids=["tls", "cert_coordinator", "rules"]
+)
+def test_no_module_level_dict(module: ModuleType) -> None:
+    """No module-level dict that could grow with the number of probed hosts."""
+    dicts = [name for name, value in vars(module).items() if isinstance(value, dict) and not name.startswith("__")]
+    assert dicts == []
 
 
 def test_tls_handshake_timeout_default() -> None:

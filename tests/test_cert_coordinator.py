@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -759,6 +760,117 @@ async def test_end_to_end_probe_reaches_tls_entrypoint_port(
         assert state.attributes["source"] == "probe"
         assert state.attributes["port"] == server.port
         assert state.attributes["verified"] is trusted
+
+
+# ---------------------------------------------------------------------------
+# Cancellation, overlap and the concurrency bound (wall clock, no freezer)
+# ---------------------------------------------------------------------------
+
+
+def _probe_mode_entry(hosts: Sequence[str], *, port: int = 443) -> MagicMock:
+    """Probe-mode entry (404) whose routers sit on a websecure entrypoint at ``port`` of 127.0.0.1."""
+    entry = _make_entry(url="https://127.0.0.1:8080")
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[
+            {"name": f"r{i}", "tls": {}, "rule": f"Host(`{host}`)", "entryPoints": ["websecure"]}
+            for i, host in enumerate(hosts)
+        ],
+        entrypoints=[{"name": "websecure", "address": f":{port}"}],
+    )
+    return entry
+
+
+async def test_cancelled_refresh_closes_connection_and_keeps_data(hass: Any, socket_enabled: None) -> None:
+    """Cancelling a refresh in a hanging handshake: CancelledError, data untouched, connection closed."""
+    eof = asyncio.Event()
+
+    async def _silent(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.read()
+        except OSError:
+            pass
+        finally:
+            eof.set()
+            writer.close()
+
+    server = await asyncio.start_server(_silent, "127.0.0.1", 0)
+    try:
+        port = server.sockets[0].getsockname()[1]
+        hosts = ("a.example.com", "b.example.com")
+        c = CertCoordinator(hass, _probe_mode_entry(hosts, port=port), trust_store=MagicMock(spec=Store))
+        ok = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(PROBE_TARGET, ok)
+            await c.async_refresh()
+        before = c.data
+        assert set(before) == set(hosts)
+
+        task = asyncio.create_task(c.async_refresh())
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert c.data is before
+        async with asyncio.timeout(1.0):
+            await eof.wait()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(PROBE_TARGET, ok)
+            await c.async_refresh()
+        assert c.last_update_success is True
+        assert set(c.data) == set(hosts)
+        assert c.data is not before
+    finally:
+        server.close()
+        server.close_clients()
+        await server.wait_closed()
+
+
+async def test_overlapping_refreshes_both_complete(hass: Any) -> None:
+    """Two refreshes started together both finish with a full per-host dict."""
+    hosts = ("a.example.com", "b.example.com", "c.example.com")
+    c = CertCoordinator(hass, _probe_mode_entry(hosts), trust_store=MagicMock(spec=Store))
+
+    async def _yielding(_connect: str, _port: int, sni: str, **_kw: Any) -> ProbedCertificate:
+        await asyncio.sleep(0)
+        return _probed(sni)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, AsyncMock(side_effect=_yielding))
+        await asyncio.gather(c.async_refresh(), c.async_refresh())
+    assert c.last_update_success is True
+    assert set(c.data) == set(hosts)
+
+
+async def test_probe_concurrency_is_bounded_by_semaphore(hass: Any) -> None:
+    """With 10 hosts at most TLS_SEMAPHORE probes run at the same time; all 10 complete."""
+    hosts = tuple(f"h{i:02d}.example.com" for i in range(10))
+    c = CertCoordinator(hass, _probe_mode_entry(hosts), trust_store=MagicMock(spec=Store))
+    release = asyncio.Event()
+    running = 0
+    peak = 0
+
+    async def _gated(_connect: str, _port: int, sni: str, **_kw: Any) -> ProbedCertificate:
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        try:
+            await release.wait()
+        finally:
+            running -= 1
+        return _probed(sni)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(PROBE_TARGET, AsyncMock(side_effect=_gated))
+        task = asyncio.create_task(c.async_refresh())
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert running == TLS_SEMAPHORE
+        release.set()
+        await task
+    assert peak == TLS_SEMAPHORE == 4
+    assert c.last_update_success is True
+    assert set(c.data) == set(hosts)
 
 
 # ---------------------------------------------------------------------------
