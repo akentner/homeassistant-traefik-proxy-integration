@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 06
 current_phase_name: Certificates
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-11-15T08:04:30.534Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-11-15T08:11:50.785Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 06 execution started
-state_head: 3850a6914631040d260aa123766ba32c35e5707c
+state_head: 7f5552d21d104f0b9dd6ea0203ec2f6b2046a445
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 29
+  completed_plans: 30
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 06 (Certificates) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 06 execution started
 
@@ -94,6 +94,7 @@ Progress: [██████░░░░] 63% (3 of 8 phases)
 | Phase 05 P07 | 14min | 3 tasks | 11 files |
 | Phase 05 P08 | 8min | 3 tasks | 6 files |
 | Phase 06 P01 | 10min | 2 tasks | 5 files |
+| Phase 06 P02 | 5 min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -172,6 +173,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: _async_remove_device_if_unreferenced is the single device-removal path in entity.py (per-item off and legacy cleanup)
 - [Phase 06]: 06-01: HostHeader is not Host; negated !Host() skipped; normalize_host (IDNA A-label, charset, empty labels rejected) for rule names and tls.domains
 - [Phase 06]: 06-01: cert host set capped at MAX_CERT_HOSTS=200 (first 200 sorted), one WARNING per cycle with counts only
+- [Phase 06]: TraefikCertificate.status is str | None so probe-read certificates (06-03) share the model
+- [Phase 06]: Default v3.7 test stub serves /api/certificates re-based on the clock (notAfter now+3650d); fixed capture dates only via frozen_v37_certificates(freezer)
+- [Phase 06]: parse_certificates rejects timezone-less or unparsable notAfter/notBefore as payload errors (no guessed expiry)
 
 ### Pending Todos
 
@@ -213,7 +217,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T08:04:30.398Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-11-15T08:11:50.662Z
+Stopped at: Completed 06-02-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
