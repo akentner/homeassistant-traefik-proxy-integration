@@ -289,7 +289,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       (A-22, S-02)
 - [ ] **FLOW-04**: A 404 maps to `api_disabled`; every flow error path is
       tested (config_flow.py 100 % line coverage). (A-15 flow part)
-- [ ] **FLOW-05**: `ConfigEntryAuthFailed`, `ConfigEntryNotReady` and
+- [x] **FLOW-05**: `ConfigEntryAuthFailed`, `ConfigEntryNotReady` and
       `UpdateFailed` use `translation_domain`/`translation_key` with an
       `exceptions` section in the translations. (research §4.2)
 - [ ] **FLOW-06**: A repair issue is raised for an `http://` URL combined with
@@ -471,7 +471,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-02 | Phase 7 | Pending |
 | FLOW-03 | Phase 7 | Pending |
 | FLOW-04 | Phase 7 | Pending |
-| FLOW-05 | Phase 7 | Pending |
+| FLOW-05 | Phase 7 | Complete |
 | FLOW-06 | Phase 7 | Pending |
 | FLOW-07 | Phase 7 | Pending |
 | FLOW-08 | Phase 7 | Complete |

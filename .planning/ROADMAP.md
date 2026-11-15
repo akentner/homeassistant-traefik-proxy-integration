@@ -485,7 +485,7 @@ the 2026.3 workarounds).
      listed in audit A-18 are removed; `translations/en.json` is the single
      source and `translations/de.json` covers every key in it (key-parity test);
      hassfest translation validation passes. Tests, `ruff`, `mypy --strict` green.
-**Plans**: 3/9 plans executed in 8 waves (07-02 and 07-03 run in parallel)
+**Plans**: 4/9 plans executed in 8 waves (07-02 and 07-03 run in parallel)
 
 Plans:
 **Wave 1**
@@ -496,7 +496,7 @@ Plans:
 - [x] 07-03-PLAN.md — Tracer: baseline cleanup — `strings.json` gone (test + hassfest script), `const.VERSION` gone, `api.py` comment, REQUIREMENTS/ROADMAP 2026.11 leftovers after verifying d18f96a (FLOW-07, FLOW-08)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 07-04-PLAN.md — Tracer: redirect never followed and translated; every coordinator/cert/setup exception translated; invalid stored URL stops, rejected credentials start reauth (FLOW-05, FLOW-04)
+- [x] 07-04-PLAN.md — Tracer: redirect never followed and translated; every coordinator/cert/setup exception translated; invalid stored URL stops, rejected credentials start reauth (FLOW-05, FLOW-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 07-05-PLAN.md — Tracer: entry data 1.3 with auth selector (none/basic/bearer, conditional fields) in user/reauth/reconfigure; 1.2 → 1.3 migration incl. URL userinfo; unique_id `host:port`, title = host (FLOW-01, FLOW-03)
@@ -581,7 +581,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 4. Data layer (correct + lean) | 9/9 | Complete    | 2026-11-14 |
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
-| 7. Config flow, HA 2026.11 baseline, observability | 3/9 | In Progress | - |
+| 7. Config flow, HA 2026.11 baseline, observability | 4/9 | In Progress | - |
 | 8. Marketplace + release readiness | 0/TBD | Not started | - |
 
 **Coverage:**
