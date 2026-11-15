@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-11-15T13:33:07.985Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-11-15T13:41:34.253Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: 238f952d198b4177a6c53a8294f70b6dd4be71f5
+state_head: 3d8b23afe490ea88843d96fb098a264ee5254566
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 37
+  completed_plans: 38
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
-Plan: 3 of 9
+Plan: 4 of 9
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 07 execution started
 
@@ -103,6 +103,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 06 P07 | 13min | 2 tasks | 10 files |
 | Phase 07 P01 | 4min | 2 tasks | 17 files |
 | Phase 07 P02 | 10min | 2 tasks | 10 files |
+| Phase 07 P03 | 7min | 2 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -209,6 +210,8 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: migration repair issue carries config_entry_id and stays is_persistent=True; async_remove_entry only deletes the missing-since Store
 - [Phase 07]: Phase 07: setup/unload return None, unload uses async_unload_platforms_or_raise; async_migrate_entry keeps bool (False on downgrade, direct-call test)
 - [Phase 07]: Phase 07: CertCoordinator._stopping set first in async_shutdown; no private DataUpdateCoordinator attribute is read
+- [Phase 07]: Phase 07: translations/en.json is the single English source; a test pins the package root to icons.json + manifest.json
+- [Phase 07]: Phase 07: test threading.Timer instances are joined after cancel() so HA's verify_cleanup never sees a live timer thread
 
 ### Pending Todos
 
@@ -253,7 +256,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T13:33:07.809Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-11-15T13:41:34.062Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
