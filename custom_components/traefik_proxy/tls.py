@@ -1,44 +1,41 @@
-"""stdlib-only TLS handshake helper for Phase 3; never raises — every error path returns a typed ``CertError`` TypedDict.
+"""Read the certificate a TLS server presents, without threads and without trusting it.
 
-This module is the production successor of the spike prototype at
-``.claude/skills/spike-findings-homeassistant-traefik-integration/sources/shared/tls.py``
-with the production deltas listed in
-``.claude/skills/spike-findings-homeassistant-traefik-integration/references/tls-handshake.md``
-section "tls.py — the handshake helper":
+``async_probe_certificate`` performs one native asyncio handshake with a
+shared ``CERT_NONE`` client context, so expired, self-signed and
+private-CA certificates are read as well. The connect address and the SNI
+name are separate: the probe connects to the Traefik host and asks for the
+router hostname. Nothing is sent after the handshake; the connection is
+closed right away.
 
-1. Drop unused ``%Y%m%d%H%M%SZ`` ``notAfter`` format (spike skill #1 — never
-   observed in 18 real-world samples; spike 002 catalogue).
-2. Add the 24h parse-failure log throttle
-   (``_log_parse_failure_once`` + ``_parse_log_cooldown``) — CONTEXT.md
-   D-11: a misbehaving peer must not spam the logbook.
-3. Add a low-level ``_fetch_cert_raw(host, port, *, sni=None, timeout=5.0)``
-   that separates the **connect address** (``host``) from the **SNI value**
-   (``sni``) so unit tests can probe ``127.0.0.1`` with SNI
-   ``router-a.example.test`` (spike skill "What to Avoid" #6).
-4. Add ``san_mismatch: bool = False`` to ``CertInfo`` (spike 006) and a
-   ``_hostname_matches_san`` helper implementing the RFC 6125 §6.4.3
-   wildcard match rules.
-5. ``is_error`` is a TypeGuard-compatible predicate that lets callers
-   narrow the union without repeated ``isinstance`` checks.
+The DER leaf is parsed with ``cryptography`` into a ``TraefikCertificate``.
+Trust is decided offline: ``chain_verified`` validates the presented chain
+against a ``cryptography`` trust store at a given time for the SNI host.
 
-References:
-- ``.planning/spikes/03-tls-handshake/MANIFEST.md`` — spike findings 002
-  (format strings), 005 (asyncio.open_connection is a drop-in), 006
-  (hostname mismatch detection).
-- ``.claude/skills/spike-findings-homeassistant-traefik-integration/references/tls-handshake.md``
-  — full blueprint; in particular the "What to Avoid" landmines list.
+The blocking ``fetch_cert_info`` path below is the previous implementation
+and is kept until its callers move to the async probe.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import socket
 import ssl
 import time
+import warnings
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, Final, TypedDict, cast
+
+from cryptography import x509
+from cryptography.utils import CryptographyDeprecationWarning
+from cryptography.x509.oid import NameOID
+from cryptography.x509.verification import PolicyBuilder, Store, VerificationError
+
+from .models import TraefikCertificate
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +55,167 @@ NOTAFTER_FORMATS: Final[tuple[str, ...]] = (
     "%b %d %H:%M:%S %Y",  # "Nov 15 12:00:00 2025"        (no tz)
     "%b  %d %H:%M:%S %Y %Z",  # "Nov  1 12:00:00 2025 GMT"    (double-space day)
 )
+
+
+class ProbeError(StrEnum):
+    """Closed set of probe failure classes."""
+
+    TIMEOUT = "timeout"
+    SSL = "ssl"
+    DNS = "dns"
+    REFUSED = "refused"
+    OSERROR = "oserror"
+    PARSE = "parse"
+    EMPTY = "empty"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class ProbedCertificate:
+    """The leaf a server presented.
+
+    ``verified`` is True only when the presented chain validates against
+    the trust store at the probe time for the SNI host. ``san_mismatch``
+    is True when neither a SAN nor the CN covers the SNI host.
+    """
+
+    certificate: TraefikCertificate
+    verified: bool
+    san_mismatch: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeFailure:
+    """A failed probe; ``detail`` is meant for debug logs only."""
+
+    error: ProbeError
+    detail: str
+
+
+type ProbeResult = ProbedCertificate | ProbeFailure
+
+# One client context for every probe: no certificate or CA is loaded into
+# it, so building it does no disk I/O, and any certificate handshakes.
+_PROBE_CONTEXT = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+_PROBE_CONTEXT.check_hostname = False
+_PROBE_CONTEXT.verify_mode = ssl.CERT_NONE
+
+
+def build_trust_store(ders: Iterable[bytes]) -> Store | None:
+    """Build a ``cryptography`` trust store from DER root certificates.
+
+    Roots that do not parse are skipped. Some real roots carry serial
+    number 0, which ``cryptography`` reports with a deprecation warning;
+    the warning is suppressed while loading. Returns None when no root
+    parses (``cryptography`` refuses an empty store).
+    """
+    roots: list[x509.Certificate] = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", CryptographyDeprecationWarning)
+        for der in ders:
+            try:
+                roots.append(x509.load_der_x509_certificate(der))
+            except ValueError:
+                continue
+    return Store(roots) if roots else None
+
+
+def _first_cn(name: x509.Name) -> str | None:
+    for attribute in name.get_attributes_for_oid(NameOID.COMMON_NAME):
+        value = attribute.value
+        return value if isinstance(value, str) else value.decode("utf-8", "replace")
+    return None
+
+
+def certificate_from_der(der: bytes) -> TraefikCertificate:
+    """Parse a DER certificate into a ``TraefikCertificate`` (``status`` None).
+
+    ``sans`` holds the DNS names followed by the IP addresses of the SAN
+    extension. Every parse problem raises ``ValueError``.
+    """
+    try:
+        cert = x509.load_der_x509_certificate(der)
+        try:
+            san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+        except x509.ExtensionNotFound:
+            sans: tuple[str, ...] = ()
+        else:
+            sans = (
+                *san.get_values_for_type(x509.DNSName),
+                *(str(ip) for ip in san.get_values_for_type(x509.IPAddress)),
+            )
+        return TraefikCertificate(
+            common_name=_first_cn(cert.subject) or "",
+            sans=sans,
+            not_after=cert.not_valid_after_utc,
+            not_before=cert.not_valid_before_utc,
+            issuer_cn=_first_cn(cert.issuer),
+            status=None,
+            serial_number=str(cert.serial_number),
+        )
+    except ValueError:
+        raise
+    except Exception as err:
+        raise ValueError(f"certificate parse failed: {type(err).__name__}") from err
+
+
+def _verification_subject(host: str) -> x509.DNSName | x509.IPAddress:
+    """Return an IPAddress subject for an IP literal, else a DNSName."""
+    try:
+        return x509.IPAddress(ipaddress.ip_address(host))
+    except ValueError:
+        return x509.DNSName(host)
+
+
+def chain_verified(chain: Sequence[bytes], host: str, store: Store | None, now: datetime) -> bool:
+    """Return True when the DER ``chain`` (leaf first) validates for ``host`` at ``now``.
+
+    Intermediates that do not parse are ignored. A missing store, an
+    unparsable leaf or any verification error gives False.
+    """
+    if store is None or not chain:
+        return False
+    try:
+        leaf = x509.load_der_x509_certificate(chain[0])
+        intermediates: list[x509.Certificate] = []
+        for der in chain[1:]:
+            try:
+                intermediates.append(x509.load_der_x509_certificate(der))
+            except ValueError:
+                continue
+        verifier = PolicyBuilder().store(store).time(now).build_server_verifier(_verification_subject(host))
+        verifier.verify(leaf, intermediates)
+    except VerificationError, ValueError:
+        return False
+    return True
+
+
+async def async_probe_certificate(
+    connect_host: str,
+    port: int,
+    sni: str,
+    *,
+    handshake_timeout: float,
+    trust_store: Store | None,
+    now: datetime,
+) -> ProbeResult:
+    """Handshake with ``connect_host:port`` using SNI ``sni`` and read the presented leaf."""
+    async with asyncio.timeout(handshake_timeout):
+        _reader, writer = await asyncio.open_connection(connect_host, port, ssl=_PROBE_CONTEXT, server_hostname=sni)
+    try:
+        ssl_object = writer.get_extra_info("ssl_object")
+        der = ssl_object.getpeercert(binary_form=True)
+        certificate = certificate_from_der(der)
+        chain = list(ssl_object.get_unverified_chain() or []) or [der]
+        names = (*certificate.sans, certificate.common_name) if certificate.common_name else certificate.sans
+        return ProbedCertificate(
+            certificate=certificate,
+            verified=chain_verified(chain, sni, trust_store, now),
+            san_mismatch=not _hostname_matches_san(sni, names),
+        )
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
 class CertError(TypedDict, total=False):
