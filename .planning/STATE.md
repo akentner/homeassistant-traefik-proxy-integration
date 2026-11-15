@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-11-15T20:05:48.080Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-11-15T20:10:37.170Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: 54c0ee1950e7be5d856bae6a0ef0de2d963d6074
+state_head: ed1ee6ba37d7cf2164a5bf4a0ee501447aa69247
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 47
+  completed_plans: 48
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -114,6 +114,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 08 P01 | 8 min | 2 tasks | 4 files |
 | Phase 08 P02 | 13 min | 3 tasks | 9 files |
 | Phase 08 P03 | 13min | 3 tasks | 11 files |
+| Phase 08 P04 | 3 min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -245,6 +246,7 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-03: entities_migrated repair raised after the last migration step with the final title; an existing issue follows a 1.2->1.3 title change
 - [Phase 08]: 08-03: DEVICE->USER only for entities on disabled legacy devices (generic step and router replacements); on HA 2026.11 the stale state is unreachable (registry re-derives DEVICE), so this is defence in depth
 - [Phase 08]: 08-03: cert hosts normalised only in the cert coordinator; release-hygiene guards (planning refs, developer-doc links, SyntaxWarning compile, literal sleeps) in tests/test_baseline_guards.py
+- [Phase 08]: 08-04: brand geometry guard (tests/test_brand.py, Pillow alpha bbox) pins trimmed, centred, interlaced icons; icon.svg lives in docs/; 08-05 reuses the helpers
 
 ### Pending Todos
 
@@ -289,7 +291,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T20:05:47.876Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-11-15T20:10:36.936Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
