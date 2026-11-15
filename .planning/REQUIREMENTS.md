@@ -279,7 +279,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       `data_description`; a minor-version config-entry migration converts 0.3.0
       data (token → bearer, empty → none); choosing "none" clears credentials.
       (U-03, U-11, S-03)
-- [ ] **FLOW-02**: No update listener remains; the options flow is an
+- [x] **FLOW-02**: No update listener remains; the options flow is an
       `OptionsFlowWithReload` with `NumberSelector`s (units, box mode), the
       per-item-entities toggle and the missing-entity grace period (1–168 h,
       default 24 h; I7). (A-17, S-01, U-12, W36)
@@ -468,7 +468,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CERT-04 | Phase 6 | Complete |
 | CERT-05 | Phase 6 | Complete |
 | FLOW-01 | Phase 7 | Complete |
-| FLOW-02 | Phase 7 | Pending |
+| FLOW-02 | Phase 7 | Complete |
 | FLOW-03 | Phase 7 | Complete |
 | FLOW-04 | Phase 7 | Pending |
 | FLOW-05 | Phase 7 | Complete |

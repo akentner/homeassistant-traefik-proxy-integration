@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Completed 07-06-PLAN.md
-last_updated: "2026-11-15T14:21:14.929Z"
+stopped_at: Completed 07-07-PLAN.md
+last_updated: "2026-11-15T14:43:43.332Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: f8e0a674639a4506a68cb54ba2760c0dd48eed10
+state_head: 52db8fa5e888e7c3ef98a07266cb21b26d09e407
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 41
+  completed_plans: 42
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 07 execution started
 
@@ -107,6 +107,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 07 P04 | 9min | 2 tasks | 9 files |
 | Phase 07 P05 | 19min | 3 tasks | 12 files |
 | Phase 07 P06 | 7min | 2 tasks | 11 files |
+| Phase 07 P07 | 12min | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -222,6 +223,8 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: URL credentials of 0.3.0 entries move into basic auth; next to a token or when incomplete they are dropped with one WARNING naming the entry only
 - [Phase 07]: Options apply only through the reload of OptionsFlowWithReload; the integration registers no update listener
 - [Phase 07]: Options flow merges the submitted fields into the stored options, so options the form does not show survive a save
+- [Phase 07]: The missing-entity grace period is an option (missing_grace_hours, 1-168 h, default 24 h), read once per setup; stored missing-since times survive a reload, so a shortened period removes long-missing items within one check interval after the reload
+- [Phase 07]: per_item_entities is part of the options form (BooleanSelector, default on); all five options are labelled and described in en and de
 
 ### Pending Todos
 
@@ -266,7 +269,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T14:21:14.764Z
-Stopped at: Completed 07-06-PLAN.md
+Last session: 2026-11-15T14:43:43.160Z
+Stopped at: Completed 07-07-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
