@@ -150,6 +150,11 @@ def _all_cert_ids(hass: HomeAssistant, entry: MockConfigEntry) -> tuple[str, ...
     )
 
 
+def _certificates_problem(hass: HomeAssistant, entry: MockConfigEntry) -> str:
+    """Return the entity_id of the certificates_problem aggregate."""
+    return entity_id_for(hass, "binary_sensor", f"{entry.entry_id}_certificates_problem")
+
+
 def _state(hass: HomeAssistant, entity_id: str) -> Any:
     """Return the state object of ``entity_id``; fail when it does not exist."""
     state = hass.states.get(entity_id)
@@ -321,9 +326,9 @@ async def test_cert_notifications_do_not_grow_listeners(
     """Rejected duplicate cert entities never subscribe to the cert coordinator."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    # Two kind listeners plus one per cert entity (two hosts, two classes).
+    # 2 kind listeners + 4 certificate entities (two hosts, two classes) + the aggregate.
     listeners_after_setup = len(cert_coordinator._listeners)
-    assert listeners_after_setup == 6
+    assert listeners_after_setup == 7
 
     for days in (20, 10, 5):
         cert_coordinator.async_set_updated_data({HOST: _cert(HOST, days), OTHER_HOST: _cert(OTHER_HOST, days)})
@@ -340,7 +345,8 @@ async def test_known_cert_hosts_are_never_added_again(
     """Cert cycles, a threshold change and an options change add no entity a second time."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    assert len(cert_coordinator._listeners) == 6
+    # 2 kind listeners + 4 certificate entities + the aggregate.
+    assert len(cert_coordinator._listeners) == 7
 
     for days in (20, 10, 5):
         cert_coordinator.async_set_updated_data({HOST: _cert(HOST, days), OTHER_HOST: _cert(OTHER_HOST, days)})
@@ -351,7 +357,7 @@ async def test_known_cert_hosts_are_never_added_again(
     await hass.async_block_till_done()
 
     assert DUPLICATE_ID_MESSAGE not in caplog.text
-    assert len(cert_coordinator._listeners) == 6
+    assert len(cert_coordinator._listeners) == 7
     assert _state(hass, _expiring(hass, entry)).state == "on"
 
 
@@ -396,10 +402,10 @@ async def test_vanished_cert_host_unavailable_then_removed_after_grace(
 async def test_unchanged_cert_notification_writes_nothing(
     hass: HomeAssistant, aioclient_mock: Any, cert_probe_ok: AsyncMock, freezer: Any
 ) -> None:
-    """A cert notification with unchanged data keeps last_reported of every cert entity."""
+    """A cert notification with unchanged data keeps last_reported of every cert entity, the aggregate included."""
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
-    entity_ids = _all_cert_ids(hass, entry)
+    entity_ids = (*_all_cert_ids(hass, entry), _certificates_problem(hass, entry))
     # Certificates half a day off the day boundary, so one second changes no day count.
     half_day = {
         host: dataclasses.replace(_cert(host, 30), certificate=_probed(host, 30.5).certificate)
@@ -508,7 +514,8 @@ async def test_secret_token_never_in_cert_attributes_or_log(
     for _ in range(2):
         await cert_coordinator.async_refresh()
         await hass.async_block_till_done()
-    assert mock_tls_probe.await_count == 6
+    # Setup plus two cert cycles, one probe per host each.
+    assert mock_tls_probe.await_count == 3 * 2
 
     for entity_id in _all_cert_ids(hass, entry):
         state = _state(hass, entity_id)
@@ -674,6 +681,11 @@ async def test_default_v37_setup_is_clock_independent(
         expiring = _state(hass, _expiring(hass, entry, host))
         assert expiring.state == "off"
         assert expiring.attributes["reason"] is None
+    aggregate = _state(hass, _certificates_problem(hass, entry))
+    assert aggregate.state == "off"
+    assert aggregate.attributes["problems"] == []
+    assert aggregate.attributes["problem_count"] == 0
+    assert aggregate.attributes["reasons"] == {}
     assert mock_tls_probe.call_count == 0
 
 

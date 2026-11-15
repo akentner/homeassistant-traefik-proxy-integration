@@ -46,6 +46,7 @@ ON_OFF_KEYS = {
     ("binary_sensor", "services_problem"),
     ("binary_sensor", "middlewares_problem"),
     ("binary_sensor", "certificate_expiring"),
+    ("binary_sensor", "certificates_problem"),
 }
 # Translation keys whose entity name comes from the item key (no translated name).
 UNNAMED_KEYS = {("sensor", "router"), ("sensor", "service"), ("sensor", "entrypoint")}
@@ -96,6 +97,8 @@ def _code_keys() -> set[tuple[str, str]]:
     for cls in (TraefikRouterSensor, TraefikServiceSensor, TraefikEntrypointSensor, TraefikCertExpirySensor):
         keys.add(("sensor", _class_key(cls)))
     keys.add(("binary_sensor", _class_key(TraefikCertExpiringBinarySensor)))
+    # Not a PROBLEM_SENSORS description: it reads the cert coordinator, not the snapshot.
+    keys.add(("binary_sensor", _class_key(binary_sensor.TraefikCertificatesProblemBinarySensor)))
     keys.add(("button", _class_key(TraefikRefreshButton)))
     return keys
 
