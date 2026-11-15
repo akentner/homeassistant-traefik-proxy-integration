@@ -1,21 +1,29 @@
 name: Validate
 
+# Every `run:` command of the lint, test and test-min-ha jobs is the Makefile's
+# command string (make lint / typecheck / test / test-min-ha), so a developer
+# runs exactly what CI runs. Actions are pinned to commit SHAs; Dependabot
+# (.github/dependabot.yml) proposes updates.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions: {}
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Set up Python
         run: uv python install 3.14
@@ -34,47 +42,61 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.14"]
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v5
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set up Python
+        run: uv python install 3.14
+
       - name: Sync dev dependencies
         run: uv sync
-      - name: Pytest with coverage
-        run: uv run pytest tests/ -v --cov
+
+      - name: Pytest with the coverage gate
+        run: uv run pytest -q tests
 
   test-min-ha:
     name: Tests (minimum HA 2026.11.0)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
       - name: Set up Python
         run: uv python install 3.14
-      - name: Install the minimum Home Assistant test stack
-        run: |
-          uv venv --python 3.14 .venv-min-ha
-          uv pip install --python .venv-min-ha/bin/python "pytest-homeassistant==2026.11.0" "pytest-cov>=7.0.0"
+
+      - name: Create the minimum-HA venv
+        run: uv venv --clear --python 3.14 .venv-min-ha
+
+      - name: Install the locked minimum-HA test stack
+        run: uv pip sync --python .venv-min-ha/bin/python --require-hashes .github/requirements-min-ha.txt
+
       - name: Pytest against HA 2026.11.0
-        run: .venv-min-ha/bin/python -m pytest -q -o addopts="-p no:respx" tests
+        run: .venv-min-ha/bin/python -m pytest -q tests
 
   hassfest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: home-assistant/actions/hassfest@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No version tag exists upstream; pinned to the master commit of that date.
+      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master (2026-10-26)
 
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: hacs/action@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The token comes from the action's github_token input default.
+      - uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
