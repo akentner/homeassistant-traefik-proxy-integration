@@ -1,19 +1,19 @@
 """Tests for the Traefik integration config flow.
 
 Covers:
-- ``STEP_USER_DATA_SCHEMA`` rejects malformed URLs via ``cv.url``.
+- ``STEP_USER_DATA_SCHEMA`` accepts any URL string (the shape check runs in
+  the step) and defaults the auth type to none.
 - ``_validate_input`` maps ``InvalidUrlClientError`` (aiohttp URL parse failure)
   to ``InvalidUrl`` and ``async_step_user`` surfaces ``errors["base"] = "invalid_url"``
   instead of HA's generic "Unknown error occurred".
-- ``STEP_USER_DATA_SCHEMA`` accepts an empty ``api_key`` (``TextSelector``
-  with URL type used to mask the field; ``cv.url`` rejects bad schemes).
 - ``TraefikProxyApiClient`` classifies ``InvalidUrlClientError`` as
   ``TraefikProxyInvalidUrlError`` so neither the flow nor the coordinator sees a
   raw aiohttp exception.
 - ``_validate_input`` probes ``/api/version`` and maps every client error class
   to its flow error (auth, API disabled, invalid URL, cannot connect).
 - Every ``AuthMode`` round-trips through the client to the exact
-  Authorization header ``Auth.header()`` promises.
+  Authorization header ``Auth.header()`` promises, also from stored entry data.
+- The user step stores entry data 1.3 and reauth replaces the credentials.
 
 Hermetic via ``aioclient_mock`` (HA's HTTP mock layer) — no live Traefik needed.
 """
@@ -25,9 +25,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy.api import (
     Auth,
@@ -42,7 +42,6 @@ from custom_components.traefik_proxy.api import (
 )
 from custom_components.traefik_proxy.config_flow import (
     STEP_USER_DATA_SCHEMA,
-    STEP_YAML_DATA_SCHEMA,
     ApiDisabled,
     CannotConnect,
     InvalidAuth,
@@ -51,17 +50,20 @@ from custom_components.traefik_proxy.config_flow import (
     _validate_input,
 )
 from custom_components.traefik_proxy.const import (
-    CONF_API_KEY,
     CONF_URL,
     CONF_VERIFY_SSL,
     DOMAIN,
 )
 from custom_components.traefik_proxy.coordinator import auth_from_entry_data
-from tests.conftest import MOCK_URL, load_fixture, stub_traefik
+from tests.conftest import AUTH_TYPE, MOCK_URL, load_fixture, make_traefik_entry, stub_traefik
 
 GOOD_URL = "https://traefik.example.com:8080"
 USERINFO_URL = "https://u:p@traefik.example.com:8080"
 CONSTRUCTION_ERROR = "Cannot combine AUTHORIZATION header with AUTH argument or credentials encoded in URL"
+# admin:s3cret, base64-encoded (RFC 7617)
+BASIC_HEADER = "Basic YWRtaW46czNjcmV0"
+BEARER_DATA = {CONF_URL: GOOD_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "tok"}
+NONE_DATA = {CONF_URL: GOOD_URL, AUTH_TYPE: "none"}
 
 
 # ----------------------- schema validation -----------------------
@@ -108,16 +110,10 @@ def test_user_schema_accepts_http_and_https(url: str) -> None:
     assert out[CONF_URL] == url
 
 
-def test_user_schema_accepts_empty_api_key() -> None:
-    """Bearer is optional — empty string must pass schema validation."""
-    out = STEP_USER_DATA_SCHEMA({CONF_URL: GOOD_URL, CONF_API_KEY: ""})
-    assert out[CONF_API_KEY] == ""
-
-
-def test_user_schema_omitted_api_key_defaults_to_empty() -> None:
-    """Omitting ``api_key`` entirely (e.g. UI form with blank field) → default ``""``."""
+def test_user_schema_defaults_to_no_auth() -> None:
+    """Without an auth type the form selects none and adds no credential."""
     out = STEP_USER_DATA_SCHEMA({CONF_URL: GOOD_URL})
-    assert out[CONF_API_KEY] == ""
+    assert out == {CONF_URL: GOOD_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"}
 
 
 def test_user_schema_serializes_for_config_flow_endpoint() -> None:
@@ -136,18 +132,11 @@ def test_user_schema_serializes_for_config_flow_endpoint() -> None:
 
     serialized = serialize_schema(STEP_USER_DATA_SCHEMA, custom_serializer=cv.custom_serializer)
     assert isinstance(serialized, list)
-    assert len(serialized) == 3
     # URL field becomes a selector block of type=text/url.
     by_name = {field["name"]: field for field in serialized}
+    assert list(by_name) == [CONF_URL, CONF_VERIFY_SSL, AUTH_TYPE, CONF_USERNAME, CONF_PASSWORD, CONF_TOKEN]
     assert by_name["url"]["selector"] == {"text": {"type": "url", "multiple": False, "multiline": False}}
-    assert by_name["api_key"]["selector"]["text"]["type"] == "password"
-
-
-def test_yaml_schema_accepts_arbitrary_url_string() -> None:
-    """YAML schema is plain string validation; URL shape is checked by
-    ``_check_url_shape`` after submission (see v0.1.3 release notes)."""
-    out = STEP_YAML_DATA_SCHEMA({CONF_URL: "http;//foo.bar"})
-    assert out[CONF_URL] == "http;//foo.bar"
+    assert by_name[CONF_TOKEN]["selector"]["text"]["type"] == "password"
 
 
 # ----------------------- _check_url_shape -----------------------
@@ -188,13 +177,6 @@ def test_check_url_shape_rejects_userinfo(url: str) -> None:
         _check_url_shape(url)
 
 
-def test_check_url_shape_allows_userinfo_when_opted_in() -> None:
-    """allow_userinfo=True skips only the userinfo rule; the scheme check stays."""
-    _check_url_shape(USERINFO_URL, allow_userinfo=True)
-    with pytest.raises(InvalidUrl):
-        _check_url_shape("ftp://u:p@traefik.example.com", allow_userinfo=True)
-
-
 # ----------------------- _validate_input + aiohttp url-parse failure -----------------------
 
 
@@ -207,32 +189,30 @@ async def test_validate_input_maps_invalid_url_client_error_to_invalid_url(
     with pytest.raises(InvalidUrl):
         await _validate_input(
             hass,
-            {CONF_URL: "http;//foo.bar", CONF_API_KEY: "tok", CONF_VERIFY_SSL: True},
+            {CONF_URL: "http;//foo.bar", AUTH_TYPE: "bearer", CONF_TOKEN: "tok", CONF_VERIFY_SSL: True},
         )
 
 
 async def test_validate_input_uses_urlparse_shape_check(hass: object) -> None:
     """Pre-flight shape check runs BEFORE aiohttp — bad URLs never reach the network."""
     with pytest.raises(InvalidUrl):
-        await _validate_input(hass, {CONF_URL: "://broken", CONF_API_KEY: "tok"})
+        await _validate_input(hass, {CONF_URL: "://broken", AUTH_TYPE: "bearer", CONF_TOKEN: "tok"})
 
 
 async def test_validate_input_passes_on_good_url(hass: object, aioclient_mock: Any) -> None:
     """Happy-path probe succeeds against the captured /api/version and sends the bearer token."""
     aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
 
-    await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok"})
+    await _validate_input(hass, BEARER_DATA)
 
     assert aioclient_mock.mock_calls[0][3] == {"Authorization": "Bearer tok"}
 
 
-async def test_validate_input_empty_bearer_does_not_send_authorization_header(
-    hass: object, aioclient_mock: Any
-) -> None:
-    """Empty bearer -> no Authorization header sent -> Traefik with api.insecure works."""
+async def test_validate_input_no_auth_does_not_send_authorization_header(hass: object, aioclient_mock: Any) -> None:
+    """Auth type none -> no Authorization header sent -> Traefik with api.insecure works."""
     aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
 
-    await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: ""})
+    await _validate_input(hass, NONE_DATA)
 
     assert "Authorization" not in aioclient_mock.mock_calls[0][3]
 
@@ -240,7 +220,7 @@ async def test_validate_input_empty_bearer_does_not_send_authorization_header(
 async def test_validate_input_rejects_token_with_control_characters(hass: object, aioclient_mock: Any) -> None:
     """A token the client refuses to send surfaces as invalid_auth without a request."""
     with pytest.raises(InvalidAuth):
-        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok\r\nX-Injected: 1"})
+        await _validate_input(hass, {**BEARER_DATA, CONF_TOKEN: "tok\r\nX-Injected: 1"})
     assert aioclient_mock.mock_calls == []
 
 
@@ -269,7 +249,7 @@ async def test_validate_input_maps_client_errors(
         patch.object(TraefikProxyApiClient, "async_get_version", AsyncMock(side_effect=side_effect)),
         pytest.raises(expected),
     ):
-        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+        await _validate_input(hass, {**BEARER_DATA, CONF_VERIFY_SSL: True})
 
 
 async def test_validate_input_maps_real_404_to_api_disabled(hass: object, aioclient_mock: Any) -> None:
@@ -277,7 +257,7 @@ async def test_validate_input_maps_real_404_to_api_disabled(hass: object, aiocli
     aioclient_mock.get(f"{GOOD_URL}/api/version", status=404)
 
     with pytest.raises(ApiDisabled):
-        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: ""})
+        await _validate_input(hass, NONE_DATA)
 
 
 # ----------------------- api.py: InvalidUrlClientError is classified -----------------------
@@ -317,31 +297,67 @@ async def test_every_auth_mode_round_trips_to_its_header(hass: object, aioclient
     assert headers == auth.header()
 
 
+ENTRY_DATA_BY_MODE = {
+    "none": {AUTH_TYPE: "none"},
+    "basic": {AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"},
+    "bearer": {AUTH_TYPE: "bearer", CONF_TOKEN: "s3cret-token"},
+}
+
+
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
-        pytest.param({CONF_API_KEY: "tok"}, Auth(mode=AuthMode.bearer, token="tok"), id="token"),
-        pytest.param({CONF_API_KEY: ""}, Auth(), id="empty"),
-        pytest.param({}, Auth(), id="missing"),
-        pytest.param({CONF_API_KEY: None}, Auth(), id="none"),
+        pytest.param(ENTRY_DATA_BY_MODE["none"], Auth(), id="none"),
+        pytest.param(
+            ENTRY_DATA_BY_MODE["basic"], Auth(mode=AuthMode.basic, username="admin", password="s3cret"), id="basic"
+        ),
+        pytest.param(ENTRY_DATA_BY_MODE["bearer"], Auth(mode=AuthMode.bearer, token="s3cret-token"), id="bearer"),
+        pytest.param({}, Auth(), id="missing-auth-type"),
     ],
 )
 def test_auth_from_entry_data(data: dict[str, Any], expected: Auth) -> None:
-    """Entry data maps to bearer for a non-empty token and to no auth otherwise."""
-    assert auth_from_entry_data({CONF_URL: GOOD_URL, **data}) == expected
+    """Entry data 1.3 maps its auth_type and the mode's credentials to Auth."""
+    assert auth_from_entry_data({CONF_URL: GOOD_URL, CONF_VERIFY_SSL: True, **data}) == expected
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param({AUTH_TYPE: "digest"}, id="unknown-auth-type"),
+        pytest.param({AUTH_TYPE: "basic", CONF_USERNAME: "admin"}, id="basic-without-password"),
+        pytest.param({AUTH_TYPE: "bearer"}, id="bearer-without-token"),
+    ],
+)
+def test_auth_from_entry_data_rejects_unusable_data(data: dict[str, Any]) -> None:
+    """An unknown auth type or a mode without its credentials raises ValueError."""
+    with pytest.raises(ValueError):
+        auth_from_entry_data({CONF_URL: GOOD_URL, **data})
+
+
+@pytest.mark.parametrize("mode", list(ENTRY_DATA_BY_MODE))
+async def test_entry_data_round_trips_to_probe_header(hass: object, aioclient_mock: Any, mode: str) -> None:
+    """Entry data 1.3 -> auth_from_entry_data -> the probe request carries exactly Auth.header()."""
+    assert set(ENTRY_DATA_BY_MODE) == {m.value for m in AuthMode}
+    aioclient_mock.get(f"{GOOD_URL}/api/version", json=load_fixture("v3.7", "version.json"))
+    data = {CONF_URL: GOOD_URL, CONF_VERIFY_SSL: True, **ENTRY_DATA_BY_MODE[mode]}
+
+    await _validate_input(hass, data)
+
+    expected = auth_from_entry_data(data).header()
+    assert aioclient_mock.mock_calls[0][3] == expected
+    if mode == "none":
+        assert expected == {}
+    else:
+        assert expected.get("Authorization", "").startswith("Basic " if mode == "basic" else "Bearer ")
 
 
 # ----------------------- URL userinfo (credentials embedded in the URL) -----------------------
 
 
-def _version_requests(aioclient_mock: Any) -> list[Any]:
-    return [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
-
-
 async def test_validate_input_rejects_userinfo_url_without_request(hass: object, aioclient_mock: Any) -> None:
     """A userinfo URL is refused by the shape check before any request is sent."""
     with pytest.raises(InvalidUrl):
-        await _validate_input(hass, {CONF_URL: USERINFO_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+        await _validate_input(hass, {**BEARER_DATA, CONF_URL: USERINFO_URL, CONF_VERIFY_SSL: True})
 
     assert aioclient_mock.call_count == 0
 
@@ -351,7 +367,7 @@ async def test_validate_input_maps_request_construction_error_to_invalid_url(has
     aioclient_mock.get(f"{GOOD_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
 
     with pytest.raises(InvalidUrl):
-        await _validate_input(hass, {CONF_URL: GOOD_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True})
+        await _validate_input(hass, {**BEARER_DATA, CONF_VERIFY_SSL: True})
 
 
 async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) -> None:
@@ -359,7 +375,7 @@ async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) ->
     result = await hass.config_entries.flow.async_init(
         DOMAIN,
         context={"source": "user"},
-        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "tok", CONF_VERIFY_SSL: True},
+        data={CONF_URL: USERINFO_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "tok", CONF_VERIFY_SSL: True},
     )
 
     assert result["type"] is FlowResultType.FORM
@@ -367,56 +383,62 @@ async def test_user_step_rejects_userinfo_url(hass: Any, aioclient_mock: Any) ->
     assert aioclient_mock.call_count == 0
 
 
-def _userinfo_entry(hass: Any) -> MockConfigEntry:
-    """An existing entry whose stored URL carries userinfo (added, not set up)."""
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="Traefik",
-        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "old", CONF_VERIFY_SSL: True},
-        unique_id="traefik.example.com",
-    )
-    entry.add_to_hass(hass)
-    return entry
+# ----------------------- user step and reauth store entry data 1.3 -----------------------
 
 
-async def test_reauth_confirm_userinfo_url_with_token_maps_construction_error(hass: Any, aioclient_mock: Any) -> None:
-    """Reauth probes the stored userinfo URL; a token makes aiohttp refuse, mapped to invalid_url."""
-    aioclient_mock.get(f"{MOCK_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
-    entry = _userinfo_entry(hass)
-
-    result = await entry.start_reauth_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: "new"})
-
+async def test_user_step_basic_auth_reaches_traefik(hass: Any, aioclient_mock: Any) -> None:
+    """Basic auth from the user step is stored as 1.3 data and sent on every /api/version request."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_url"}
-    assert len(_version_requests(aioclient_mock)) == 1
-    assert entry.data[CONF_API_KEY] == "old"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"},
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    entry = result["result"]
+    assert (entry.version, entry.minor_version) == (1, 3)
+    assert dict(entry.data) == {
+        CONF_URL: MOCK_URL,
+        CONF_VERIFY_SSL: True,
+        AUTH_TYPE: "basic",
+        CONF_USERNAME: "admin",
+        CONF_PASSWORD: "s3cret",
+    }
+    versions = _version_requests(aioclient_mock)
+    # The probe plus the setup of the new entry.
+    assert len(versions) >= 2
+    assert all((call[3] or {}).get("Authorization") == BASIC_HEADER for call in versions)
 
 
-async def test_reauth_confirm_userinfo_url_without_token_succeeds(hass: Any, aioclient_mock: Any) -> None:
-    """Reauth of a userinfo entry with an empty token completes against a healthy Traefik."""
-    stub_traefik(aioclient_mock, rawdata={})
-    entry = _userinfo_entry(hass)
+async def test_reauth_bearer_replaces_token_with_complete_data(hass: Any, aioclient_mock: Any) -> None:
+    """Reauth stores complete 1.3 data and aborts with the central reauth_successful reason."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
 
     result = await entry.start_reauth_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: ""})
-    await hass.async_block_till_done()
+    assert result["step_id"] == "reauth_confirm"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {AUTH_TYPE: "bearer", CONF_TOKEN: "new"})
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert entry.data[CONF_API_KEY] == ""
+    assert result["translation_domain"] == "homeassistant"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "new"}
+    assert _probe_auth(aioclient_mock) == "Bearer new"
 
 
-async def test_yaml_step_userinfo_url_with_token_maps_construction_error(hass: Any, aioclient_mock: Any) -> None:
-    """A YAML import with a userinfo URL reaches the client, which answers with the mapped invalid_url."""
-    aioclient_mock.get(f"{MOCK_URL}/api/version", exc=ValueError(CONSTRUCTION_ERROR))
+def _version_requests(aioclient_mock: Any) -> list[Any]:
+    return [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
 
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN,
-        context={"source": "yaml"},
-        data={CONF_URL: USERINFO_URL, CONF_API_KEY: "tok"},
-    )
 
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"base": "invalid_url"}
-    assert len(_version_requests(aioclient_mock)) == 1
+def _probe_auth(aioclient_mock: Any) -> str | None:
+    """Authorization header of the first /api/version request (the flow probe for entries not set up)."""
+    versions = _version_requests(aioclient_mock)
+    assert versions, "no /api/version request recorded"
+    headers: dict[str, str] = versions[0][3] or {}
+    return headers.get("Authorization")

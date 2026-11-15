@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import CONF_TOKEN
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from pytest_homeassistant.common import MockConfigEntry
 
@@ -29,6 +30,7 @@ from custom_components.traefik_proxy.data import TraefikRuntimeData
 from custom_components.traefik_proxy.entity_manager import ROUTERS
 from custom_components.traefik_proxy.models import TraefikSnapshot
 from tests.conftest import (
+    AUTH_TYPE,
     MOCK_URL,
     entity_id_for,
     load_fixture,
@@ -135,9 +137,16 @@ async def test_request_construction_error_stops_setup_without_traceback(hass, ai
     assert "Cannot combine" not in caplog.text
 
 
-async def test_invalid_credentials_start_reauth_without_request(hass, aioclient_mock, caplog) -> None:
-    """A stored token Auth rejects => ConfigEntryAuthFailed 'invalid_credentials' => reauth, no request (D-15)."""
-    entry = _make_entry(data={CONF_URL: MOCK_URL, CONF_API_KEY: "bad\ntoken", CONF_VERIFY_SSL: True})
+@pytest.mark.parametrize(
+    "auth",
+    [
+        pytest.param({AUTH_TYPE: "bearer", CONF_TOKEN: "bad\ntoken"}, id="control-character"),
+        pytest.param({AUTH_TYPE: "digest"}, id="unknown-auth-type"),
+    ],
+)
+async def test_invalid_credentials_start_reauth_without_request(hass, aioclient_mock, caplog, auth) -> None:
+    """Stored credentials Auth rejects => ConfigEntryAuthFailed 'invalid_credentials' => reauth, no request (D-15)."""
+    entry = _make_entry(data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **auth}, minor_version=3)
     entry.add_to_hass(hass)
     result = await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

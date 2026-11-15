@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -221,12 +222,30 @@ def restub_traefik(aioclient_mock: Any, **kwargs: Any) -> None:
     stub_traefik(aioclient_mock, **kwargs)
 
 
+# Stored entry data keys are a persistence contract, so tests spell them out.
+AUTH_TYPE = "auth_type"
+# Current config entry version (1.3) and its data for ``MOCK_URL`` with a bearer token.
+ENTRY_MINOR_VERSION = 3
+ENTRY_DATA: dict[str, Any] = {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "k"}
+# Data of a 0.3.0 entry (before 1.3): an optional bearer token under api_key.
+LEGACY_ENTRY_DATA: dict[str, Any] = {CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True}
+
+
 def make_traefik_entry(*, options: dict[str, Any] | None = None, **kwargs: Any) -> MockConfigEntry:
-    """Build a Traefik config entry for ``MOCK_URL``; ``kwargs`` override MockConfigEntry fields."""
+    """Build a Traefik config entry for ``MOCK_URL``; ``kwargs`` override MockConfigEntry fields.
+
+    The entry is at the current version 1.3 with a bearer token. A caller that
+    asks for an older minor version without passing ``data`` gets the legacy
+    data shape, so the entry runs through the migration on setup.
+    """
+    minor_version = kwargs.get("minor_version", ENTRY_MINOR_VERSION)
+    legacy = minor_version < ENTRY_MINOR_VERSION
     params: dict[str, Any] = {
         "domain": DOMAIN,
         "title": "Traefik",
-        "data": {CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+        "version": 1,
+        "minor_version": minor_version,
+        "data": dict(LEGACY_ENTRY_DATA if legacy else ENTRY_DATA),
         "unique_id": "traefik.example.com",
         "options": options or {},
     }
@@ -313,21 +332,6 @@ def make_cert_state(
         error=error,
         failures=failures,
         fetched_at=None if certificate is None else now,
-    )
-
-
-@pytest.fixture
-def mock_traefik_config_entry() -> MockConfigEntry:
-    """A config entry for the Traefik integration, valid for happy-path tests."""
-    return MockConfigEntry(
-        domain="traefik_proxy",
-        title="Traefik Proxy",
-        data={
-            "url": "https://traefik.example.com:8080",
-            "api_key": "test-secret",
-            "verify_ssl": True,
-        },
-        unique_id="traefik.example.com",
     )
 
 

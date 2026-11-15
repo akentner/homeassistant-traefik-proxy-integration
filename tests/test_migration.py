@@ -1,4 +1,4 @@
-"""Config-entry migration 1.1 -> 1.2 and its repair notice (D-18, D-19, ENT-09, M34).
+"""Config-entry migrations 1.1 -> 1.2 (registry, repair notice) and 1.2 -> 1.3 (entry data).
 
 Old (0.3.0) registry entries are pre-created before setup. HA schedules an
 entry reload 30 s after the migration clears ``disabled_by`` on an entity, so
@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
+from homeassistant.const import CONF_TOKEN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -19,6 +20,9 @@ from homeassistant.helpers import issue_registry as ir
 import custom_components.traefik_proxy as integration
 from custom_components.traefik_proxy.config_flow import TraefikProxyConfigFlow
 from custom_components.traefik_proxy.const import (
+    CONF_API_KEY,
+    CONF_URL,
+    CONF_VERIFY_SSL,
     DOMAIN,
     UID_MIDDLEWARES_PROBLEM,
     UID_ROUTERS_PROBLEM,
@@ -28,6 +32,8 @@ from custom_components.traefik_proxy.coordinator import VERSION_RECHECK_INTERVAL
 from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, SERVICES, missing_store_key
 from tests.conftest import (
+    AUTH_TYPE,
+    MOCK_URL,
     entity_id_for,
     load_fixture,
     make_traefik_entry,
@@ -161,7 +167,9 @@ async def test_migration_from_1_1(hass: HomeAssistant, aioclient_mock: Any) -> N
 
     for name in ("router_a", "router_b", "reload"):
         assert registry.async_get(ids[name]) is None, name
-    assert entry.minor_version == 2
+    # 1.1 reaches 1.3 in one setup.
+    assert entry.minor_version == 3
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "k"}
     for name in ("routers_problem", "middlewares_problem"):
         reg_entry = registry.async_get(ids[name])
         assert reg_entry is not None
@@ -198,17 +206,17 @@ async def test_migration_from_1_1(hass: HomeAssistant, aioclient_mock: Any) -> N
 
 
 async def test_migration_without_old_entries(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    """A 1.1 entry without replaced entries is bumped to 1.2 without a repair issue."""
+    """A 1.1 entry without replaced entries is bumped to 1.3 without a repair issue."""
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=1)
     await setup_traefik_entry(hass, aioclient_mock, entry)
 
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert _own_issues(hass) == []
 
 
 async def test_entry_at_1_2_skips_migration(hass: HomeAssistant, aioclient_mock: Any) -> None:
-    """An entry created at minor version 2 keeps a look-alike router binary_sensor and gets no issue."""
-    assert (TraefikProxyConfigFlow.VERSION, TraefikProxyConfigFlow.MINOR_VERSION) == (1, 2)
+    """An entry at minor version 2 skips the 1.2 step: it keeps a look-alike router binary_sensor and gets no issue."""
+    assert (TraefikProxyConfigFlow.VERSION, TraefikProxyConfigFlow.MINOR_VERSION) == (1, 3)
     entry = make_traefik_entry(entry_id=ENTRY_ID, version=1, minor_version=2)
     entry.add_to_hass(hass)
     router = _create(hass, entry, "binary_sensor", "http_router_file-ok@file")
@@ -216,7 +224,7 @@ async def test_entry_at_1_2_skips_migration(hass: HomeAssistant, aioclient_mock:
     await setup_traefik_entry(hass, aioclient_mock, entry)
 
     assert er.async_get(hass).async_get(router) is not None
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert _own_issues(hass) == []
 
 
@@ -299,12 +307,15 @@ async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
     assert first_issue is not None
     assert first_issue.translation_placeholders == {"entry_title": "Traefik", "removed_count": "3"}
 
+    data_after_first = dict(entry.data)
+    assert data_after_first == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "k"}
     hass.config_entries.async_update_entry(entry, minor_version=1)
     assert await integration.async_migrate_entry(hass, entry)
 
     after_second = {e.entity_id: e for e in er.async_entries_for_config_entry(registry, ENTRY_ID)}
     assert after_second == after_first
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
+    assert dict(entry.data) == data_after_first
     assert len(_own_issues(hass)) == 1
     issue = _get_issue(hass, ENTRY_ID)
     assert issue is not None
@@ -634,3 +645,53 @@ async def test_device_disabled_mapping_is_scoped_and_idempotent(hass: HomeAssist
 
     assert _entries(registry, ENTRY_ID, OTHER_ENTRY_ID) == after_first
     assert other.minor_version == 1
+
+
+# ----------------------- 1.2 -> 1.3: entry data -----------------------
+
+
+@pytest.mark.parametrize(
+    ("legacy", "expected"),
+    [
+        pytest.param({CONF_API_KEY: "k"}, {AUTH_TYPE: "bearer", CONF_TOKEN: "k"}, id="token"),
+        pytest.param({CONF_API_KEY: ""}, {AUTH_TYPE: "none"}, id="empty-token"),
+        pytest.param({}, {AUTH_TYPE: "none"}, id="no-token"),
+    ],
+)
+async def test_migration_1_2_maps_api_key_to_auth_type(
+    hass: HomeAssistant, legacy: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    """A 1.2 entry's api_key becomes bearer + token (non-empty) or auth type none; api_key is removed."""
+    entry = make_traefik_entry(
+        entry_id=ENTRY_ID, minor_version=2, data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: False, **legacy}
+    )
+    entry.add_to_hass(hass)
+
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.minor_version == 3
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: False, **expected}
+
+
+async def test_migration_1_2_keeps_existing_auth_type(hass: HomeAssistant) -> None:
+    """An entry that already has an auth type keeps its auth keys (re-run after a reset minor version)."""
+    data = {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "basic", "username": "admin", "password": "s3cret"}
+    entry = make_traefik_entry(entry_id=ENTRY_ID, minor_version=2, data=data)
+    entry.add_to_hass(hass)
+
+    assert await integration.async_migrate_entry(hass, entry)
+    hass.config_entries.async_update_entry(entry, minor_version=2)
+    assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.minor_version == 3
+    assert dict(entry.data) == data
+
+
+async def test_migrated_token_entry_loads_with_bearer_header(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """A migrated 0.3.0 token entry loads and sends its token as a bearer header."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry(entry_id=ENTRY_ID, minor_version=2))
+
+    assert entry.minor_version == 3
+    versions = [call for call in aioclient_mock.mock_calls if str(call[1]).endswith("/api/version")]
+    assert versions
+    assert all((call[3] or {}).get("Authorization") == "Bearer k" for call in versions)

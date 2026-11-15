@@ -18,12 +18,12 @@ from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import CONF_TOKEN
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant.common import MockConfigEntry
 
 from custom_components.traefik_proxy.api import TraefikProxyApiClient
 from custom_components.traefik_proxy.const import (
-    CONF_API_KEY,
     CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
@@ -31,7 +31,7 @@ from custom_components.traefik_proxy.const import (
     DOMAIN,
 )
 from custom_components.traefik_proxy.coordinator import effective_verify_ssl
-from tests.conftest import MOCK_URL, stub_traefik
+from tests.conftest import AUTH_TYPE, MOCK_URL, make_traefik_entry, stub_traefik
 
 NEW_URL = "https://traefik-new.example.com:8080"
 PROBE_CLIENT = "custom_components.traefik_proxy.config_flow.TraefikProxyApiClient"
@@ -39,12 +39,9 @@ PROBE_CLIENT = "custom_components.traefik_proxy.config_flow.TraefikProxyApiClien
 
 def _make_entry(*, verify_ssl: bool = True, options: dict[str, Any] | None = None) -> MockConfigEntry:
     """Build a Traefik MockConfigEntry with the given data verify_ssl and options."""
-    return MockConfigEntry(
-        domain=DOMAIN,
-        title="Traefik",
-        data={CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: verify_ssl},
-        options=options or {},
-        unique_id="traefik.example.com",
+    return make_traefik_entry(
+        data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: verify_ssl, AUTH_TYPE: "bearer", CONF_TOKEN: "k"},
+        options=options,
     )
 
 
@@ -81,7 +78,7 @@ async def test_user_flow_verify_ssl_false_reaches_runtime_client(hass, aioclient
     with patch(PROBE_CLIENT, wraps=TraefikProxyApiClient) as probe:
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {CONF_URL: MOCK_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: False},
+            {CONF_URL: MOCK_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "k", CONF_VERIFY_SSL: False},
         )
         await hass.async_block_till_done()
 
@@ -106,7 +103,7 @@ async def test_options_false_then_reconfigure_true(hass, aioclient_mock) -> None
 
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_URL: NEW_URL, CONF_API_KEY: "k", CONF_VERIFY_SSL: True},
+        {CONF_URL: NEW_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "k", CONF_VERIFY_SSL: True},
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -165,7 +162,9 @@ async def test_reauth_probe_uses_effective_value(hass, aioclient_mock) -> None:
     assert result["type"] is FlowResultType.FORM
 
     with patch(PROBE_CLIENT, wraps=TraefikProxyApiClient) as probe:
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_API_KEY: "new"})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {AUTH_TYPE: "bearer", CONF_TOKEN: "new"}
+        )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
