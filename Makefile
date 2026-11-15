@@ -1,6 +1,8 @@
-.PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity hassfest clean help
+.PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity hassfest hacs-action clean help
 
+REPO         ?= akentner/homeassistant-traefik-proxy-integration
 HASSFEST_IMG ?= ghcr.io/home-assistant/hassfest:latest
+HACS_IMG     ?= ghcr.io/hacs/action:main
 
 help:  ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -47,6 +49,17 @@ hassfest-sanity:  ## Run local hassfest-style sanity checks (no docker).
 
 hassfest:  ## Run hassfest exactly like home-assistant/actions/hassfest (throwaway container).
 	docker run --rm --pull always -v "$(CURDIR)":/github/workspace $(HASSFEST_IMG)
+
+hacs-action:  ## Run the hacs/action validators (category integration, no ignore) on the LOCAL tree.
+	@tmp=$$(mktemp -d) || exit 1; \
+	git ls-files -co --exclude-standard > "$$tmp/files.txt"; \
+	cp scripts/hacs_action_local.py "$$tmp/"; \
+	INPUT_GITHUB_TOKEN="$$(gh auth token)" docker run --rm --pull always \
+	  -e INPUT_GITHUB_TOKEN -e INPUT_CATEGORY=integration -e REPOSITORY_REF=local-tree \
+	  -e INPUT_REPOSITORY=$(REPO) -e REPOSITORY=$(REPO) -e GITHUB_REPOSITORY=$(REPO) \
+	  -v "$(CURDIR)":/repo:ro -v "$$tmp":/harness:ro \
+	  --entrypoint python3 $(HACS_IMG) /harness/hacs_action_local.py; \
+	rc=$$?; rm -f "$$tmp/files.txt" "$$tmp/hacs_action_local.py"; rmdir "$$tmp"; exit $$rc
 
 clean:  ## Remove caches and build artefacts.
 	@find . -name __pycache__ -prune -exec rm -rf {} +
