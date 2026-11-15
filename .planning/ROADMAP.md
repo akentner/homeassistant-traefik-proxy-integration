@@ -562,12 +562,12 @@ tag and catalog PR themselves remain the user's action.
      `.planning/`; `feat/marketplace-polish` is pushed and a **Draft PR** to
      `main` is open — no tag, release or `hacs/default` PR is created by the
      assistant (U1, M8). Tests, `ruff`, `mypy --strict` green.
-**Plans**: 1/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
+**Plans**: 2/13 plans executed in 8 waves (executed sequentially in the worktree, W55)
 
 Plans:
 **Wave 1**
 - [x] 08-01-PLAN.md — Tracer: diagnostics redact Header/Query values of router rules and errors (fail closed); entity attributes unchanged (REL-06; D-17, D-29)
-- [ ] 08-02-PLAN.md — Tracer: connect host resolved once per cert cycle, cert-cycle error chaining, deterministic socket tests, T-06-13 guard, probe clock IN-12..IN-14, fixture note (REL-04; D-18, D-20, D-22)
+- [x] 08-02-PLAN.md — Tracer: connect host resolved once per cert cycle, cert-cycle error chaining, deterministic socket tests, T-06-13 guard, probe clock IN-12..IN-14, fixture note (REL-04; D-18, D-20, D-22)
 - [ ] 08-03-PLAN.md — Tracer: migration repair with final title and kept-ID text, DEVICE->USER only for disabled devices, one host normalisation point, documented defence branches, planning-reference / doc-link / SyntaxWarning / sleep guards (REL-06, REL-04; D-10, D-11, D-16, D-19, D-21)
 - [ ] 08-04-PLAN.md — Tracer: icon re-export — trimmed, centred icons from `docs/icon.svg` (moved), geometry test (REL-02; D-03)
 
@@ -615,7 +615,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 5. Entity model + lifecycle | 8/8 | Complete    | 2026-11-15 |
 | 6. Certificates | 7/7 | Complete    | 2026-11-15 |
 | 7. Config flow, HA 2026.11 baseline, observability | 9/9 | Complete    | 2026-11-15 |
-| 8. Marketplace + release readiness | 1/13 | In Progress | - |
+| 8. Marketplace + release readiness | 2/13 | In Progress | - |
 
 **Coverage:**
 

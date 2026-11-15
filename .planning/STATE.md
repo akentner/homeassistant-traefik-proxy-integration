@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 08
 current_phase_name: Marketplace + release readiness
 status: executing
-stopped_at: Completed 08-01-PLAN.md
-last_updated: "2026-11-15T19:37:22.926Z"
+stopped_at: Completed 08-02-PLAN.md
+last_updated: "2026-11-15T19:51:33.334Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 08 execution started
-state_head: fdcefc983f954a5279b9bcaf0a89d2903d9b130b
+state_head: 7e798c8d1f6ca4337e7b42298801cbf44b5c1e66
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 57
-  completed_plans: 45
+  completed_plans: 46
 milestone_name: milestone
 ---
 
@@ -31,7 +31,7 @@ failing, and which TLS certificates are expiring soon.
 ## Current Position
 
 Phase: 08 (Marketplace + release readiness) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-11-15 — Phase 08 execution started
 
@@ -112,6 +112,7 @@ Progress: [█████████░] 88% (6 of 8 phases)
 | Phase 07 P08 | 12min | 2 tasks | 5 files |
 | Phase 07 P09 | 17min | 3 tasks | 9 files |
 | Phase 08 P01 | 8 min | 2 tasks | 4 files |
+| Phase 08 P02 | 13 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -237,6 +238,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: en/de translation parity is enforced over the whole files
 - [Phase 08]: 08-01: Router errors split at the raw rule; a matcher call in any other segment redacts the whole error (diagnostics only)
 - [Phase 08]: 08-01: v2-form Query argument without '=' becomes the whole marker (ambiguous v2 key vs v3 value, fail closed)
+- [Phase 08]: 08-02: probe-mode cert cycle resolves the Traefik host once (first getaddrinfo address); a lookup failure is every host's probe failure
+- [Phase 08]: 08-02: autouse test resolver maps the MOCK_URL host to 192.0.2.80 (HA test plugin blocks DNS)
+- [Phase 08]: 08-02: capture throwaway cert is git-ignored, docstring says so; committing it left to the manager
 
 ### Pending Todos
 
@@ -281,7 +285,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T19:37:22.704Z
-Stopped at: Completed 08-01-PLAN.md
+Last session: 2026-11-15T19:51:33.065Z
+Stopped at: Completed 08-02-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
