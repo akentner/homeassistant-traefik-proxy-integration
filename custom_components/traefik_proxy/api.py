@@ -92,8 +92,7 @@ class Auth:
         """Return the Authorization header for one request (empty for mode none)."""
         if self.mode is AuthMode.basic and self.username and self.password:
             # RFC 7617 with UTF-8 credentials. Built here because aiohttp 3.14
-            # deprecates BasicAuth and the aiohttp of older Home Assistant
-            # releases lacks its replacement.
+            # deprecates BasicAuth.
             credentials = f"{self.username}:{self.password}".encode()
             return {"Authorization": f"Basic {base64.b64encode(credentials).decode('ascii')}"}
         if self.mode is AuthMode.bearer and self.token:

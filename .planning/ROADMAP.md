@@ -536,7 +536,7 @@ tag and catalog PR themselves remain the user's action.
      (keys sorted as hassfest requires) and `"version": "1.0.0"`; `brand/`
      contains re-exported, trimmed and centred `icon.png` (256²) /
      `icon@2x.png` (512²) plus `logo.png` / `logo@2x.png`, and `icon.svg`
-     lives in `docs/`; local brand serving is confirmed for HA 2026.3.0.
+     lives in `docs/`; local brand serving is confirmed for HA 2026.11.0.
   2. `README.md` is rewritten (Marketplace / My-link badge, prerequisites incl.
      how to protect the Traefik API with basicAuth, install/removal, options,
      entity table matching the code, example automations, troubleshooting, FAQ

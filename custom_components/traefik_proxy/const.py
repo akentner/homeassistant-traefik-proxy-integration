@@ -71,9 +71,6 @@ CERT_RETRY_INTERVAL: Final = 300
 # Upper bound of hosts probed per cert cycle (a constant, not an option).
 MAX_CERT_HOSTS: Final = 200
 
-# Version - bumped manually; CI in Plan 04 enforces match with git tag
-VERSION: Final = "1.0.0"
-
 # Platforms forwarded in async_setup_entry.
 # Phase 2 adds sensor (entrypoint/service/aggregate) and button (refresh).
 PLATFORMS: Final = ["binary_sensor", "sensor", "button"]

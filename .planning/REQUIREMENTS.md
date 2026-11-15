@@ -311,10 +311,10 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 - [ ] **REL-01**: `manifest.json` has `categories:
       ["computers_network.monitoring"]` (sorted keys) and version `1.0.0`;
-      `hacs.json` keeps `homeassistant: 2026.3.0`. (research §2)
+      `hacs.json` keeps `homeassistant: 2026.11.0`. (research §2)
 - [ ] **REL-02**: Brand icons are re-exported trimmed and centred, `logo.png`
       / `logo@2x.png` are added, `icon.svg` moves to `docs/`, local brand
-      serving is confirmed for HA 2026.3.0, and the README carries the Traefik
+      serving is confirmed for HA 2026.11.0, and the README carries the Traefik
       trademark note. (B-01..B-06, research §3)
 - [ ] **REL-03**: README is rewritten (Marketplace/My-link badge,
       prerequisites incl. protecting the Traefik API, install/removal, options,
@@ -325,7 +325,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       `fail_under`, Makefile aligned with CI, no test `SyntaxWarning`, no real
       multi-second sleeps in tests. (H-03, H-04, H-09, H-10, H-12)
 - [ ] **REL-05**: CI runs on push, PR, nightly schedule and manual dispatch,
-      includes a test job against HA 2026.3.x, and pins all actions by tag or
+      includes the test job against HA 2026.11.x added in Phase 7, and pins all actions by tag or
       SHA. (H-05, M9, M24)
 - [ ] **REL-06**: Shipped code contains no planning references (CONTEXT.md,
       PITFALLS, D-xx, BLOCKER, phase/plan numbers, `.planning/`, `.claude/`
@@ -386,11 +386,9 @@ Explicitly excluded. Documented to prevent scope creep.
 | Per-middleware entities | Middlewares are config-time constructs with no runtime state to expose |
 | TCP/UDP router+service entities | PROJECT.md explicitly HTTP-only; TCP uses a different API surface |
 | Integration service actions (reload or otherwise) | The Traefik API is read-only; the "Refresh now" button covers manual refresh (M12). Research §4.4 (action-setup, response data, action exceptions, service translations) is therefore moot |
-| HA 2026.11-only APIs (`ir` `config_entry_id`, `async_refresh_issues`, `async_unload_platforms_or_raise`, `-> None` setup) | Minimum HA stays 2026.3.0 (M4) |
 | `quality_scale.yaml` / manifest `quality_scale` | hassfest skips it for custom integrations; IQS rules are used as a checklist only (M10) |
 | Probatio migration (`import probatio`) | `voluptuous` is aliased to Probatio since HA 2026.9 with no deprecation; no action needed (research §4.7) |
 | Option "probe certificates via DNS" | Probing via the Traefik host with SNI is the only correct path behind CDNs/split DNS (M19); a DNS mode would re-introduce audit T-02 |
-| Conditional form fields (HA 2026.10+) | Would raise the minimum HA version (M4) |
 
 ## Traceability
 
@@ -504,7 +502,7 @@ exactly one phase (A-15 is split into its client and flow halves).
 | 6 — Certificates | A-12, P-05, P-06, P-07, P-08, U-09, U-10, S-04, S-05, S-07, T-01, T-02 | CERT-01..05 |
 | 7 — Config flow / 2026.11 baseline / observability | A-15 (flow: full error-path test matrix + translated `api_disabled` text), A-17, A-18, A-22, U-03, U-11, U-12, U-13, U-14, U-16, S-01, S-02, S-03; research §4.1, §4.2 translated `UpdateFailed`, §4.5, §4.6 (diagnostics, repairs), §5 2026.6→2026.12 listener deprecation, research summary items 6–7 (listener leak), 9 | FLOW-01..08, DIAG-04 |
 | 8 — Marketplace + release | A-19, B-01, B-02, B-03, B-04, B-05, B-06, H-01, H-02, H-03, H-04, H-05, H-06, H-07, H-08, H-09, H-10, H-12; research §2 (categories, CI triggers, release, catalog PR text, My-link badge), §3 brand, §4.6 `docs-*` rules + coverage gate, §6 Q1 (tag prefix), Q7 (doc URLs), Q8 (`info.md`) | REL-01..08, DIST-04, DOCS-02, DOCS-04 |
-| Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 2026.11-only APIs, `UNDEFINED`, `ATTR_*` constants — not used / not adopted (M4); §4.1 conditional form fields — would raise min HA | — |
+| Out of scope | research §4.4 service actions + research summary item 8 (`supports_response`) — moot, services removed in Phase 5; §4.7 Probatio — no action; §5 `UNDEFINED`, `ATTR_*` constants — not used (D-09) | — |
 
 ---
 *Requirements defined: 2026-07-05*
