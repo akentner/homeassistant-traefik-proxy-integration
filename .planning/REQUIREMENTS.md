@@ -301,7 +301,7 @@ Requirements for initial release. Each maps to a roadmap phase.
       source and `translations/de.json` has full key parity (tested). (A-18,
       U-13, U-14, M7)
 
-- [ ] **FLOW-08**: The minimum Home Assistant is 2026.11.0 (`hacs.json`,
+- [x] **FLOW-08**: The minimum Home Assistant is 2026.11.0 (`hacs.json`,
       test floor, CI job pinned to 2026.11.0); sub-devices link through the
       2026.11 device API instead of the registry workaround, repairs carry
       `config_entry_id`, unload uses `async_unload_platforms_or_raise`, and no
@@ -476,7 +476,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-05 | Phase 7 | Pending |
 | FLOW-06 | Phase 7 | Pending |
 | FLOW-07 | Phase 7 | Pending |
-| FLOW-08 | Phase 7 | Pending |
+| FLOW-08 | Phase 7 | Complete |
 | REL-01 | Phase 8 | Pending |
 | REL-02 | Phase 8 | Pending |
 | REL-03 | Phase 8 | Pending |

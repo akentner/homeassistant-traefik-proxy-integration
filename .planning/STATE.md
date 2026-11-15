@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
 status: executing
-stopped_at: Phase 06 complete, ready to plan Phase 07
-last_updated: "2026-11-15T12:49:20.645Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-11-15T12:57:34.658Z"
 last_activity: 2026-11-15
-last_activity_desc: Phase 06 complete, transitioned to Phase 07
-state_head: 406204dafa7dd7385ffc32997a8a631d070858ed
+last_activity_desc: Phase 07 execution started
+state_head: bb8440927d9db3e18908121f7671c31ee9c5a0c3
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 35
+  completed_plans: 36
 milestone_name: milestone
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-11-15)
 **Core value:** If nothing else works, the user must be able to see — at a
 glance inside Home Assistant — which Traefik routers are enabled, which are
 failing, and which TLS certificates are expiring soon.
-**Current focus:** Phase 07 — Config flow, HA 2026.12 compatibility, observability
+**Current focus:** Phase 07 — Config flow, HA 2026.11 baseline, observability
 
 ## Current Position
 
-Phase: 07 (Config flow, HA 2026.11 baseline, observability) — READY TO EXECUTE
-Plan: Not started
+Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
+Plan: 2 of 9
 Status: Ready to execute
-Last activity: 2026-11-15 — Phase 06 complete, transitioned to Phase 07
+Last activity: 2026-11-15 — Phase 07 execution started
 
 Progress: [████████░░] 75% (6 of 8 phases)
 
@@ -101,6 +101,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 06 P05 | 14min | 3 tasks | 8 files |
 | Phase 06 P06 | 8min | 2 tasks | 7 files |
 | Phase 06 P07 | 13min | 2 tasks | 10 files |
+| Phase 07 P01 | 4min | 2 tasks | 17 files |
 
 ## Accumulated Context
 
@@ -200,6 +201,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-06: Any failed cert cycle retries after CERT_RETRY_INTERVAL = 300 s (except Exception wrapper); success restores 6 h
 - [Phase 06]: 06-07: certificates_problem aggregate is a fixed per-entry entity on a TraefikCertCoordinatorEntity base (main device, cert coordinator), not a PROBLEM_SENSORS description; it uses HostCertState.problem like the per-host sensor, reasons only for the 50 listed hosts
 - [Phase 06]: 06-07: aggregate tests reference the class as a binary_sensor module attribute so RED fails in the test body, not at collection
+- [Phase 07]: 07-01: test stack is pytest-homeassistant>=2026.11.0 (dev HA 2026.11.1); provenance asserted from installed metadata (M38)
+- [Phase 07]: 07-01: minimum HA 2026.11.0 enforced by hacs.json, ~/.cache/traefik-proxy-integration/ha2611-venv and CI job test-min-ha; ha2603-venv retired
+- [Phase 07]: 07-01: pre-2026.11 import shims removed (probatio as vol only; single BinarySensorDeviceClass import)
 
 ### Pending Todos
 
@@ -244,7 +248,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T09:19:24.831Z
-Stopped at: Phase 06 complete, ready to plan Phase 07
+Last session: 2026-11-15T12:57:34.487Z
+Stopped at: Completed 07-01-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6
