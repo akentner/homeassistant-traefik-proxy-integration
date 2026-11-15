@@ -3,7 +3,12 @@ name: Validate
 # Every `run:` command of the lint, test and test-min-ha jobs is the Makefile's
 # command string (make lint / typecheck / test / test-min-ha), so a developer
 # runs exactly what CI runs. Actions are pinned to commit SHAs; Dependabot
-# (.github/dependabot.yml) proposes updates.
+# (.github/dependabot.yml) proposes updates. For hassfest and hacs/action the
+# SHA pin freezes only the action wrapper: both run a moving upstream image
+# (ghcr.io/home-assistant/hassfest:latest, ghcr.io/hacs/action:main), so the
+# validator code can change between runs without a commit here. Every job
+# runs with `permissions: {}`. `make hassfest` / `make hacs-action` pin those
+# images by digest for local runs.
 on:
   push:
     branches: [main]
@@ -87,6 +92,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No version tag exists upstream; pinned to the master commit of that date.
+      # The pin freezes the wrapper only; it runs ghcr.io/home-assistant/hassfest:latest.
       - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master (2026-10-26)
 
   hacs:
@@ -97,6 +103,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The token comes from the action's github_token input default.
+      # The pin freezes the wrapper only; it runs ghcr.io/hacs/action:main.
       - uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration

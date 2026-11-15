@@ -1,8 +1,11 @@
 .PHONY: install-hooks install-pre-commit pre-commit test test-min-ha min-ha-lock lint format typecheck hassfest-sanity hassfest hacs-action clean help
 
 REPO         ?= akentner/homeassistant-traefik-proxy-integration
-HASSFEST_IMG ?= ghcr.io/home-assistant/hassfest:latest
+# Pinned by digest (ghcr.io/home-assistant/hassfest:latest as of 2026-11-09, HA 2026.11.1); bump deliberately.
+# CI's home-assistant/actions/hassfest runs the moving :latest tag instead.
+HASSFEST_IMG ?= ghcr.io/home-assistant/hassfest@sha256:da6522993280166fe072704989a2b4c33e639e8ceb69c8ab6ad7ec5045c1a1e3
 # Pinned by digest (ghcr.io/hacs/action:main as of 2026-10-20); bump deliberately.
+# CI's hacs/action runs the moving :main tag instead.
 HACS_IMG     ?= ghcr.io/hacs/action@sha256:187499a09c5d41f9f0d42ff80d203ed87b974c028290140913b61e005fb0aab2
 
 help:  ## Show this help.
@@ -48,8 +51,8 @@ typecheck:  ## Run mypy --strict.
 hassfest-sanity:  ## Run local hassfest-style sanity checks (no docker).
 	uv run python scripts/hassfest_checks.py all
 
-hassfest:  ## Run hassfest exactly like home-assistant/actions/hassfest (throwaway container).
-	docker run --rm --pull always -v "$(CURDIR)":/github/workspace $(HASSFEST_IMG)
+hassfest:  ## Run hassfest like home-assistant/actions/hassfest (digest-pinned image, read-only tree, throwaway container).
+	docker run --rm -v "$(CURDIR)":/github/workspace:ro $(HASSFEST_IMG)
 
 # The action refuses to run without a token. HACS_ACTION_TOKEN must be a
 # fine-grained token with read-only access to public repositories (no scopes);

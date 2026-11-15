@@ -37,6 +37,16 @@ keys `domain`, `name`, then alphabetical. `hacs.json` unchanged (`"homeassistant
 
 Offline sanity check: `uv run python scripts/hassfest_checks.py all` -> `hassfest-style checks passed`, exit 0.
 
+**Review fix WR-03 (2026-11-15):** `make hassfest` now runs the same digest
+(`HASSFEST_IMG ?= ghcr.io/home-assistant/hassfest@sha256:da652299…`) without
+`--pull always` and mounts the tree read-only
+(`docker run --rm -v "$(CURDIR)":/github/workspace:ro $(HASSFEST_IMG)`).
+Re-run in the main checkout: exit 0, `Integrations: 1` / `Invalid integrations: 0`;
+hassfest needs no write access. `docker ps -a`, `docker network ls` and
+`docker volume ls` matched `docker-baseline-phase8.txt` afterwards. CI's
+`home-assistant/actions/hassfest` still runs the moving `:latest` tag; its SHA
+pin freezes only the wrapper.
+
 ### Release identity (D-01, D-02)
 
 | Command | Exit | Output |
