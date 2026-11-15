@@ -84,8 +84,12 @@ def _insecure_issue_id(entry_id: str) -> str:
 def _async_check_insecure_credentials(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
     """Raise the insecure_credentials issue while the entry sends credentials over http, else delete it.
 
-    The issue is bound to the entry and deleted again when the entry unloads,
-    so every setup evaluates the current URL and auth type.
+    The issue is bound to the entry (Home Assistant deletes it with the entry
+    and hides it while the entry is disabled). :func:`async_unload_entry`
+    deletes it, so every setup evaluates the current URL and auth type. It is
+    not deleted through ``entry.async_on_unload``: Home Assistant runs those
+    callbacks right after a failed setup, and the issue must stay while a
+    retrying setup keeps sending the credentials.
     """
     issue_id = _insecure_issue_id(entry.entry_id)
     uses_http = urlsplit(str(entry.data.get(CONF_URL, ""))).scheme == "http"
@@ -103,7 +107,6 @@ def _async_check_insecure_credentials(hass: HomeAssistant, entry: TraefikProxyCo
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
-    entry.async_on_unload(lambda: ir.async_delete_issue(hass, DOMAIN, issue_id))
 
 
 def _migrated_entry_data(data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]:
@@ -303,10 +306,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
 
     Order matters:
 
-    1. Build the API client and both coordinators, then assign
-       ``entry.runtime_data`` before any refresh: the main coordinator reads
-       its client from the runtime data, and the cert coordinator reads the
-       main coordinator's data through it.
+    1. Build the API client, then raise the ``insecure_credentials`` repair
+       issue when the URL uses plain HTTP and the entry has credentials
+       (otherwise delete it). It depends on the entry data only, so it also
+       shows while a failing setup retries. Unload deletes it, so a reload
+       re-evaluates it (and resets a user's ignore). Then build both
+       coordinators and assign ``entry.runtime_data`` before any refresh:
+       the main coordinator reads its client from the runtime data, and the
+       cert coordinator reads the main coordinator's data through it.
     2. Await the main coordinator's first refresh. It raises
        ``ConfigEntryNotReady`` on transient failure (HA retries) or
        ``ConfigEntryAuthFailed`` on 401/403 (reauth flow).
@@ -326,11 +333,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     7. Remove the entry's 0.3.0 per-category devices that no entity
        references any more, and keep the main device's ``sw_version``
        following the Traefik version.
-    8. Raise the ``insecure_credentials`` repair issue when the URL uses
-       plain HTTP and the entry has credentials, otherwise delete it. Unload
-       deletes it, so a reload re-evaluates it (and resets a user's ignore).
     """
     client = build_api_client(hass, entry)
+    _async_check_insecure_credentials(hass, entry)
     coordinator = TraefikProxyCoordinator(hass, entry)
     cert_coordinator = CertCoordinator(hass, entry)
     entry.runtime_data = TraefikRuntimeData(
@@ -368,8 +373,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     async_remove_legacy_devices(hass, entry)
     entry.async_on_unload(async_track_sw_version(hass, entry, main.id))
 
-    _async_check_insecure_credentials(hass, entry)
-
     _LOGGER.debug(
         "Traefik integration ready: entry_id=%s, scan_interval=%ss",
         entry.entry_id,
@@ -381,11 +384,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry
     """Unload a Traefik config entry.
 
     Unloads the platforms; a platform that fails to unload raises Home
-    Assistant's translated unload error. Home Assistant then runs every
-    callback the setup registered through ``entry.async_on_unload`` (timers
-    and coordinator listeners).
+    Assistant's translated unload error. Then deletes the
+    ``insecure_credentials`` issue, so the next setup re-evaluates it. Home
+    Assistant then runs every callback the setup registered through
+    ``entry.async_on_unload`` (timers and coordinator listeners).
     """
     await hass.config_entries.async_unload_platforms_or_raise(entry, PLATFORMS)
+    ir.async_delete_issue(hass, DOMAIN, _insecure_issue_id(entry.entry_id))
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:

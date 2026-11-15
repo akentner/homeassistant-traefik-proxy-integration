@@ -101,6 +101,43 @@ async def test_unload_deletes_issue_and_setup_raises_it_again(hass: HomeAssistan
 
 
 @pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        pytest.param(500, ConfigEntryState.SETUP_RETRY, id="not-ready"),
+        pytest.param(401, ConfigEntryState.SETUP_ERROR, id="auth-failed"),
+    ],
+)
+async def test_failing_setup_still_raises_issue(
+    hass: HomeAssistant, aioclient_mock: Any, status: int, state: ConfigEntryState
+) -> None:
+    """A setup that fails after the client is built (retry or reauth) still shows the issue (WR-03)."""
+    aioclient_mock.get(f"{HTTP_URL}/api/version", status=status)
+    entry = _entry(HTTP_URL, BEARER)
+    entry.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is state
+    issue = _get_issue(hass, entry)
+    assert issue is not None
+    assert issue.config_entry_id == entry.entry_id
+
+
+async def test_failing_setup_over_https_raises_no_issue(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """A failing setup over https raises no issue."""
+    aioclient_mock.get(f"{MOCK_URL}/api/version", status=500)
+    entry = _entry(MOCK_URL, BEARER)
+    entry.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert _own_issues(hass) == []
+
+
+@pytest.mark.parametrize(
     "submitted",
     [
         # A new scheme needs the token entered again (WR-01).
