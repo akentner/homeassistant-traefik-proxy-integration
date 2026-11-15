@@ -822,11 +822,17 @@ async def test_userinfo_migration_is_idempotent(hass: HomeAssistant, caplog: Any
     assert len(_warnings(caplog)) == 1
 
 
-async def test_unparsable_url_is_kept_as_stored(hass: HomeAssistant) -> None:
-    """A URL urlsplit cannot parse stays as stored (setup reports it); the auth type comes from the token."""
+async def test_unparsable_url_is_kept_as_stored(hass: HomeAssistant, caplog: Any) -> None:
+    """A URL urlsplit cannot parse stays as stored (setup reports it), so does the unique_id; one WARNING."""
     entry = _legacy_entry(hass, "http://u:p@[::1", **{CONF_API_KEY: "k"})
 
     assert await integration.async_migrate_entry(hass, entry)
+
+    assert entry.unique_id == "traefik.example.com"
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    assert ENTRY_ID in warnings[0].getMessage()
+    assert "[::1" not in caplog.text
 
     assert dict(entry.data) == {
         CONF_URL: "http://u:p@[::1",

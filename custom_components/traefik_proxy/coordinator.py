@@ -44,6 +44,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# Port of a URL without an explicit one, by scheme.
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
 # How often a healthy coordinator re-reads /api/version to detect a Traefik
 # restart or upgrade (/api/rawdata carries no start date).
 VERSION_RECHECK_INTERVAL = timedelta(hours=1)
@@ -89,6 +92,31 @@ def split_url_userinfo(url: str) -> tuple[str, str | None, str | None]:
     userinfo, _, hostport = netloc.rpartition("@")
     username, _, password = userinfo.partition(":")
     return url.replace(netloc, hostport, 1), unquote(username) or None, unquote(password) or None
+
+
+def url_host(url: str) -> str | None:
+    """Return the lowercased host of ``url``, or None when it has none or cannot be parsed."""
+    try:
+        return urlsplit(url).hostname
+    except ValueError:
+        return None
+
+
+def url_unique_id(url: str) -> str:
+    """Return the config entry unique_id of a Traefik API URL: ``host:port``.
+
+    The host is lowercased, an IPv6 address is wrapped in brackets and a
+    missing port is the scheme's default (80 for http, 443 for https). Raises
+    ``ValueError`` for a URL without a usable host or port.
+    """
+    parts = urlsplit(url)
+    host = parts.hostname
+    port = parts.port if parts.port is not None else _DEFAULT_PORTS.get(parts.scheme)
+    if not host or port is None:
+        raise ValueError("URL has no usable host and port")
+    if ":" in host:
+        host = f"[{host}]"
+    return f"{host}:{port}"
 
 
 def build_api_client(hass: HomeAssistant, entry: ConfigEntry[Any]) -> TraefikProxyApiClient:

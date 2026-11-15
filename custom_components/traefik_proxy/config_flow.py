@@ -72,7 +72,7 @@ from .const import (
     MIN_SCAN_INTERVAL,
     MIN_TLS_WARN_DAYS,
 )
-from .coordinator import auth_from_entry_data, effective_verify_ssl
+from .coordinator import auth_from_entry_data, effective_verify_ssl, url_host, url_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -170,15 +170,21 @@ def _check_url_shape(url: str) -> None:
     Catches the common class of malformed-input bugs that the
     ``TextSelector(type=URL)`` field cannot block (e.g. ``http;//`` from
     autocomplete / paste mistakes). Raises :class:`InvalidUrl` if the URL
-    is missing a scheme, has a non-HTTP scheme, has no host, or carries
-    credentials (``user:pass@host``): credentials belong in the
-    authentication fields.
+    cannot be parsed, is missing a scheme, has a non-HTTP scheme, has no
+    host or an invalid port, or carries credentials (``user:pass@host``):
+    credentials belong in the authentication fields. A URL that passes has
+    a :func:`url_unique_id`.
     """
-    parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
-        raise InvalidUrl(url)
-    if parsed.username or parsed.password:
-        raise InvalidUrl(url)
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.hostname:
+            raise InvalidUrl(url)
+        if parsed.username or parsed.password:
+            raise InvalidUrl(url)
+        # Raises ValueError for a port out of range or not a number.
+        _ = parsed.port
+    except ValueError:
+        raise InvalidUrl(url) from None
 
 
 async def _validate_input(hass: HomeAssistant, data: Mapping[str, Any]) -> None:
@@ -368,15 +374,16 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             except InvalidUrl:
                 errors["base"] = "invalid_url"
             else:
+                # One entry per Traefik (host:port); a configured one is not
+                # contacted again.
+                await self.async_set_unique_id(url_unique_id(url))
+                self._abort_if_unique_id_configured()
                 credentials, errors = _collect_credentials(user_input, auth_type)
             if not errors:
                 data = _entry_data(url, user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL), auth_type, credentials)
                 errors = await _async_probe_errors(self.hass, data)
             if not errors:
-                # unique_id = URL host avoids double-add for same Traefik
-                await self.async_set_unique_id(urlparse(url).hostname or url)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=DEFAULT_NAME, data=data)
+                return self.async_create_entry(title=url_host(url) or url, data=data)
 
         return self.async_show_form(
             step_id="user",
@@ -428,10 +435,12 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
         The URL and the effective TLS verification are pre-filled; secrets are
         not. With an unchanged auth type an empty or omitted credential keeps
         the stored one (for the probe and storage); a changed auth type needs
-        its own credentials, and none removes them. A host owned by another
-        entry aborts with ``already_configured`` before any request. The new
-        TLS verification value is also written to the options, so it stays
-        the effective one.
+        its own credentials, and none removes them. A host:port owned by
+        another entry aborts with ``already_configured`` before any request.
+        The unique_id follows the new host:port; a title that is the old host
+        or the default name follows the new host, a user-chosen title stays.
+        The new TLS verification value is also written to the options, so it
+        stays the effective one.
         """
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
@@ -444,11 +453,11 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
             except InvalidUrl:
                 errors["base"] = "invalid_url"
             else:
-                # Checked before the probe so a host owned by another entry
-                # is never contacted.
-                host = urlparse(url).hostname or url
+                # Checked before the probe so a Traefik owned by another
+                # entry is never contacted.
+                unique_id = url_unique_id(url)
                 for other in self._async_current_entries(include_ignore=False):
-                    if other.entry_id != entry.entry_id and other.unique_id == host:
+                    if other.entry_id != entry.entry_id and other.unique_id == unique_id:
                         return self.async_abort(reason="already_configured")
                 auth_type = user_input.get(CONF_AUTH_TYPE, stored_auth)
                 stored = entry.data if auth_type == entry.data.get(CONF_AUTH_TYPE) else None
@@ -458,8 +467,13 @@ class TraefikProxyConfigFlow(ConfigFlow, domain=DOMAIN):
                 new_data = _entry_data(url, verify_ssl, auth_type, credentials)
                 errors = await _async_probe_errors(self.hass, new_data)
             if not errors:
+                title = entry.title
+                if title in {url_host(entry.data.get(CONF_URL, "")), DEFAULT_NAME}:
+                    title = url_host(url) or title
                 return self.async_update_reload_and_abort(
                     entry,
+                    unique_id=unique_id,
+                    title=title,
                     data=new_data,
                     options={**entry.options, CONF_VERIFY_SSL: verify_ssl},
                 )

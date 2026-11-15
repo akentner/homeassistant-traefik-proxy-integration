@@ -21,6 +21,7 @@ from .const import (
     CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
+    DEFAULT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
     DOMAIN,
@@ -29,7 +30,13 @@ from .const import (
     UID_ROUTERS_PROBLEM,
     UID_SERVICES_PROBLEM,
 )
-from .coordinator import TraefikProxyCoordinator, build_api_client, split_url_userinfo
+from .coordinator import (
+    TraefikProxyCoordinator,
+    build_api_client,
+    split_url_userinfo,
+    url_host,
+    url_unique_id,
+)
 from .data import TraefikProxyConfigEntry, TraefikRuntimeData
 from .entity import (
     async_legacy_devices,
@@ -110,6 +117,29 @@ def _migrated_entry_data(data: Mapping[str, Any]) -> tuple[dict[str, Any], bool]
     return new_data, had_userinfo
 
 
+def _migrated_unique_id(hass: HomeAssistant, entry: TraefikProxyConfigEntry, url: str) -> str | None:
+    """Return the host:port unique_id for ``url``, or None to keep the entry's current one.
+
+    The current one is kept when the URL has no usable host and port or when
+    another entry of the domain already owns the new unique_id; a WARNING
+    names the entries only.
+    """
+    try:
+        unique_id = url_unique_id(url)
+    except ValueError:
+        _LOGGER.warning("Traefik entry %s: its URL has no usable host and port; kept its unique_id", entry.entry_id)
+        return None
+    owner = hass.config_entries.async_entry_for_domain_unique_id(DOMAIN, unique_id)
+    if owner is not None and owner.entry_id != entry.entry_id:
+        _LOGGER.warning(
+            "Traefik entry %s: entry %s already uses the same host and port; kept its unique_id",
+            entry.entry_id,
+            owner.entry_id,
+        )
+        return None
+    return unique_id
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> bool:
     """Migrate a config entry to the current version.
 
@@ -127,9 +157,12 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
     the change when anything was removed.
 
     1.2 -> 1.3: the entry data names its auth type (none, basic or bearer)
-    and carries only the credentials of that type. The 1.1 -> 1.2 step runs
-    first, so a 1.1 entry reaches 1.3 in one setup. An entry from a newer
-    major version fails (downgrade).
+    and carries only the credentials of that type; the unique_id becomes
+    ``host:port`` unless another entry owns it, and the default title becomes
+    the host (a user-chosen title stays). Entity and device unique_ids are
+    entry_id-based and unchanged. The 1.1 -> 1.2 step runs first, so a 1.1
+    entry reaches 1.3 in one setup. An entry from a newer major version fails
+    (downgrade).
     """
     if entry.version > 1:
         _LOGGER.debug(
@@ -224,7 +257,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntr
                 entry.entry_id,
                 entry.title,
             )
-        hass.config_entries.async_update_entry(entry, data=new_data, minor_version=3)
+        url = str(new_data.get(CONF_URL, ""))
+        new_unique_id = _migrated_unique_id(hass, entry, url) or entry.unique_id
+        title = entry.title
+        if title == DEFAULT_NAME:
+            title = url_host(url) or title
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, minor_version=3, unique_id=new_unique_id, title=title
+        )
         _LOGGER.debug("Migrated Traefik entry %s to 1.3: auth type %s", entry.entry_id, new_data[CONF_AUTH_TYPE])
 
     return True

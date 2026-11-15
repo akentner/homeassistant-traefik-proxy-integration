@@ -28,6 +28,7 @@ from custom_components.traefik_proxy.const import (
 from custom_components.traefik_proxy.coordinator import (
     VERSION_RECHECK_INTERVAL,
     TraefikProxyCoordinator,
+    url_host,
     url_unique_id,
 )
 from custom_components.traefik_proxy.data import TraefikRuntimeData
@@ -722,3 +723,16 @@ def test_url_unique_id_rejects_unusable_url(url: str) -> None:
     """A URL without a usable host or port raises ValueError."""
     with pytest.raises(ValueError):
         url_unique_id(url)
+
+
+@pytest.mark.parametrize(
+    ("url", "host"),
+    [
+        pytest.param("https://Traefik.Example.com:8080/x", "traefik.example.com", id="lowercased"),
+        pytest.param("https://", None, id="no-host"),
+        pytest.param("http://[::1", None, id="unparsable"),
+    ],
+)
+def test_url_host(url: str, host: str | None) -> None:
+    """The host of a URL is lowercased; a URL without a parsable host has none."""
+    assert url_host(url) == host
