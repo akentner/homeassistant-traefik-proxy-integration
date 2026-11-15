@@ -3,17 +3,17 @@ gsd_state_version: "1.0"
 milestone: v1.0
 current_phase: 07
 current_phase_name: Config flow, HA 2026.11 baseline, observability
-status: executing
-stopped_at: Completed 07-08-PLAN.md
-last_updated: "2026-11-15T14:53:28.844Z"
+status: verifying
+stopped_at: Completed 07-09-PLAN.md
+last_updated: "2026-11-15T15:12:28.816Z"
 last_activity: 2026-11-15
 last_activity_desc: Phase 07 execution started
-state_head: 6f1ab6726f5a18c7fc00cd830ae86549d2c4955a
+state_head: 4129a9742336bd38e89c93f14aa6c3e594abb240
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 44
-  completed_plans: 43
+  completed_plans: 44
 milestone_name: milestone
 ---
 
@@ -32,7 +32,7 @@ failing, and which TLS certificates are expiring soon.
 
 Phase: 07 (Config flow, HA 2026.11 baseline, observability) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-11-15 — Phase 07 execution started
 
 Progress: [████████░░] 75% (6 of 8 phases)
@@ -109,6 +109,7 @@ Progress: [████████░░] 75% (6 of 8 phases)
 | Phase 07 P06 | 7min | 2 tasks | 11 files |
 | Phase 07 P07 | 12min | 2 tasks | 8 files |
 | Phase 07 P08 | 12min | 2 tasks | 5 files |
+| Phase 07 P09 | 17min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -229,6 +230,9 @@ Recent decisions affecting current work:
 - [Phase 07]: Phase 07: a 3xx answer to the flow probe is the form error 'redirect' (user, reauth, reconfigure); the redirect is never followed
 - [Phase 07]: Phase 07: credentials in a newly entered URL are their own form error 'url_has_credentials'; a malformed URL is reported as invalid_url first
 - [Phase 07]: Phase 07: an unexpected exception during flow validation is 'unknown' and logged once with a fixed message (no URL, no credentials)
+- [Phase 07]: Phase 07: diagnostics dump parsed models only and redact username/password/token/api_key/users/authorization; URL userinfo is cut, an unparsable stored URL is redacted as a whole
+- [Phase 07]: Phase 07: insecure_credentials repair (WARNING, not fixable, entry-bound) is raised at the end of every setup while http is used with credentials; unload deletes it, so a reload resets a user's ignore (accepted)
+- [Phase 07]: Phase 07: en/de translation parity is enforced over the whole files
 
 ### Pending Todos
 
@@ -273,7 +277,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-15T14:53:28.664Z
-Stopped at: Completed 07-08-PLAN.md
+Last session: 2026-11-15T15:12:28.647Z
+Stopped at: Completed 07-09-PLAN.md
 Resume file: None
 Next: /gsd-plan-phase 6

@@ -166,7 +166,7 @@ Requirements for initial release. Each maps to a roadmap phase.
 
 ### Diagnostics (DIAG-04)
 
-- [ ] **DIAG-04**: A `diagnostics.py` exports config-entry diagnostics
+- [x] **DIAG-04**: A `diagnostics.py` exports config-entry diagnostics
       (entry data, options, current snapshot) with `async_redact_data`
       stripping token, username, password and any other credential-shaped
       keys (Phase 7; audit U-16).
@@ -292,11 +292,11 @@ Requirements for initial release. Each maps to a roadmap phase.
 - [x] **FLOW-05**: `ConfigEntryAuthFailed`, `ConfigEntryNotReady` and
       `UpdateFailed` use `translation_domain`/`translation_key` with an
       `exceptions` section in the translations. (research §4.2)
-- [ ] **FLOW-06**: A repair issue is raised for an `http://` URL combined with
+- [x] **FLOW-06**: A repair issue is raised for an `http://` URL combined with
       credentials and is deleted when resolved or when the entry unloads, using
       the HA 2026.11 issue-registry API with `config_entry_id` (I1 supersedes
       M4). (research §4.6)
-- [ ] **FLOW-07**: `strings.json`, the YAML step and its strings, and the dead
+- [x] **FLOW-07**: `strings.json`, the YAML step and its strings, and the dead
       code from audit A-18 are removed; `translations/en.json` is the single
       source and `translations/de.json` has full key parity (tested). (A-18,
       U-13, U-14, M7)
@@ -422,7 +422,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIAG-01 | Phase 2 | Complete |
 | DIAG-02 | Phase 2 | Superseded |
 | DIAG-03 | Phase 2 | Superseded |
-| DIAG-04 | Phase 7 | Pending |
+| DIAG-04 | Phase 7 | Complete |
 | TLS-01 | Phase 3 | Complete (refined by CERT-01/05) |
 | TLS-02 | Phase 3 | Complete (refined by CERT-05) |
 | TLS-03 | Phase 3 | Complete |
@@ -472,8 +472,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | FLOW-03 | Phase 7 | Complete |
 | FLOW-04 | Phase 7 | Complete |
 | FLOW-05 | Phase 7 | Complete |
-| FLOW-06 | Phase 7 | Pending |
-| FLOW-07 | Phase 7 | Pending |
+| FLOW-06 | Phase 7 | Complete |
+| FLOW-07 | Phase 7 | Complete |
 | FLOW-08 | Phase 7 | Complete |
 | REL-01 | Phase 8 | Pending |
 | REL-02 | Phase 8 | Pending |
