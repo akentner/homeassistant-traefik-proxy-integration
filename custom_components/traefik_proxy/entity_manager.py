@@ -220,8 +220,10 @@ class TraefikEntityManager:
         present again or no longer registered are dropped.
 
         When the coordinator's last cycle failed (``last_update_success`` is
-        False, e.g. a failed first cert cycle), an orphan without a stored
-        time is adopted as present: added, but not marked missing. Orphans
+        False, e.g. a failed first cert cycle) or its first cycle has not
+        finished yet (``data`` is None; the first cert cycle runs in the
+        background), an orphan without a stored time is adopted as present:
+        added, but not marked missing. Orphans
         with a stored time keep it (or are removed when it ran out). The next
         successful cycle reconciles them like any other key.
 
@@ -242,8 +244,8 @@ class TraefikEntityManager:
             if domain == spec.domain and (key := spec.key_of(entry_id, unique_id)) is not None
         } - present
         now = dt_util.utcnow()
-        # A failed cycle carries no information about which items exist.
-        failed = not coordinator.last_update_success
+        # A failed or not yet finished cycle carries no information about which items exist.
+        failed = not coordinator.last_update_success or coordinator.data is None
         for key in sorted(orphans):
             if failed and key not in stored:
                 present.add(key)

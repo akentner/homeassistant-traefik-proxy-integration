@@ -247,7 +247,8 @@ async def setup_traefik_entry(
         entry = make_traefik_entry()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    # The first cert cycle runs as a background task of the entry.
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.state is ConfigEntryState.LOADED
     return entry
 

@@ -295,11 +295,16 @@ class TraefikCertCoordinatorEntity(_TraefikEntityBase[CertCoordinator]):
 
     Cert cycles, threshold changes and day-boundary fires notify only the
     cert coordinator's listeners. Available while the last cert cycle
-    succeeded.
+    succeeded; unavailable before the first cycle finished (no data yet),
+    so a pending first cycle never reads as "no problem".
     """
 
     def __init__(self, entry: TraefikProxyConfigEntry, unique_id: str) -> None:
         super().__init__(entry.runtime_data.cert_coordinator, entry, unique_id)
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.data is not None
 
 
 class TraefikCertEntity(TraefikCertCoordinatorEntity):

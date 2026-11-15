@@ -21,6 +21,7 @@ the v3.7 capture with ``/api/certificates`` failing.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -37,7 +38,7 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.traefik_proxy.cert_coordinator import CertCoordinator
-from custom_components.traefik_proxy.const import DEFAULT_TLS_CERT_COOLDOWN, DOMAIN
+from custom_components.traefik_proxy.const import DEFAULT_TLS_CERT_COOLDOWN, DOMAIN, UID_CERTIFICATES_PROBLEM
 from custom_components.traefik_proxy.entity_manager import CERT_EXPIRING, CERT_EXPIRY
 from custom_components.traefik_proxy.models import TraefikCertificate
 from custom_components.traefik_proxy.tls import ProbedCertificate, ProbeError, ProbeFailure
@@ -328,7 +329,8 @@ async def _setup_failing_certificates(
         aioclient_mock.get(f"{MOCK_URL}/api/certificates", status=500)
     stub_traefik(aioclient_mock, version="v3.7")
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    # The first cert cycle runs as a background task of the entry.
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.state is ConfigEntryState.LOADED
     return entry
 
@@ -414,3 +416,97 @@ async def test_certificate_failure_never_raises_not_ready(
     assert entry.state is ConfigEntryState.LOADED
     assert entry.runtime_data.coordinator.last_update_success
     assert not entry.runtime_data.cert_coordinator.last_update_success
+
+
+async def test_setup_does_not_wait_for_the_first_cert_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, socket_enabled: None
+) -> None:
+    """The first cert cycle runs in the background; setup finishes while it runs.
+
+    While it runs, restored hosts are unavailable and not missing, and the
+    aggregate is unavailable (never a fake "off"). When it finishes, the cert
+    entities follow. Wall clock (no freezer), so the setup timeout can fire.
+    """
+    started = asyncio.Event()
+    release = asyncio.Event()
+    not_after = (dt_util.utcnow() + timedelta(days=100)).replace(microsecond=0)
+
+    async def _gated(_connect_host: str, _port: int, sni: str, **_kwargs: Any) -> ProbedCertificate:
+        started.set()
+        await release.wait()
+        return ProbedCertificate(
+            certificate=TraefikCertificate(sni, (sni,), not_after, not_after - timedelta(days=90), "CA", None, "1"),
+            verified=True,
+            san_mismatch=False,
+        )
+
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for spec in (CERT_EXPIRY, CERT_EXPIRING):
+        registry.async_get_or_create(spec.domain, DOMAIN, spec.unique_id(entry.entry_id, HOST), config_entry=entry)
+    stub_traefik(aioclient_mock, version="v2.11")
+    aggregate_uid = f"{entry.entry_id}_{UID_CERTIFICATES_PROBLEM}"
+
+    with patch(PROBE_TARGET, AsyncMock(side_effect=_gated)):
+        async with asyncio.timeout(5):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state is ConfigEntryState.LOADED
+        assert started.is_set()
+        cert_coordinator = entry.runtime_data.cert_coordinator
+        manager = entry.runtime_data.entity_manager
+        assert cert_coordinator.data is None
+        assert _expiry(hass, entry).state == "unavailable"
+        assert _expiring(hass, entry).state == "unavailable"
+        assert manager.missing_since(CERT_EXPIRY, HOST) is None
+        assert manager.missing_since(CERT_EXPIRING, HOST) is None
+        aggregate = hass.states.get(entity_id_for(hass, "binary_sensor", aggregate_uid))
+        assert aggregate is not None
+        assert aggregate.state == "unavailable"
+
+        release.set()
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert cert_coordinator.last_update_success
+    assert dt_util.parse_datetime(_expiry(hass, entry).state) == not_after
+    assert _expiring(hass, entry).state == "off"
+    assert _expiry(hass, entry, OTHER_HOST).state not in ("unavailable", "unknown")
+    aggregate = hass.states.get(entity_id_for(hass, "binary_sensor", aggregate_uid))
+    assert aggregate is not None
+    assert aggregate.state == "off"
+
+
+async def test_unload_cancels_a_running_first_cert_cycle(
+    hass: HomeAssistant, aioclient_mock: Any, socket_enabled: None
+) -> None:
+    """Unload while the first cert cycle hangs: the cycle is cancelled, no timer is left behind."""
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _hanging(_connect_host: str, _port: int, _sni: str, **_kwargs: Any) -> ProbedCertificate:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+        raise AssertionError("unreachable")
+
+    entry = make_traefik_entry()
+    entry.add_to_hass(hass)
+    stub_traefik(aioclient_mock, version="v2.11")
+    with patch(PROBE_TARGET, AsyncMock(side_effect=_hanging)):
+        async with asyncio.timeout(5):
+            assert await hass.config_entries.async_setup(entry.entry_id)
+            await hass.async_block_till_done()
+            await started.wait()
+        cert_coordinator = entry.runtime_data.cert_coordinator
+        async with asyncio.timeout(5):
+            assert await hass.config_entries.async_unload(entry.entry_id)
+            await hass.async_block_till_done()
+            await cancelled.wait()
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    assert cert_coordinator.data is None
+    assert not _timer_pending(cert_coordinator)

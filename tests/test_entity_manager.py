@@ -270,10 +270,11 @@ def test_entry_host_falls_back_to_title() -> None:
 
 
 class _FakeCoordinator:
-    """Minimal coordinator: one listener list and a success flag."""
+    """Minimal coordinator: one listener list, a success flag and the data of a finished cycle."""
 
     def __init__(self) -> None:
         self.last_update_success = True
+        self.data: Any = {}
         self.listeners: list[Any] = []
 
     def async_add_listener(self, update_callback: Any) -> Any:

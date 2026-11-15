@@ -795,7 +795,8 @@ async def test_end_to_end_probe_reaches_tls_entrypoint_port(
         if trusted:
             mp.setattr(HA_CLIENT_CONTEXT, lambda *_a, **_kw: _ha_context(root[0].public_bytes(Encoding.DER)))
         assert await hass.config_entries.async_setup(entry.entry_id)
-        await hass.async_block_till_done()
+        # The first cert cycle runs as a background task of the entry.
+        await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.state is ConfigEntryState.LOADED
 
     assert sorted(connects) == [("127.0.0.1", server.port, host) for host in E2E_HOSTS]

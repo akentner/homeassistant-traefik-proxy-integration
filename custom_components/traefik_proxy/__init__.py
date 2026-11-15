@@ -217,16 +217,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     2. Await the main coordinator's first refresh. It raises
        ``ConfigEntryNotReady`` on transient failure (HA retries) or
        ``ConfigEntryAuthFailed`` on 401/403 (reauth flow).
-    3. Run the cert coordinator's first cycle with ``async_refresh``, which
-       never raises: a certificate failure must not block the setup. A
-       failed cycle stays failed, so the cert entities are unavailable and
-       the cycle is retried after ``CERT_RETRY_INTERVAL``.
-    4. Load the entity manager: stored missing-since times, the entry's
+    3. Load the entity manager: stored missing-since times, the entry's
        registry entries and the deadline timer. With the per-item option
        off, purge the router and service registry entries right away.
-    5. Register the main device and the Certificates sub-device, plus the
+    4. Register the main device and the Certificates sub-device, plus the
        Routers / Services sub-devices when per-item entities are on.
-    6. Forward platforms (sensor, binary_sensor, button).
+    5. Forward platforms (sensor, binary_sensor, button). The cert
+       coordinator has no data yet, so its entities start unavailable and
+       registry-restored hosts are not marked missing.
+    6. Start the cert coordinator's first cycle as a background task: a
+       probe cycle can take minutes and must not block the setup, and a
+       certificate failure never fails it. A failed cycle stays failed, so
+       the cert entities stay unavailable and the cycle is retried after
+       ``CERT_RETRY_INTERVAL``. Unload cancels the task.
     7. Remove the entry's 0.3.0 per-category devices that no entity
        references any more, and keep the main device's ``sw_version``
        following the Traefik version.
@@ -248,7 +251,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
         int(cert_coordinator.update_interval.total_seconds()) if cert_coordinator.update_interval else 0,
         cert_coordinator.threshold_days,
     )
-    await cert_coordinator.async_refresh()
 
     entity_manager = entry.runtime_data.entity_manager
     await entity_manager.async_load()
@@ -262,6 +264,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TraefikProxyConfigEntry)
     main = async_setup_devices(hass, entry, per_item=per_item)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    entry.async_create_background_task(hass, cert_coordinator.async_refresh(), "traefik_proxy first cert cycle")
 
     # Safe order: the platforms have re-pointed every entity they add to the
     # new devices, so only legacy devices nothing references are removed.
