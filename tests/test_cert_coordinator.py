@@ -987,8 +987,10 @@ def _probe_mode_entry(hosts: Sequence[str], *, port: int = 443) -> MagicMock:
 async def test_cancelled_refresh_closes_connection_and_keeps_data(hass: Any, socket_enabled: None) -> None:
     """Cancelling a refresh in a hanging handshake: CancelledError, data untouched, connection closed."""
     eof = asyncio.Event()
+    accepted = asyncio.Event()
 
     async def _silent(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        accepted.set()
         try:
             await reader.read()
         except OSError:
@@ -1010,7 +1012,9 @@ async def test_cancelled_refresh_closes_connection_and_keeps_data(hass: Any, soc
         assert set(before) == set(hosts)
 
         task = asyncio.create_task(c.async_refresh())
-        await asyncio.sleep(0.2)
+        # Cancel only once the server accepted a probe connection: the probe then waits in the handshake.
+        async with asyncio.timeout(5.0):
+            await accepted.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -1216,6 +1220,38 @@ async def test_host_dropped_from_host_set_and_new_host_without_history() -> None
     assert list(data) == ["a.example.com", "c.example.com"]
     assert data["a.example.com"].failures == 2
     assert data["c.example.com"].failures == 1
+
+
+def _container_sizes(c: CertCoordinator, hosts: Sequence[str]) -> dict[str, int]:
+    """Return the size of every container attribute of ``c`` except ``data``; fail when one holds a host."""
+    sizes: dict[str, int] = {}
+    for name, value in vars(c).items():
+        if name == "data" or not isinstance(value, dict | set | frozenset | list | tuple):
+            continue
+        items = [*value.keys(), *value.values()] if isinstance(value, dict) else list(value)
+        assert not any(isinstance(item, str) and item in hosts for item in items), name
+        sizes[name] = len(value)
+    return sizes
+
+
+async def test_cert_coordinator_keeps_no_per_host_state_besides_data() -> None:
+    """5 hosts, then 2 of them: ``data`` holds only the current hosts; no other attribute grows with hosts."""
+    hosts = tuple(f"h{i}.example.com" for i in range(5))
+    entry = _entry_with_tls_hosts(*hosts)
+    c = CertCoordinator(MagicMock(), entry)
+    probe = AsyncMock(side_effect=lambda _connect, _port, sni, **_kw: _probed(sni))
+    before = _container_sizes(c, hosts)
+
+    await _cycle(c, probe)
+    assert set(c.data) == set(hosts)
+    after_five = _container_sizes(c, hosts)
+
+    entry.runtime_data.coordinator.data = make_snapshot(
+        routers=[{"name": f"r{i}", "tls": {}, "rule": f"Host(`{host}`)"} for i, host in enumerate(hosts[:2])],
+    )
+    await _cycle(c, probe)
+    assert set(c.data) == set(hosts[:2])
+    assert before == after_five == _container_sizes(c, hosts)
 
 
 # ---------------------------------------------------------------------------

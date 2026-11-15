@@ -484,9 +484,11 @@ async def tls_server(socket_enabled: None) -> AsyncIterator[TlsServerStarter]:
 
     with wall_clock_watchdog(asyncio.get_running_loop(), TLS_TEST_WALL_CLOCK_LIMIT) as fired:
         yield start
+    # Close and await every server on every path, then report a fired wall-clock guard.
     for server in servers:
         server.close()
         server.close_clients()
+    for server in servers:
+        await server.wait_closed()
     if fired.is_set():
         pytest.fail(f"test exceeded the tls_server wall-clock limit of {TLS_TEST_WALL_CLOCK_LIMIT} s")
-        await server.wait_closed()

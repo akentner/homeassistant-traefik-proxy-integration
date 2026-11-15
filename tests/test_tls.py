@@ -21,7 +21,7 @@ import socket
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -477,6 +477,7 @@ async def test_probe_sends_no_bytes_after_handshake(tls_server: TlsServerStarter
 class _TcpServer:
     port: int
     eof: asyncio.Event
+    accepted: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 type _TcpServerStarter = Callable[
@@ -505,10 +506,12 @@ async def tcp_server(socket_enabled: None) -> AsyncIterator[_TcpServerStarter]:
 
 
 async def _start_silent_server(tcp_server: _TcpServerStarter) -> _TcpServer:
-    """A TCP server that accepts, never answers and records EOF from the client."""
+    """A TCP server that accepts, never answers and records the accept and EOF from the client."""
     eof = asyncio.Event()
+    accepted = asyncio.Event()
 
     async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        accepted.set()
         try:
             await reader.read()
         except OSError:
@@ -519,6 +522,7 @@ async def _start_silent_server(tcp_server: _TcpServerStarter) -> _TcpServer:
 
     server = await tcp_server(_handle)
     server.eof = eof
+    server.accepted = accepted
     return server
 
 
@@ -548,13 +552,17 @@ async def test_probe_plain_http_server_is_ssl_error(tcp_server: _TcpServerStarte
 
 
 async def test_probe_closed_port_is_refused(socket_enabled: None) -> None:
-    """A closed port on 127.0.0.1 is ``refused``."""
+    """A closed port on 127.0.0.1 is ``refused``.
+
+    The port stays bound by a socket that never listens until the probe
+    returned, so no other process can take it; Linux refuses the connect.
+    """
     assert socket_enabled is None  # consumed for fixture propagation
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
 
-    failure = await _probe_failure("127.0.0.1", port)
+        failure = await _probe_failure("127.0.0.1", port)
 
     assert failure.error is ProbeError.REFUSED
 
@@ -676,7 +684,9 @@ async def test_probe_cancelled_during_handshake_closes_connection(tcp_server: _T
             "127.0.0.1", server.port, ROUTER_A, handshake_timeout=5.0, trust_store=None, now=dt_util.utcnow()
         )
     )
-    await asyncio.sleep(0.2)
+    # Cancel only once the server accepted the connection: the probe then waits in the handshake.
+    async with asyncio.timeout(5.0):
+        await server.accepted.wait()
     task.cancel()
 
     with pytest.raises(asyncio.CancelledError):
