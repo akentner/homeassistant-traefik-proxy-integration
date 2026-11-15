@@ -22,6 +22,14 @@ CONF_TLS_WARN_DAYS: Final = "tls_warn_days"
 CONF_PER_ITEM_ENTITIES: Final = "per_item_entities"
 DEFAULT_PER_ITEM_ENTITIES: Final = True
 
+# Options key: hours a router, service or certificate that vanished from
+# Traefik stays as "missing" before its entity is removed (wall clock,
+# survives restarts and reloads).
+CONF_MISSING_GRACE_HOURS: Final = "missing_grace_hours"
+DEFAULT_MISSING_GRACE_HOURS: Final = 24
+MIN_MISSING_GRACE_HOURS: Final = 1
+MAX_MISSING_GRACE_HOURS: Final = 168
+
 # Defaults
 DEFAULT_VERIFY_SSL: Final = True
 DEFAULT_SCAN_INTERVAL: Final = 15  # seconds (CONTEXT.md D-12)
@@ -32,10 +40,8 @@ DEFAULT_NAME: Final = "Traefik Proxy"
 STATE_MISSING: Final = "missing"
 ITEM_STATE_OPTIONS: Final = ("enabled", "warning", "error", "disabled", STATE_MISSING)
 
-# A missing item's entity is removed once it has been missing this long (wall
-# clock, survives restarts). The check runs every MISSING_CHECK_INTERVAL, so
-# removal lands at most one interval after the deadline.
-MISSING_GRACE_PERIOD: Final = timedelta(hours=24)
+# Missing items are checked against the configured grace period every
+# MISSING_CHECK_INTERVAL, so removal lands at most one interval after it.
 MISSING_CHECK_INTERVAL: Final = timedelta(minutes=5)
 
 # Problem aggregates list at most this many names; problem_count carries the full number.

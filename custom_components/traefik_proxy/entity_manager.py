@@ -11,8 +11,10 @@ or removes per-item entities. On every successful coordinator cycle it
 - clears the missing mark of keys that came back (the entity was never
   removed, so its entity_id, name and area are unchanged).
 
-A key that stays missing for ``MISSING_GRACE_PERIOD`` (wall clock) loses its
-registry entry. The missing-since times are kept in a per-entry Store, so the
+A key that stays missing for the grace period of the entry's options
+(``missing_grace_period``, wall clock) loses its registry entry. The period is
+read once per setup; a changed period applies after the reload to the stored
+missing-since times, which a reload never resets. The missing-since times are kept in a per-entry Store, so the
 grace period survives reloads and restarts, and a timer of its own removes
 expired keys even when the snapshot never changes. Registry entries of the
 entry whose key is absent from the first snapshot are adopted as missing
@@ -30,7 +32,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
@@ -44,11 +46,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_MISSING_GRACE_HOURS,
     CONF_PER_ITEM_ENTITIES,
+    DEFAULT_MISSING_GRACE_HOURS,
     DEFAULT_PER_ITEM_ENTITIES,
     DOMAIN,
     MISSING_CHECK_INTERVAL,
-    MISSING_GRACE_PERIOD,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +96,11 @@ MISSING_STORE_VERSION = 1
 def per_item_entities_enabled(entry: TraefikProxyConfigEntry) -> bool:
     """Return whether the entry creates one entity per router and per service."""
     return bool(entry.options.get(CONF_PER_ITEM_ENTITIES, DEFAULT_PER_ITEM_ENTITIES))
+
+
+def missing_grace_period(entry: TraefikProxyConfigEntry) -> timedelta:
+    """Return how long a vanished key stays missing before its registry entry is removed."""
+    return timedelta(hours=int(entry.options.get(CONF_MISSING_GRACE_HOURS, DEFAULT_MISSING_GRACE_HOURS)))
 
 
 # Store data: {kind name: {key: missing since, ISO-8601 UTC}}.
@@ -169,6 +177,7 @@ class TraefikEntityManager:
     def __init__(self, hass: HomeAssistant, entry: TraefikProxyConfigEntry) -> None:
         self._hass = hass
         self._entry = entry
+        self._grace = missing_grace_period(entry)
         self._kinds: dict[str, _Kind] = {}
         self._store: Store[MissingData] | None = None
         # Stored missing-since times of kinds that are not registered yet.
@@ -251,7 +260,7 @@ class TraefikEntityManager:
                 present.add(key)
                 continue
             since = stored.get(key, now)
-            if now - since >= MISSING_GRACE_PERIOD:
+            if now - since >= self._grace:
                 self._async_remove_registry_entry(spec, key)
             else:
                 kind.missing[key] = since
@@ -330,7 +339,7 @@ class TraefikEntityManager:
         now = dt_util.utcnow()
         removed = False
         for kind in self._kinds.values():
-            expired = sorted(key for key, since in kind.missing.items() if now - since >= MISSING_GRACE_PERIOD)
+            expired = sorted(key for key, since in kind.missing.items() if now - since >= self._grace)
             for key in expired:
                 self._async_remove_registry_entry(kind.spec, key)
                 del kind.missing[key]
@@ -346,7 +355,7 @@ class TraefikEntityManager:
         entity_id = registry.async_get_entity_id(spec.domain, DOMAIN, spec.unique_id(self._entry.entry_id, key))
         if entity_id is None:
             return
-        _LOGGER.debug("Removing %s, missing for longer than %s", entity_id, MISSING_GRACE_PERIOD)
+        _LOGGER.debug("Removing %s, missing for longer than %s", entity_id, self._grace)
         registry.async_remove(entity_id)
 
     @callback

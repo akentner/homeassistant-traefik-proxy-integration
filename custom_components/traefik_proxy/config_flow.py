@@ -61,17 +61,21 @@ from .api import (
 )
 from .const import (
     CONF_AUTH_TYPE,
+    CONF_MISSING_GRACE_HOURS,
     CONF_SCAN_INTERVAL,
     CONF_TLS_WARN_DAYS,
     CONF_URL,
     CONF_VERIFY_SSL,
+    DEFAULT_MISSING_GRACE_HOURS,
     DEFAULT_NAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TLS_WARN_DAYS,
     DEFAULT_VERIFY_SSL,
     DOMAIN,
+    MAX_MISSING_GRACE_HOURS,
     MAX_SCAN_INTERVAL,
     MAX_TLS_WARN_DAYS,
+    MIN_MISSING_GRACE_HOURS,
     MIN_SCAN_INTERVAL,
     MIN_TLS_WARN_DAYS,
 )
@@ -296,6 +300,9 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
       effective value of the entry).
     - ``tls_warn_days``: days before expiry at which a certificate counts as
       expiring (1..90, default 14).
+    - ``missing_grace_hours``: hours a router, service or certificate that
+      vanished from Traefik stays as "missing" before its entity is removed
+      (1..168, default 24).
 
     The selectors validate the ranges, so a value outside one never reaches
     the step. Home Assistant reloads the entry only when the saved options
@@ -307,7 +314,8 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the options form pre-filled with the active values, or store the submitted ones.
 
-        The number selectors return floats; both numbers are stored as int.
+        The number selectors return floats; the numbers are stored as int
+        (a non-integral value is truncated).
         Options the form does not show are kept.
         """
         current = self.config_entry.options
@@ -319,6 +327,7 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
                     CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
                     CONF_VERIFY_SSL: bool(user_input[CONF_VERIFY_SSL]),
                     CONF_TLS_WARN_DAYS: int(user_input[CONF_TLS_WARN_DAYS]),
+                    CONF_MISSING_GRACE_HOURS: int(user_input[CONF_MISSING_GRACE_HOURS]),
                 }
             )
 
@@ -331,6 +340,9 @@ class TraefikProxyOptionsFlow(OptionsFlowWithReload):
                 vol.Required(
                     CONF_TLS_WARN_DAYS, default=current.get(CONF_TLS_WARN_DAYS, DEFAULT_TLS_WARN_DAYS)
                 ): _number_selector(MIN_TLS_WARN_DAYS, MAX_TLS_WARN_DAYS, "d"),
+                vol.Required(
+                    CONF_MISSING_GRACE_HOURS, default=current.get(CONF_MISSING_GRACE_HOURS, DEFAULT_MISSING_GRACE_HOURS)
+                ): _number_selector(MIN_MISSING_GRACE_HOURS, MAX_MISSING_GRACE_HOURS, "h"),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
