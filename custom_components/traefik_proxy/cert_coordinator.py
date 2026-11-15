@@ -384,7 +384,9 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         the event loop's resolver, bounded by the handshake timeout; its
         addresses keep the resolver's order (RFC 6724, usually IPv6 first)
         without duplicates. The result is never cached: the next cycle
-        resolves again.
+        resolves again. A name the resolver cannot encode (an over-long or
+        invalid IDNA label, raised as UnicodeError) is a dns failure like
+        any other lookup error.
         """
         try:
             ipaddress.ip_address(host)
@@ -395,7 +397,7 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
         try:
             async with asyncio.timeout(self._timeout):
                 infos = await asyncio.get_running_loop().getaddrinfo(host, None, type=socket.SOCK_STREAM)
-        except socket.gaierror as err:
+        except (socket.gaierror, UnicodeError) as err:
             return ProbeFailure(ProbeError.DNS, f"{type(err).__name__}: {err}")
         except TimeoutError as err:
             return ProbeFailure(ProbeError.TIMEOUT, f"{type(err).__name__}: {err}")

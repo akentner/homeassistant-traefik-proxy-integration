@@ -502,8 +502,10 @@ async def test_probe_cycle_resolve_failure_is_dns_for_every_host_without_connect
         (socket.gaierror(-2, "Name or service not known"), ProbeError.DNS),
         (TimeoutError(), ProbeError.TIMEOUT),
         (OSError(101, "Network is unreachable"), ProbeError.OSERROR),
+        (UnicodeError("encoding with 'idna' codec failed (UnicodeError: label too long)"), ProbeError.DNS),
+        (UnicodeEncodeError("idna", "a" * 64, 0, 64, "label too long"), ProbeError.DNS),
     ],
-    ids=["gaierror", "timeout", "oserror"],
+    ids=["gaierror", "timeout", "oserror", "unicodeerror", "idna-label-too-long"],
 )
 async def test_probe_cycle_resolve_error_maps_to_probe_error(
     monkeypatch: pytest.MonkeyPatch, error: BaseException, expected: ProbeError

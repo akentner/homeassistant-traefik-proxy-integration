@@ -33,7 +33,7 @@ findings:
     title: "The migration repair issue now depends on the 1.3 step completing"
   - id: IN-03
     severity: info
-    disposition: open
+    disposition: fixed
     title: "`UnicodeError` from `getaddrinfo` escapes the probe cycle"
   - id: IN-04
     severity: info
@@ -47,7 +47,7 @@ findings:
     severity: info
     disposition: open
     title: "Coverage gate and x86-only lock make partial and non-x86 local runs fail"
-open: 6
+open: 5
 total: 11
 recorded: 2026-11-15T21:51:48.954Z
 ---
@@ -63,7 +63,7 @@ recorded: 2026-11-15T21:51:48.954Z
 | WR-04 | warning | fixed | 08-REVIEW-FIX.md |
 | IN-01 | info | open | - |
 | IN-02 | info | open | - |
-| IN-03 | info | open | - |
+| IN-03 | info | fixed | quick 261116-0h6, commit "fix(cert): IN-03 treat a UnicodeError from the Traefik host lookup as a dns failure" |
 | IN-04 | info | open | - |
 | IN-05 | info | open | - |
 | IN-06 | info | open | - |
