@@ -625,16 +625,26 @@ async def test_user_step_requires_credentials_of_auth_type(
 @pytest.mark.parametrize(
     ("submitted", "errors"),
     [
-        pytest.param({**BASIC_INPUT, CONF_USERNAME: "ad:min"}, {CONF_USERNAME: "invalid_auth"}, id="colon-username"),
-        pytest.param({**BASIC_INPUT, CONF_USERNAME: "ad\tmin"}, {CONF_USERNAME: "invalid_auth"}, id="control-username"),
-        pytest.param({**BASIC_INPUT, CONF_PASSWORD: "s3\x00cret"}, {CONF_PASSWORD: "invalid_auth"}, id="password"),
-        pytest.param({AUTH_TYPE: "bearer", CONF_TOKEN: "to\nken"}, {CONF_TOKEN: "invalid_auth"}, id="token"),
+        pytest.param(
+            {**BASIC_INPUT, CONF_USERNAME: "ad:min"}, {CONF_USERNAME: "invalid_credential_format"}, id="colon-username"
+        ),
+        pytest.param(
+            {**BASIC_INPUT, CONF_USERNAME: "ad\tmin"},
+            {CONF_USERNAME: "invalid_credential_format"},
+            id="control-username",
+        ),
+        pytest.param(
+            {**BASIC_INPUT, CONF_PASSWORD: "s3\x00cret"}, {CONF_PASSWORD: "invalid_credential_format"}, id="password"
+        ),
+        pytest.param(
+            {AUTH_TYPE: "bearer", CONF_TOKEN: "to\nken"}, {CONF_TOKEN: "invalid_credential_format"}, id="token"
+        ),
     ],
 )
 async def test_user_step_rejected_credentials_mark_their_field(
     hass: Any, aioclient_mock: Any, submitted: dict[str, Any], errors: dict[str, str]
 ) -> None:
-    """A credential the client cannot send marks its field invalid_auth; Traefik is not contacted."""
+    """A credential the client cannot send marks its field invalid_credential_format; Traefik is not contacted."""
     result = await _submit_user(hass, submitted)
 
     assert result["type"] is FlowResultType.FORM
@@ -1076,6 +1086,7 @@ FLOW_ERROR_KEYS = {
     "invalid_url",
     "url_has_credentials",
     "invalid_auth",
+    "invalid_credential_format",
     "cannot_connect",
     "api_disabled",
     "redirect",
@@ -1101,3 +1112,18 @@ def test_flow_error_keys_have_texts(language: str) -> None:
         assert text.strip()
         assert "://" not in text
         assert "{" not in text
+
+
+@pytest.mark.parametrize(("language", "blame"), [("en", "rejected"), ("de", "abgelehnt")])
+def test_local_credential_rejection_does_not_blame_traefik(language: str, blame: str) -> None:
+    """The field error for a credential that cannot be sent does not say Traefik rejected it (IN-01)."""
+    import json
+    from pathlib import Path
+
+    import custom_components.traefik_proxy as integration
+
+    path = Path(integration.__file__).parent / "translations" / f"{language}.json"
+    errors = json.loads(path.read_text(encoding="utf-8"))["config"]["error"]
+
+    assert blame not in errors["invalid_credential_format"]
+    assert blame in errors["invalid_auth"]

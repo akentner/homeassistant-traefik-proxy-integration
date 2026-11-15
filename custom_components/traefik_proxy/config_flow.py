@@ -285,7 +285,8 @@ def _collect_credentials(
     A missing or empty field falls back to ``stored`` when given (reconfigure
     with an unchanged auth type and target) and is otherwise ``required``. Complete
     credentials ``Auth`` rejects (a ':' or control character in the username,
-    a control character in a secret) mark that field ``invalid_auth``.
+    a control character in a secret) mark that field
+    ``invalid_credential_format``.
     """
     try:
         mode = AuthMode(auth_type)
@@ -304,7 +305,8 @@ def _collect_credentials(
     try:
         Auth(mode=mode, **credentials)
     except ValueError:
-        errors[_rejected_field(mode, credentials)] = "invalid_auth"
+        # Rejected locally, Traefik was not contacted: not invalid_auth.
+        errors[_rejected_field(mode, credentials)] = "invalid_credential_format"
     return credentials, errors
 
 

@@ -62,6 +62,7 @@
       "invalid_url": "The address is not valid. Use the http or https scheme and a host name, optionally followed by a port.",
       "url_has_credentials": "The address contains a user name or password. Remove them from the address and enter them in the authentication fields instead.",
       "invalid_auth": "Traefik rejected the credentials. Traefik's API has no credentials of its own: check the basicAuth or forwardAuth middleware in front of the api@internal service and the authentication type you chose. Credentials with a control character, or a colon in the username, cannot be sent.",
+      "invalid_credential_format": "This value cannot be sent: a username must not contain a colon, and no credential may contain a control character such as a line break or a tab.",
       "cannot_connect": "Unable to reach Traefik. Check the address, the port and the network, and that Traefik is running. For a self-signed certificate on the Traefik API, turn off TLS verification.",
       "api_disabled": "Traefik answered HTTP 404: its API is not available at this address. Enable the API in Traefik's static configuration (api section) and route it to the api@internal service, or correct the address.",
       "redirect": "Traefik answered with a redirect, which is not followed. Enter the address it redirects to instead, usually the HTTPS address of the Traefik API.",

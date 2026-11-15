@@ -62,6 +62,7 @@
       "invalid_url": "Die Adresse ist ungültig. Nutze das Schema http oder https und einen Hostnamen, optional gefolgt von einem Port.",
       "url_has_credentials": "Die Adresse enthält einen Benutzernamen oder ein Passwort. Entferne sie aus der Adresse und gib sie stattdessen in den Feldern zur Authentifizierung ein.",
       "invalid_auth": "Traefik hat die Zugangsdaten abgelehnt. Die Traefik-API hat keine eigenen Zugangsdaten: Prüfe die basicAuth- oder forwardAuth-Middleware vor dem Dienst api@internal und die gewählte Authentifizierung. Zugangsdaten mit einem Steuerzeichen oder einem Doppelpunkt im Benutzernamen können nicht gesendet werden.",
+      "invalid_credential_format": "Dieser Wert kann nicht gesendet werden: Ein Benutzername darf keinen Doppelpunkt enthalten, und keine Zugangsangabe darf ein Steuerzeichen wie einen Zeilenumbruch oder einen Tabulator enthalten.",
       "cannot_connect": "Traefik ist nicht erreichbar. Prüfe Adresse, Port und Netzwerk und ob Traefik läuft. Bei einem selbstsignierten Zertifikat der Traefik-API schalte die TLS-Prüfung aus.",
       "api_disabled": "Traefik hat mit HTTP 404 geantwortet: Unter dieser Adresse ist die API nicht verfügbar. Aktiviere die API in der statischen Traefik-Konfiguration (Abschnitt api) und leite sie an den Dienst api@internal weiter, oder korrigiere die Adresse.",
       "redirect": "Traefik hat mit einer Weiterleitung geantwortet, der nicht gefolgt wird. Gib stattdessen die Zieladresse der Weiterleitung ein, meist die HTTPS-Adresse der Traefik-API.",
