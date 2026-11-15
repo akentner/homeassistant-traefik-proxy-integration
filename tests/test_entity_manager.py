@@ -705,8 +705,8 @@ def _assert_per_item_off(hass: HomeAssistant, entry: Any) -> None:
     assert _kind_keys(hass, entry, ROUTERS) == []
     assert _kind_keys(hass, entry, SERVICES) == []
     assert _kind_keys(hass, entry, ENTRYPOINTS)
-    # The test probe reports every host unreachable; both cert kinds still
-    # exist for an error host and are unaffected by the per-item option.
+    # The test probe fails for every host; both cert kinds still exist for a
+    # host without a certificate and are unaffected by the per-item option.
     assert _kind_keys(hass, entry, CERT_EXPIRING)
     assert sorted(_kind_keys(hass, entry, CERT_EXPIRY)) == sorted(_kind_keys(hass, entry, CERT_EXPIRING))
     for suffix in SNAPSHOT_UID_SUFFIXES:

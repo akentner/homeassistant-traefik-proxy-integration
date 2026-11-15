@@ -19,6 +19,7 @@ except ImportError:  # HA releases before 2026.10 define it in the package
     from homeassistant.components.binary_sensor import BinarySensorDeviceClass  # type: ignore[attr-defined]
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from .const import MAX_PROBLEM_NAMES, UID_MIDDLEWARES_PROBLEM, UID_ROUTERS_PROBLEM, UID_SERVICES_PROBLEM
 from .entity import TraefikCertEntity, TraefikEntity, cert_hosts
@@ -116,12 +117,16 @@ class TraefikProblemBinarySensor(TraefikEntity, BinarySensorEntity):
 
 
 class TraefikCertExpiringBinarySensor(TraefikCertEntity, BinarySensorEntity):
-    """Problem binary sensor: on while one TLS host's certificate expires within the threshold.
+    """Problem binary sensor for one TLS host's certificate.
 
-    On when ``days_until_expiry <= threshold_days`` (signed, so an expired
-    certificate is on); the threshold is read live from the cert coordinator,
-    so an options change re-evaluates without a new probe. Enabled by
-    default: certificate expiry is a security alarm.
+    On with a ``reason`` by precedence: ``expired`` (days < 0), else
+    ``probe_failed`` (two or more consecutive failed probes), else
+    ``not_found`` (the Traefik API has no certificate for the host), else
+    ``expiring`` (days <= threshold). Off with reason None. Unknown only
+    while the host has no certificate and fewer than two failed probes.
+    The threshold is read live from the cert coordinator, so an options
+    change re-evaluates without a new probe. Enabled by default:
+    certificate expiry is a security alarm.
     """
 
     _spec = CERT_EXPIRING
@@ -131,34 +136,32 @@ class TraefikCertExpiringBinarySensor(TraefikCertEntity, BinarySensorEntity):
 
     @property
     def is_on(self) -> bool | None:
-        """Return whether the certificate expires within the threshold, or None without a certificate."""
-        info = self._info()
-        return None if info is None else info.days_until_expiry <= self.coordinator.threshold_days
+        """Return whether the host's certificate is a problem, or None while unknown."""
+        state = self._state()
+        if state is None:
+            return None
+        return state.is_problem(self.coordinator.threshold_days, dt_util.utcnow())
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         threshold = self.coordinator.threshold_days
-        info = self._info()
-        if info is None:
-            err = self._error()
-            return {
-                "days_until_expiry": None,
-                "threshold_days": threshold,
-                "not_after": None,
-                "last_error": err.get("error") if err else None,
-                "san_mismatch": None,
-                "host": self._host,
-                "fetched_at": None,
-            }
+        state = self._state()
+        now = dt_util.utcnow()
+        problem = state.problem(threshold, now) if state is not None else None
+        certificate = state.certificate if state is not None else None
+        fetched_at = state.fetched_at if state is not None else None
         return {
-            "days_until_expiry": info.days_until_expiry,
+            "reason": problem.value if problem is not None else None,
+            "days_until_expiry": state.days_left(now) if state is not None else None,
             "threshold_days": threshold,
-            "not_after": info.not_after.isoformat(),
-            "last_error": None,
-            "san_mismatch": info.san_mismatch,
+            "not_after": certificate.not_after.isoformat() if certificate is not None else None,
+            "last_error": state.error if state is not None else None,
+            "verified": state.verified if state is not None else None,
+            "source": state.source.value if state is not None else None,
+            "san_mismatch": state.san_mismatch if state is not None else None,
             "host": self._host,
-            "fetched_at": info.fetched_at.isoformat(),
+            "fetched_at": fetched_at.isoformat() if fetched_at is not None else None,
         }
 
     def _state_token(self) -> object:
-        return (self._row(), self.coordinator.threshold_days)
+        return (self._state(), self.coordinator.threshold_days, self._days_left())

@@ -203,16 +203,17 @@ def test_attributes_keep_cached_values_after_a_failed_cycle() -> None:
 
 
 def test_days_until_expiry_is_computed_live(freezer: Any) -> None:
-    """The same row reports one day less after a day passes; the state token follows."""
+    """Floor days drop right after the exact boundary and then hold for a day; the state token follows."""
     sensor = _sensor({HOST: _cert_state(10)})
     token = sensor._state_token()
     assert sensor.extra_state_attributes["days_until_expiry"] == 10
-    freezer.tick(timedelta(hours=23))
-    assert sensor.extra_state_attributes["days_until_expiry"] == 10
-    assert sensor._state_token() == token
-    freezer.tick(timedelta(hours=1))
+    freezer.tick(timedelta(microseconds=1))
     assert sensor.extra_state_attributes["days_until_expiry"] == 9
     assert sensor._state_token() != token
+    token = sensor._state_token()
+    freezer.tick(timedelta(hours=23))
+    assert sensor.extra_state_attributes["days_until_expiry"] == 9
+    assert sensor._state_token() == token
 
 
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ clock frozen at ``REFERENCE``.
 from __future__ import annotations
 
 import copy
+import dataclasses
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -79,7 +80,7 @@ def _cert(host: str, days: int) -> HostCertState:
     return make_cert_state(host, days=days, now=REFERENCE, verified=True)
 
 
-def _probed(sni: str, days: int = 30) -> ProbedCertificate:
+def _probed(sni: str, days: float = 30) -> ProbedCertificate:
     """Return a verified probe result for ``sni`` expiring ``days`` after ``REFERENCE``."""
     return ProbedCertificate(
         certificate=TraefikCertificate(
@@ -196,7 +197,8 @@ async def test_cert_cycle_updates_timestamp_sensor_state(
     await hass.async_block_till_done()
 
     state = _state(hass, expiry)
-    assert dt_util.parse_datetime(state.state) == renewed.not_after
+    assert renewed.certificate is not None
+    assert dt_util.parse_datetime(state.state) == renewed.certificate.not_after
     # Days are computed from the frozen clock at read time.
     assert state.attributes["days_until_expiry"] == 3
     other = _state(hass, other_expiry)
@@ -393,6 +395,13 @@ async def test_unchanged_cert_notification_writes_nothing(
     entry = await _setup(hass, aioclient_mock)
     cert_coordinator = entry.runtime_data.cert_coordinator
     entity_ids = _all_cert_ids(hass, entry)
+    # Certificates half a day off the day boundary, so one second changes no day count.
+    half_day = {
+        host: dataclasses.replace(_cert(host, 30), certificate=_probed(host, 30.5).certificate)
+        for host in (HOST, OTHER_HOST)
+    }
+    cert_coordinator.async_set_updated_data(half_day)
+    await hass.async_block_till_done()
     before = {entity_id: _state(hass, entity_id).last_reported for entity_id in entity_ids}
 
     freezer.tick(timedelta(seconds=1))

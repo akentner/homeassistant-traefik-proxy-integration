@@ -312,9 +312,10 @@ class TraefikSnapshotSensor(TraefikEntity, SensorEntity):
 class TraefikCertExpirySensor(TraefikCertEntity, SensorEntity):
     """Timestamp sensor with the ``notAfter`` time of one TLS host's certificate.
 
-    Unavailable while the host's probe failed, the host is absent from the
-    cert data or the last cert cycle failed. The attributes are always
-    present, with None values on the error path.
+    Available while the cert cycle succeeds and the host is in the cert
+    data. A failing probe keeps the last known value; before the first
+    certificate was read the value is unknown. The attributes are always
+    present, with None values without a certificate.
     """
 
     _spec = CERT_EXPIRY
@@ -325,34 +326,27 @@ class TraefikCertExpirySensor(TraefikCertEntity, SensorEntity):
 
     @property
     def native_value(self) -> datetime | None:
-        """Return the certificate's ``notAfter`` (UTC), or None without a certificate."""
-        info = self._info()
-        return None if info is None else info.not_after
+        """Return the last known certificate's ``notAfter`` (UTC), or None without a certificate."""
+        state = self._state()
+        if state is None or state.certificate is None:
+            return None
+        return state.certificate.not_after
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        info = self._info()
-        if info is None:
-            err = self._error()
-            return {
-                "days_until_expiry": None,
-                "subject": None,
-                "issuer": None,
-                "san": None,
-                "san_mismatch": None,
-                "host": self._host,
-                "port": err.get("port") if err else None,
-                "fetched_at": None,
-                "last_error": err.get("error") if err else None,
-            }
+        state = self._state()
+        certificate = state.certificate if state is not None else None
+        fetched_at = state.fetched_at if state is not None else None
         return {
-            "days_until_expiry": info.days_until_expiry,
-            "subject": info.subject,
-            "issuer": info.issuer,
-            "san": tuple(sorted(info.san)),
-            "san_mismatch": info.san_mismatch,
+            "days_until_expiry": self._days_left(),
+            "subject": (certificate.common_name or None) if certificate is not None else None,
+            "issuer": certificate.issuer_cn if certificate is not None else None,
+            "san": tuple(sorted(certificate.sans)) if certificate is not None else None,
+            "san_mismatch": state.san_mismatch if state is not None else None,
+            "verified": state.verified if state is not None else None,
+            "source": state.source.value if state is not None else None,
             "host": self._host,
-            "port": info.port,
-            "fetched_at": info.fetched_at.isoformat(),
-            "last_error": None,
+            "port": state.port if state is not None else None,
+            "fetched_at": fetched_at.isoformat() if fetched_at is not None else None,
+            "last_error": state.error if state is not None else None,
         }

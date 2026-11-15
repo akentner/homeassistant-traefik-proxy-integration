@@ -14,13 +14,13 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
-from .cert_coordinator import CertCoordinator
+from .cert_coordinator import CertCoordinator, HostCertState
 from .const import CONF_URL, DOMAIN
 from .coordinator import TraefikProxyCoordinator
 from .data import TraefikProxyConfigEntry
 from .entity_manager import KindSpec
-from .tls import CertError, CertInfo
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -294,9 +294,10 @@ class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
     """Entity for the certificate of one TLS host; holds only the host.
 
     Listens to the cert coordinator, because cert cycles and threshold
-    changes notify only its listeners. Available only while the last cert
-    cycle succeeded and the host's row is a certificate; a host absent from
-    the cert data (missing) or with a failed probe is unavailable.
+    changes notify only its listeners. Available while the last cert cycle
+    succeeded and the host is in the cert data, also when its probe failed;
+    a host absent from the cert data (missing) is unavailable. Days until
+    expiry are computed from the clock at read time.
     ``homeassistant.update_entity`` requests a cert refresh.
     """
 
@@ -309,23 +310,18 @@ class TraefikCertEntity(_TraefikEntityBase[CertCoordinator]):
         self._host = host
         self._attr_translation_placeholders = {"host": host}
 
-    def _row(self) -> CertInfo | CertError | None:
-        """Return the host's row of the latest cert data, or None when the host is absent."""
+    def _state(self) -> HostCertState | None:
+        """Return the host's state in the latest cert data, or None when the host is absent."""
         return (self.coordinator.data or {}).get(self._host)
 
-    def _info(self) -> CertInfo | None:
-        """Return the host's certificate, or None when it is absent or its probe failed."""
-        row = self._row()
-        return row if isinstance(row, CertInfo) else None
-
-    def _error(self) -> CertError | None:
-        """Return the host's probe error, or None."""
-        row = self._row()
-        return None if row is None or isinstance(row, CertInfo) else row
+    def _days_left(self) -> int | None:
+        """Return the signed days until the certificate expires, or None without one."""
+        state = self._state()
+        return None if state is None else state.days_left(dt_util.utcnow())
 
     @property
     def available(self) -> bool:
-        return super().available and self._info() is not None
+        return super().available and self._state() is not None
 
     def _state_token(self) -> object:
-        return (self._row(),)
+        return (self._state(), self._days_left())

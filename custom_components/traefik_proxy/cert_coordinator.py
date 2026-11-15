@@ -1,81 +1,136 @@
-"""Cert-coordinator side of Phase 3: 6h TLS-handshake cycle with bounded concurrency.
+"""Cert coordinator: per-host certificate state of the Traefik TLS routers.
 
-This module is the cert coordinator (stored next to the main coordinator
-on ``entry.runtime_data``) that runs every 6 hours and probes every
-distinct hostname extracted from the routers of the main
-coordinator's snapshot. It is the data path Phase 3 entities depend on
-(TLS-03, TLS-04, TLS-05); the entity platforms land in plan 03-02 and
-the test surface lands in plan 03-03.
+The cert coordinator is stored next to the main coordinator on
+``entry.runtime_data`` and runs on its own slow cadence. Every cycle reads
+the TLS hosts of the main coordinator's latest snapshot (no extra Traefik
+API call) and probes each host once: a TLS handshake to the Traefik host of
+the entry URL with the router host as SNI name, at most ``TLS_SEMAPHORE``
+handshakes at a time. Router hostnames are never resolved through DNS.
 
-Design contracts locked by CONTEXT.md and spike 004:
-
-- CONTEXT.md D-05 — bounded concurrent handshakes
-  (``asyncio.Semaphore(4)``) and per-host ``asyncio.timeout(5)`` so a
-  hanging host cannot stall the cycle indefinitely.
-- CONTEXT.md D-06 — in-memory ``dict[str, CertInfo | CertError]`` cache;
-  errors are kept in the cache (not just successes) so a single
-  transient failure does not erase the prior result on the next cycle.
-- CONTEXT.md D-07 — independent of the main ``TraefikProxyCoordinator`` cycle;
-  a TLS failure on one hostname never marks the main coordinator as
-  failed.
-- CONTEXT.md D-10 — every error path becomes a typed ``CertError`` and
-  is recorded in the cache; nothing propagates as an exception.
-- PITFALLS #14 — read hostnames from the main coordinator's
-  snapshot routers (already polled at the 15s scan
-  interval) rather than re-polling the Traefik HTTP API; the cert
-  cycle is much slower than the main cycle (6h vs 15s).
+The result is one :class:`HostCertState` per host of the current host set.
+Days until expiry are never stored; entities compute them from the clock at
+read time. A cycle never fails because a probe failed; a failed probe is
+part of the host's state.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from enum import StrEnum
+from typing import TYPE_CHECKING, Final
+from urllib.parse import urlsplit
 
+from cryptography.x509.verification import Store
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_URL,
     DEFAULT_TLS_CERT_COOLDOWN,
     DEFAULT_TLS_WARN_DAYS,
     MAX_CERT_HOSTS,
     TLS_HANDSHAKE_TIMEOUT,
     TLS_SEMAPHORE,
 )
+from .models import TraefikCertificate
 from .rules import extract_hosts, normalize_host
-from .tls import CertError, CertInfo, fetch_cert_info_async
+from .tls import ProbedCertificate, ProbeResult, async_probe_certificate
 
 if TYPE_CHECKING:
     from .data import TraefikProxyConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
+# Port probed on the Traefik host.
+PROBE_PORT: Final = 443
+# Consecutive failed probes after which a host is a problem.
+CERT_FAILURES_FOR_PROBLEM: Final = 2
+# ``error`` of a host the Traefik API reports no certificate for.
+NOT_FOUND: Final = "not_found"
+DAY: Final = timedelta(days=1)
 
-class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
-    """Background 6h TLS-handshake cycle keyed by hostname.
 
-    Every cycle:
+class CertSource(StrEnum):
+    """Where a host's certificate state came from."""
 
-    1. Reads the routers of the main ``TraefikProxyCoordinator`` snapshot
-       (no direct Traefik HTTP API call — main cycle already covers
-       that at the 15s scan interval).
-    2. Collects the sorted, normalized union of hostnames from
-       ``tls_domains[].main`` + ``tls_domains[].sans`` + the literal
-       ``Host()`` names of the router rule (see :mod:`.rules`).
-    3. Probes every hostname concurrently through
-       ``asyncio.Semaphore(4)`` + ``asyncio.timeout(5)`` — each
-       handshake runs on a worker thread via ``asyncio.to_thread`` so
-       the HA event loop stays responsive.
-    4. Writes the per-host result back to ``self.data`` keyed by
-       hostname; ``CertInfo`` AND ``CertError`` are both kept (CONTEXT.md
-       errors surface on the entity, not just successes).
+    API = "api"
+    PROBE = "probe"
 
-    Threshold mutations (``CONF_TLS_WARN_DAYS`` from the Options Flow)
-    flow through :meth:`async_set_threshold` from the
-    ``_async_options_updated`` listener — that path mutates
-    ``threshold_days`` and calls :meth:`async_update_listeners` so the
-    binary sensor re-renders immediately without re-handshaking.
+
+class CertProblem(StrEnum):
+    """Why a host's certificate is a problem, in precedence order."""
+
+    EXPIRED = "expired"
+    PROBE_FAILED = "probe_failed"
+    NOT_FOUND = "not_found"
+    EXPIRING = "expiring"
+
+
+@dataclass(frozen=True, slots=True)
+class HostCertState:
+    """Certificate state of one TLS host.
+
+    ``certificate`` is the last known certificate (None until one was read).
+    ``verified`` and ``san_mismatch`` belong to that certificate. ``error``
+    is the code of the last failed attempt (None after a success) and
+    ``failures`` the number of consecutive failed probes. ``fetched_at`` is
+    when ``certificate`` was read.
+    """
+
+    host: str
+    source: CertSource
+    certificate: TraefikCertificate | None
+    verified: bool | None
+    san_mismatch: bool | None
+    port: int | None
+    error: str | None
+    failures: int
+    fetched_at: datetime | None
+
+    def days_left(self, now: datetime) -> int | None:
+        """Return the signed whole days until ``not_after`` (floor), or None without a certificate."""
+        if self.certificate is None:
+            return None
+        return (self.certificate.not_after - now) // DAY
+
+    def problem(self, threshold_days: int, now: datetime) -> CertProblem | None:
+        """Return the host's problem by precedence, or None when it has none."""
+        days = self.days_left(now)
+        if days is not None and days < 0:
+            return CertProblem.EXPIRED
+        if self.failures >= CERT_FAILURES_FOR_PROBLEM:
+            return CertProblem.PROBE_FAILED
+        if self.error == NOT_FOUND:
+            return CertProblem.NOT_FOUND
+        if days is not None and days <= threshold_days:
+            return CertProblem.EXPIRING
+        return None
+
+    def is_problem(self, threshold_days: int, now: datetime) -> bool | None:
+        """Return True for any problem, None without a certificate, else False."""
+        if self.problem(threshold_days, now) is not None:
+            return True
+        if self.certificate is None:
+            return None
+        return False
+
+
+class CertCoordinator(DataUpdateCoordinator[dict[str, HostCertState]]):
+    """Certificate cycle keyed by hostname.
+
+    Every cycle collects the sorted, normalized, capped TLS hosts of the
+    main snapshot (:meth:`_collect_hosts`) and probes each one concurrently
+    under the semaphore; ``data`` maps each host to its
+    :class:`HostCertState`.
+
+    Threshold changes (``tls_warn_days`` in the options) go through
+    :meth:`async_set_threshold`, which notifies the listeners so the
+    expiring sensors re-evaluate without a new probe.
     """
 
     config_entry: TraefikProxyConfigEntry
@@ -89,13 +144,12 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         sem: int = TLS_SEMAPHORE,
         timeout: float = TLS_HANDSHAKE_TIMEOUT,
         update_interval_seconds: int = DEFAULT_TLS_CERT_COOLDOWN,
+        trust_store: Store | None = None,
     ) -> None:
-        """Construct the cert coordinator with the spike-validated defaults.
+        """Construct the cert coordinator.
 
-        The ``config_entry=entry`` kwarg to ``super().__init__``
-        populates ``self.config_entry`` (the HA base class only sets it
-        when the kwarg is provided), which :meth:`_collect_hosts` needs
-        to read the main coordinator's snapshot.
+        ``trust_store`` holds the roots a probed chain is verified against;
+        without one every probed certificate reports ``verified`` False.
         """
         super().__init__(
             hass,
@@ -111,62 +165,74 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         )
         self._sem = asyncio.Semaphore(sem)
         self._timeout = timeout
-        # Optional port cache so future probes can override the default
-        # 443 (tests inject custom ports via the test seam).
-        self._host_port: dict[str, int] = {}
+        self._trust_store = trust_store
 
-    async def _async_update_data(self) -> dict[str, CertInfo | CertError]:
-        """One cert cycle — probe every distinct hostname in parallel.
-
-        ``asyncio.gather(..., return_exceptions=False)`` documents the
-        contract: :meth:`_probe` catches every exception internally so
-        no exception is ever returned. The cycle can never raise.
-        """
+    async def _async_update_data(self) -> dict[str, HostCertState]:
+        """Run one cert cycle over the current host set."""
         hosts = self._collect_hosts()
-        tasks = [self._probe(host) for host in hosts]
-        results = await asyncio.gather(*tasks, return_exceptions=False)
-        return {host: result for host, result in zip(hosts, results, strict=False)}
+        now = dt_util.utcnow()
+        return await self._async_probe_states(hosts, now)
 
-    async def _probe(self, host: str, port: int = 443) -> CertInfo | CertError:
-        """Probe one hostname with the bounded-concurrency wrapper.
+    def _connect_host(self) -> str:
+        """Return the Traefik host of the entry URL; every probe connects there."""
+        url: str = self.config_entry.data[CONF_URL]
+        host = urlsplit(url).hostname
+        if host is None:
+            raise UpdateFailed("The Traefik URL has no host to probe certificates at")
+        return host
 
-        Defense in depth — ``fetch_cert_info`` itself never raises
-        (CONTEXT.md D-10) but this method adds an
-        ``asyncio.TimeoutError`` catch for handshake timeouts that
-        aren't caught by the inner ``socket.timeout``, plus a final
-        ``Exception`` catch for any other surprise. The cycle must
-        never propagate.
-        """
+    async def _async_probe_states(self, hosts: Sequence[str], now: datetime) -> dict[str, HostCertState]:
+        """Probe every host and return their states in host order."""
+        if not hosts:
+            return {}
+        connect_host = self._connect_host()
+        results = await asyncio.gather(*(self._async_probe_host(host, PROBE_PORT, connect_host, now) for host in hosts))
+        return {
+            host: self._probe_state(host, PROBE_PORT, result, now) for host, result in zip(hosts, results, strict=True)
+        }
+
+    async def _async_probe_host(self, host: str, port: int, connect_host: str, now: datetime) -> ProbeResult:
+        """Probe ``host`` (as SNI) at ``connect_host:port`` under the semaphore."""
         async with self._sem:
-            try:
-                async with asyncio.timeout(self._timeout):
-                    return await fetch_cert_info_async(host, port, timeout=self._timeout)
-            except TimeoutError as exc:
-                return {
-                    "host": host,
-                    "port": port,
-                    "error": "timeout",
-                    "detail": str(exc) or f"timeout after {self._timeout}s",
-                }
-            except Exception as exc:  # final-resort catch-all; every error path becomes a typed CertError
-                return {
-                    "host": host,
-                    "port": port,
-                    "error": "unreachable",
-                    "detail": f"{type(exc).__name__}: {exc}",
-                }
+            return await async_probe_certificate(
+                connect_host,
+                port,
+                host,
+                handshake_timeout=self._timeout,
+                trust_store=self._trust_store,
+                now=now,
+            )
+
+    @staticmethod
+    def _probe_state(host: str, port: int, result: ProbeResult, now: datetime) -> HostCertState:
+        """Map one probe result to the host's state."""
+        if isinstance(result, ProbedCertificate):
+            return HostCertState(
+                host=host,
+                source=CertSource.PROBE,
+                certificate=result.certificate,
+                verified=result.verified,
+                san_mismatch=result.san_mismatch,
+                port=port,
+                error=None,
+                failures=0,
+                fetched_at=now,
+            )
+        _LOGGER.debug("Certificate probe of %s failed: %s (%s)", host, result.error.value, result.detail)
+        return HostCertState(
+            host=host,
+            source=CertSource.PROBE,
+            certificate=None,
+            verified=None,
+            san_mismatch=None,
+            port=port,
+            error=result.error.value,
+            failures=1,
+            fetched_at=None,
+        )
 
     async def async_set_threshold(self, threshold_days: int) -> None:
-        """Update the warning threshold live (no re-handshake needed).
-
-        The Options Flow listener (``_async_options_updated`` in
-        ``__init__.py``) calls this whenever ``CONF_TLS_WARN_DAYS``
-        changes. The cert data (``not_after``, ``days_until_expiry``)
-        is unchanged; only the threshold applied to it shifts.
-        ``async_update_listeners`` is the HA method that schedules a
-        ``_ha_state_updated`` callback for every registered listener so
-        the binary sensor re-renders within the next event-loop tick.
-        """
+        """Update the warning threshold live and notify the listeners (no new probe)."""
         self.threshold_days = int(threshold_days)
         self.async_update_listeners()
 
@@ -217,10 +283,12 @@ class CertCoordinator(DataUpdateCoordinator[dict[str, CertInfo | CertError]]):
         """Return the current warning threshold (read accessor)."""
         return self.threshold_days
 
-    def _reset(self) -> None:
-        """Clear the in-memory cache — test seam only, not exposed in the front door."""
-        self.data = {}
-        self._host_port = {}
 
-
-__all__ = ["CertCoordinator"]
+__all__ = [
+    "CERT_FAILURES_FOR_PROBLEM",
+    "NOT_FOUND",
+    "CertCoordinator",
+    "CertProblem",
+    "CertSource",
+    "HostCertState",
+]

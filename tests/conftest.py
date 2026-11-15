@@ -358,8 +358,8 @@ async def mock_certificate_server(
 ) -> AsyncIterator[tuple[str, int, str]]:
     """Spin up a stdlib TLS server on 127.0.0.1 with a CA-signed cert.
 
-    Yields ``(host, port, sni_hostname)`` so tests can probe
-    ``fetch_cert_info("127.0.0.1", port, timeout=5.0)`` and
+    Yields ``(host, port, sni_hostname)`` so tests can run the blocking
+    probe of ``tls.py`` against ``("127.0.0.1", port)`` and
     ``_fetch_cert_raw(host="127.0.0.1", port=port, sni=<other-host>,
     timeout=...)`` (the latter for SNI-mismatch scenarios per spike 003).
 
@@ -367,7 +367,7 @@ async def mock_certificate_server(
     fixture generates a throwaway CA, signs the server leaf with it,
     and chains them into a single PEM for ``load_cert_chain``. The
     CA path is then monkey-patched into the production SSLContext via
-    ``ssl.SSLContext.load_verify_locations`` so ``fetch_cert_info`` —
+    ``ssl.SSLContext.load_verify_locations`` so the blocking probe —
     which uses ``PROTOCOL_TLS_CLIENT`` + ``load_default_certs()`` —
     can complete the handshake against the test cert chain. Without
     this injection, the verifier rejects the self-signed CA root and
