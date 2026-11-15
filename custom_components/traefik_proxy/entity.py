@@ -103,8 +103,8 @@ def async_setup_devices(
     """Register the main device and its sub-devices; return the main device.
 
     Runs before the platforms are set up, so entities attach to named devices.
-    Sub-devices are linked to the main device through the registry, the one
-    linking API available on every supported Home Assistant version. With
+    Sub-devices are linked to the main device when they are created, through
+    the ``via_device_id`` keyword of the device registry. With
     ``per_item`` off the Routers and Services sub-devices are not registered,
     and existing ones of this entry are removed unless a registry entry still
     references them.
@@ -130,16 +130,15 @@ def async_setup_devices(
                 _async_remove_device_if_unreferenced(device_registry, entity_registry, device_entry)
     wanted = (*per_item_devices, TraefikDevice.CERTIFICATES) if per_item else (TraefikDevice.CERTIFICATES,)
     for device in wanted:
-        sub = device_registry.async_get_or_create(
+        device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={device_identifier(entry.entry_id, device)},
             translation_key=device.value,
             translation_placeholders=placeholders,
             manufacturer="Traefik",
             entry_type=DeviceEntryType.SERVICE,
+            via_device_id=main.id,
         )
-        if sub.via_device_id != main.id:
-            device_registry.async_update_device(sub.id, via_device_id=main.id)
     return main
 
 
