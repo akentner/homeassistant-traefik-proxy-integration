@@ -104,7 +104,7 @@ the rule also redacts the error. This includes harmless text such as
 - Alternative: an allow-list of known-safe Traefik error forms. Rejected as
   brittle across Traefik v2 and v3.
 
-### WR-02: Probe mode connects only to the first resolved address
+### WR-02: Probe mode connects only to the first resolved address (regression for IPv6-first or multi-address hosts)
 
 **Files modified:** `custom_components/traefik_proxy/cert_coordinator.py`, `tests/test_cert_coordinator.py`, `CHANGELOG.md`
 **Commit:** ca1f5eb
@@ -172,7 +172,7 @@ pre-existing files. Docker cleanup: `docker ps -a`, `docker network ls` and
 networks bridge, host, none and winboat_default; 6 volumes). The re-run is
 recorded in 08-LOCAL-VALIDATION.md.
 
-### WR-04: CI lint and test jobs install dev dependencies without a lock
+### WR-04: CI lint and test jobs install dev dependencies without a lock (`uv.lock` is git-ignored)
 
 **Files modified:** `.gitignore`, `uv.lock`, `.github/workflows/validate.yml`, `Makefile`, `.pre-commit-config.yaml`
 **Commit:** 759874c
