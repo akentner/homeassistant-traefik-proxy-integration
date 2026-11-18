@@ -4,10 +4,10 @@ milestone: v1.0
 current_phase: 8
 status: completed
 stopped_at: Phase 8 complete — all phases complete
-last_updated: "2026-11-15T23:31:21.522Z"
+last_updated: "2026-11-18T16:15:33.394Z"
 last_activity: 2026-11-16
 last_activity_desc: Phase 8 complete
-state_head: 91541540430c99d08ece9a3ddb3793a7e6420013
+state_head: 9b427026c5fda4708b2793ecb3b3ad30cded97db
 progress:
   total_phases: 8
   completed_phases: 8
@@ -33,7 +33,7 @@ failing, and which TLS certificates are expiring soon.
 Phase: 8
 Plan: Not started
 Status: All phases complete
-Last activity: 2026-11-16 - Completed quick task 261116-0h6: IN-03 UnicodeError dns path + checkout persist-credentials false
+Last activity: 2026-11-18 - Completed quick task 261118-nnf: Prepare release candidate 1.0.0-rc1
 
 Progress: [██████████] 100% (8 of 8 phases)
 
@@ -304,6 +304,7 @@ None yet.
 |---|-------------|------|--------|-----------|
 | 261113-viw | Security fixes: verify_ssl single source, admin-only reload service, no token prefill in reconfigure, HA 2026.3.0 minimum + HA 2026.10 compat | 2026-11-13 | 1a07f14 | [261113-viw-security-fixes-verify-ssl-single-source-](./quick/261113-viw-security-fixes-verify-ssl-single-source-/) |
 | 261116-0h6 | IN-03 UnicodeError in cert host lookup as dns failure; persist-credentials: false on all checkout steps | 2026-11-16 | 9154154 | [261116-0h6-in-03-unicodeerror-dns-path-checkout-per](./quick/261116-0h6-in-03-unicodeerror-dns-path-checkout-per/) |
+| 261118-nnf | Prepare release candidate 1.0.0-rc1 (version bump, CHANGELOG, release notes) | 2026-11-18 | 9b42702 | [261118-nnf-prepare-release-candidate-1-0-0-rc1-vers](./quick/261118-nnf-prepare-release-candidate-1-0-0-rc1-vers/) |
 
 - `custom_components/traefik/config_flow.py` ruff-format diff is pre-existing
   from Phase 2-02 (verified via `git stash` before-plan baseline). Out of
