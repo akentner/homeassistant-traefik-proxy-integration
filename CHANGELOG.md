@@ -221,6 +221,13 @@ Every release tag gets an entry, also when it has no user-visible change.
 - Credentials with a control character, or a user name with a colon, are
   rejected before they are sent.
 
+## [1.0.0-rc1] - 2026-11-18
+
+Release candidate for 1.0.0, published as a GitHub pre-release. It contains
+every change listed under [1.0.0] above, including the breaking changes and
+required actions. HACS offers it only when pre-releases are enabled for this
+repository.
+
 ## [0.3.0] - 2026-07-06
 
 ### Changed
@@ -303,6 +310,7 @@ developer tooling).
 - A reload button and service.
 
 [1.0.0]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.3.0...v1.0.0
+[1.0.0-rc1]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.3.0...v1.0.0-rc1
 [0.3.0]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.1.6...v0.2.0
