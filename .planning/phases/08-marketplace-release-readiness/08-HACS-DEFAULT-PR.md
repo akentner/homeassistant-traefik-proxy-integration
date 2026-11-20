@@ -19,8 +19,11 @@ Re-read both right before you submit; the list grows daily.
       complete run of all 10 hacs/action checks on this tree (REL-07 was
       deferred to CI; it is not proven locally).
 - [ ] Tag `v1.0.0` exists and the GitHub release "Traefik Proxy 1.0.0" is
-      published with the body from `08-RELEASE-NOTES-v1.0.0.md`. The
-      `Release check` workflow (tag equals manifest version) passed.
+      published with the body from `08-RELEASE-NOTES-v1.0.0.md`, as a full
+      release marked as the latest release (not a pre-release). The
+      pre-release `v1.0.0-rc1` does not count: its manifest version is
+      1.0.0-rc1. The `Release check` workflow (tag equals manifest version)
+      passed.
 - [ ] The repository is public, not archived, has a description, topics,
       issues enabled and the MIT licence (all green on 2026-11-15).
 

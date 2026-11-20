@@ -2,11 +2,17 @@
 DRAFT for the GitHub release v1.0.0 (created by the user, not by an agent).
 Paste everything below the "----- cut -----" line as the release body.
 Before publishing:
-  1. Set the date in CHANGELOG.md (`## [1.0.0] - YYYY-MM-DD`) on main.
-  2. Update the CHANGELOG link anchor below (`#100---unreleased`) to the anchor of
-     the dated heading: `#100---YYYY-MM-DD`.
-  3. Release title: "Traefik Proxy 1.0.0", tag `v1.0.0` (the release workflow
+  1. Push first: the tagged commit must exist on GitHub, and its manifest.json
+     version must be 1.0.0. The tag v1.0.0-rc1 carries 1.0.0-rc1 and fails the
+     release check, so do not tag 22902d9 as v1.0.0.
+  2. Release title: "Traefik Proxy 1.0.0", tag `v1.0.0` (the release workflow
      compares the tag without `v` with manifest.json version 1.0.0).
+  3. In the GitHub release form, do not tick "Set as a pre-release", and tick
+     "Set as the latest release" (0.3.0 stays the latest release until then;
+     v1.0.0-rc1 remains a pre-release).
+  4. CHANGELOG.md is dated `## [1.0.0] - 2026-11-20`, and the change-list link
+     below uses its anchor `#100---2026-11-20`. If you publish on another day,
+     change the CHANGELOG date and this anchor together.
 This file is a planning draft; it is not shipped and not part of the integration.
 ----- cut -----
 -->
@@ -15,6 +21,11 @@ This file is a planning draft; it is not shipped and not part of the integration
 
 1.0.0 is a major rework of the integration. It changes entity types, entity IDs
 and devices. Read the required actions before you update.
+
+1.0.0 contains the same integration code as the release candidate 1.0.0-rc1,
+which was tested before this release; only the version number differs. If you
+already run 1.0.0-rc1, update through HACS; nothing else is needed. The required
+actions below apply when you update from 0.3.x.
 
 ## Required actions
 
@@ -69,7 +80,7 @@ and devices. Read the required actions before you update.
 
 ## Full change list
 
-See the [1.0.0 section of CHANGELOG.md](https://github.com/akentner/homeassistant-traefik-proxy-integration/blob/v1.0.0/CHANGELOG.md#100---unreleased)
+See the [1.0.0 section of CHANGELOG.md](https://github.com/akentner/homeassistant-traefik-proxy-integration/blob/v1.0.0/CHANGELOG.md#100---2026-11-20)
 for every breaking change, addition, change, removal, fix and security
 improvement in this release.
 
