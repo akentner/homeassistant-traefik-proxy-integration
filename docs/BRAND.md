@@ -19,9 +19,9 @@ so the vector sources live here in `docs/` and are not shipped by HACS.
 | `dark_logo.png` | 337 x 128 | `docs/logo-dark.svg` | `ProxyLogo`, white wordmark |
 | `dark_logo@2x.png` | 674 x 256 | `docs/logo-dark.svg` | `ProxyLogo`, white wordmark |
 
-`brand/` holds exactly these six files. `tests/test_brand.py` pins their
-sizes, trimming, mode (RGBA), interlacing, the file set and the wordmark
-contrast.
+`brand/` holds exactly these six images plus `LICENSE.md`, the licence notice
+(see [Licence](#licence)). `tests/test_brand.py` pins the image sizes,
+trimming, mode (RGBA), interlacing, the file set and the wordmark contrast.
 
 ## Source
 
@@ -42,6 +42,11 @@ provenance comment was added. The path data is unchanged. `xmllint --noout`
 accepts all three SVG files.
 
 ## Licence
+
+HACS ships only `custom_components/traefik_proxy/`, so the licence notice for
+the artwork is also shipped inside the integration, in
+`custom_components/traefik_proxy/brand/LICENSE.md`. Home Assistant serves only
+its eight named brand images from `brand/`, so the extra file is never served.
 
 The file is part of the traefik/traefik repository, which is published under
 the MIT licence (`LICENSE.md` at tag `v3.7.19`):
@@ -72,10 +77,23 @@ THE SOFTWARE.
 
 ## Trademark
 
-Traefik is a trademark of Traefik Labs, and the Traefik logo is its brand
-artwork. The MIT licence covers the copyright of the artwork file, not the
-trademark. This project is not affiliated with or endorsed by Traefik Labs;
-the logo is used only to identify the software this integration connects to.
+Traefik, Træfik and the Traefik Proxy logo are trademarks of Traefik Labs. The
+MIT licence covers the copyright of the artwork file, not the trademark. This
+project is not affiliated with, endorsed by or sponsored by Traefik Labs; the
+logo is used only to identify the software this integration connects to. The
+same artwork is part of the Traefik Labs press kit
+(<https://traefik.io/downloads/traefik-labs-brand-assets.zip>); the files here
+were exported from the dashboard source, not from the press kit.
+
+### Review (2026-11-20)
+
+Reviewed 2026-11-20: no public Traefik Labs trademark policy was found
+(traefik.io/legal lists only privacy, DPA and EULA). Traefik Labs publishes a
+press kit with "Traefik Proxy - Horizontal Black/White" logos and a brand guide
+without usage rules (<https://traefik.io/downloads/traefik-labs-brand-assets.zip>).
+The white-wordmark-on-dark variant matches the brand guide. US registrations for
+TRAEFIK exist (Reg. 6772364); EUIPO/WIPO were not checked. This is not legal
+advice.
 
 ## Export commands
 

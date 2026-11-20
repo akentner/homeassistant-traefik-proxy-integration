@@ -426,19 +426,23 @@ Not yet. It reads `/api/rawdata`, but has no graph view.
 
 ## Trademark
 
-Traefik is a trademark of Traefik Labs. This project is not affiliated with or
-endorsed by Traefik Labs. The integration uses the name only to say which
-software it connects to.
+Traefik, Træfik and the Traefik Proxy logo are trademarks of Traefik Labs. This
+project is an independent community integration; it is not affiliated with,
+endorsed by or sponsored by Traefik Labs. The name and logo are used only to
+identify the software this integration connects to.
 
-The icon and logo shipped in `custom_components/traefik_proxy/brand/` are
-exported from the logo components of the Traefik Proxy dashboard source code
-(`traefik/traefik`, MIT licence); the logo is the horizontal "traefik proxy"
-lockup as used by that dashboard. The MIT licence covers the copyright of the
-artwork, not the trademark. Traefik Labs' trademark guidelines have not been
-reviewed for this use, and no permission from Traefik Labs is claimed. If
-Traefik Labs objects to the use of the logo, please open an issue so that it
-can be replaced. Source, licence text and export commands are in
-[docs/BRAND.md](docs/BRAND.md).
+The icon and logo in `custom_components/traefik_proxy/brand/` show the Traefik
+Proxy mark and the horizontal "traefik proxy" lockup. They are exported from the
+Traefik Proxy dashboard source (`traefik/traefik`, MIT licence; the same artwork
+is part of the [Traefik Labs press kit](https://traefik.io/press)). The dark
+variant changes only the wordmark colour to white, as the dashboard and Traefik
+Labs' brand guide do for dark backgrounds. The MIT licence covers the copyright
+of the artwork, not the trademark. Traefik Labs has not published a trademark
+policy that we could find, and no separate permission is claimed. If Traefik
+Labs objects, please open an issue and the images will be replaced. The licence
+notice ships with the integration in
+`custom_components/traefik_proxy/brand/LICENSE.md`. Source, licence text and
+export commands: [docs/BRAND.md](docs/BRAND.md).
 
 ## License
 
