@@ -1326,7 +1326,7 @@ wheels = [
 
 [[package]]
 name = "homeassistant-traefik-proxy-integration"
-version = "1.0.0rc1"
+version = "1.0.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
