@@ -1,0 +1,333 @@
+"""Consistency of translations, icons and PARALLEL_UPDATES with the entity code (D-12, ENT-08).
+
+Translation keys are collected from the entity classes and descriptions, so a
+renamed key, a missing German text, a missing icon or a drifting placeholder
+fails here.
+"""
+
+from __future__ import annotations
+
+import ast
+import json
+import string
+from pathlib import Path
+from typing import Any
+
+import pytest
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+
+from custom_components.traefik_proxy import binary_sensor, button, sensor
+from custom_components.traefik_proxy.api import AuthMode
+from custom_components.traefik_proxy.binary_sensor import PROBLEM_SENSORS, TraefikCertExpiringBinarySensor
+from custom_components.traefik_proxy.button import TraefikRefreshButton
+from custom_components.traefik_proxy.cert_coordinator import CertProblem
+from custom_components.traefik_proxy.const import ITEM_STATE_OPTIONS
+from custom_components.traefik_proxy.entity import TraefikDevice, device_identifier
+from custom_components.traefik_proxy.sensor import (
+    SNAPSHOT_SENSORS,
+    TraefikCertExpirySensor,
+    TraefikEntrypointSensor,
+    TraefikRouterSensor,
+    TraefikServiceSensor,
+)
+from tests.conftest import make_traefik_entry, setup_traefik_entry
+
+PACKAGE = Path(__file__).parent.parent / "custom_components" / "traefik_proxy"
+EN = PACKAGE / "translations" / "en.json"
+DE = PACKAGE / "translations" / "de.json"
+ICONS = PACKAGE / "icons.json"
+
+# Modules whose Home Assistant exceptions must all be translated (D-25).
+EXCEPTION_MODULES = ("coordinator.py", "cert_coordinator.py", "__init__.py")
+HA_EXCEPTIONS = frozenset({"UpdateFailed", "ConfigEntryAuthFailed", "ConfigEntryNotReady", "ConfigEntryError"})
+# Translation keys whose entities show an ENUM state.
+STATE_KEYS = {("sensor", "router"), ("sensor", "service")}
+# Translation keys with on/off state icons.
+ON_OFF_KEYS = {
+    ("binary_sensor", "routers_problem"),
+    ("binary_sensor", "services_problem"),
+    ("binary_sensor", "middlewares_problem"),
+    ("binary_sensor", "certificate_expiring"),
+    ("binary_sensor", "certificates_problem"),
+}
+# Translation keys whose entity name comes from the item key (no translated name).
+UNNAMED_KEYS = {("sensor", "router"), ("sensor", "service"), ("sensor", "entrypoint")}
+
+
+def _load(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
+
+
+def _flatten(node: Any, prefix: str = "") -> dict[str, str]:
+    """Return {dotted.path: string} for every string leaf below ``node``."""
+    if isinstance(node, str):
+        return {prefix: node}
+    assert isinstance(node, dict), f"{prefix}: unexpected {type(node).__name__}"
+    flat: dict[str, str] = {}
+    for key, value in node.items():
+        flat.update(_flatten(value, f"{prefix}.{key}" if prefix else key))
+    return flat
+
+
+def _placeholders(text: str) -> set[str]:
+    return {field for _, field, _, _ in string.Formatter().parse(text) if field is not None}
+
+
+def _class_key(cls: type) -> str:
+    # HA's CachedProperties metaclass keeps the class attribute under a mangled name.
+    key = vars(cls).get("__attr_translation_key")
+    assert key is not None, f"{cls.__name__} has no class-level _attr_translation_key"
+    return str(key)
+
+
+def _code_keys() -> set[tuple[str, str]]:
+    """Return every (platform, translation_key) used by the entity code."""
+    keys: set[tuple[str, str]] = set()
+    for description in SNAPSHOT_SENSORS:
+        assert description.translation_key is not None
+        keys.add(("sensor", description.translation_key))
+    for problem in PROBLEM_SENSORS:
+        assert problem.translation_key is not None
+        keys.add(("binary_sensor", problem.translation_key))
+    for cls in (TraefikRouterSensor, TraefikServiceSensor, TraefikEntrypointSensor, TraefikCertExpirySensor):
+        keys.add(("sensor", _class_key(cls)))
+    keys.add(("binary_sensor", _class_key(TraefikCertExpiringBinarySensor)))
+    # Not a PROBLEM_SENSORS description: it reads the cert coordinator, not the snapshot.
+    keys.add(("binary_sensor", _class_key(binary_sensor.TraefikCertificatesProblemBinarySensor)))
+    keys.add(("button", _class_key(TraefikRefreshButton)))
+    return keys
+
+
+def test_english_texts_have_one_source() -> None:
+    """translations/en.json is the only English source; the package root holds no text file (D-28)."""
+    assert sorted(path.name for path in PACKAGE.glob("*.json")) == ["icons.json", "manifest.json"]
+
+
+def test_de_has_exactly_the_keys_of_en() -> None:
+    """de.json carries exactly the keys of en.json, in both directions and in every section (D-28)."""
+    en = set(_flatten(_load(EN)))
+    de = set(_flatten(_load(DE)))
+    assert de == en, f"missing in de: {sorted(en - de)}; only in de: {sorted(de - en)}"
+
+
+def test_placeholders_match() -> None:
+    """Every German text uses the same {placeholders} as its English text."""
+    en = _flatten(_load(EN))
+    de = _flatten(_load(DE))
+    for key, text in en.items():
+        assert _placeholders(de.get(key, "")) == _placeholders(text), key
+
+
+def test_every_field_has_label_and_description() -> None:
+    """Every config and options step labels and describes the same fields, in en and de."""
+    for path in (EN, DE):
+        data = _load(path)
+        for flow in ("config", "options"):
+            for step_id, step in data[flow]["step"].items():
+                where = f"{path.name}: {flow}.step.{step_id}"
+                assert set(step.get("data_description", {})) == set(step.get("data", {})), where
+
+
+def test_no_url_literals() -> None:
+    """No text in en.json or de.json contains a URL literal (hassfest rejects '://')."""
+    for path in (EN, DE):
+        for key, value in _flatten(_load(path)).items():
+            assert "://" not in value, f"{path.name}: {key}"
+
+
+def _issue_translation_keys() -> set[str]:
+    """Return the literal translation keys of every async_create_issue call in __init__.py.
+
+    A key given through a module-level string constant is resolved; any other
+    expression fails.
+    """
+    tree = ast.parse((PACKAGE / "__init__.py").read_text(encoding="utf-8"))
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            constants[node.target.id] = node.value.value
+    keys: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = func.attr if isinstance(func, ast.Attribute) else func.id if isinstance(func, ast.Name) else None
+        if name != "async_create_issue":
+            continue
+        key = {keyword.arg: keyword.value for keyword in node.keywords}.get("translation_key")
+        if isinstance(key, ast.Name):
+            assert key.id in constants, f"__init__.py:{node.lineno} unknown constant {key.id}"
+            keys.add(constants[key.id])
+        else:
+            assert isinstance(key, ast.Constant) and isinstance(key.value, str), f"__init__.py:{node.lineno}"
+            keys.add(key.value)
+    return keys
+
+
+def test_issue_keys_are_raised() -> None:
+    """The issue texts are exactly the issues the integration raises."""
+    issues = set(_load(EN)["issues"])
+    assert issues == {"entities_migrated", "insecure_credentials"}
+    assert _issue_translation_keys() == issues
+
+
+def test_auth_type_options_match_auth_modes() -> None:
+    """The auth type selector has one text per AuthMode, in en and de."""
+    for path in (EN, DE):
+        options = _load(path)["selector"]["auth_type"]["options"]
+        assert set(options) == {mode.value for mode in AuthMode}, path.name
+
+
+def _exception_name(node: ast.expr) -> str | None:
+    """Return the HA exception class name ``node`` refers to, if any."""
+    name = node.id if isinstance(node, ast.Name) else node.attr if isinstance(node, ast.Attribute) else None
+    return name if name in HA_EXCEPTIONS else None
+
+
+def _raised_exception_keys() -> set[str]:
+    """Return the translation keys of every HA exception built in EXCEPTION_MODULES.
+
+    Fails on a positional message, a missing translation_domain, a
+    non-literal translation_key and on raising a bare exception class.
+    """
+    keys: set[str] = set()
+    for module in EXCEPTION_MODULES:
+        tree = ast.parse((PACKAGE / module).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Raise) and node.exc is not None:
+                assert _exception_name(node.exc) is None, f"{module}:{node.lineno} raises a bare exception class"
+            if not isinstance(node, ast.Call) or (name := _exception_name(node.func)) is None:
+                continue
+            where = f"{module}:{node.lineno} {name}"
+            assert not node.args, f"{where} has a positional message"
+            keywords = {keyword.arg: keyword.value for keyword in node.keywords}
+            assert "translation_domain" in keywords, f"{where} has no translation_domain"
+            key = keywords.get("translation_key")
+            assert isinstance(key, ast.Constant) and isinstance(key.value, str), f"{where} has no literal key"
+            keys.add(key.value)
+    return keys
+
+
+def test_every_exception_key_is_raised_and_translated() -> None:
+    """The exception keys raised in code equal the keys of en.json "exceptions" (D-25)."""
+    raised = _raised_exception_keys()
+    assert raised
+    assert raised == set(_load(EN)["exceptions"])
+
+
+def test_no_empty_strings() -> None:
+    """No string in en.json, de.json or icons.json is empty."""
+    for path in (EN, DE, ICONS):
+        for key, value in _flatten(_load(path)).items():
+            assert value.strip(), f"{path.name}: {key} is empty"
+
+
+def test_item_state_keys_equal_options() -> None:
+    """Router and service state keys equal ITEM_STATE_OPTIONS in en and de."""
+    for path in (EN, DE):
+        sensors = _load(path)["entity"]["sensor"]
+        for key in ("router", "service"):
+            assert set(sensors[key]["state"]) == set(ITEM_STATE_OPTIONS), f"{path.name}: {key}"
+
+
+def test_reason_state_keys_equal_cert_problems() -> None:
+    """The reason attribute of certificate_expiring has a name and one text per CertProblem in en and de."""
+    for path in (EN, DE):
+        expiring = _load(path)["entity"]["binary_sensor"]["certificate_expiring"]
+        reason = expiring.get("state_attributes", {}).get("reason")
+        assert reason is not None, f"{path.name}: certificate_expiring.state_attributes.reason missing"
+        assert reason["name"].strip(), path.name
+        assert set(reason["state"]) == {member.value for member in CertProblem}, path.name
+        assert all(text.strip() for text in reason["state"].values()), path.name
+
+
+def test_every_code_key_has_texts() -> None:
+    """Every translation key used in code has an en and de name (or state texts for ENUM sensors)."""
+    keys = _code_keys()
+    for path in (EN, DE):
+        entity = _load(path)["entity"]
+        for platform, key in keys:
+            if (platform, key) in UNNAMED_KEYS and (platform, key) not in STATE_KEYS:
+                continue  # name from the item key, no states: nothing to translate
+            node = entity.get(platform, {}).get(key)
+            assert node is not None, f"{path.name}: entity.{platform}.{key} missing"
+            if (platform, key) not in UNNAMED_KEYS:
+                assert node.get("name"), f"{path.name}: entity.{platform}.{key}.name missing"
+            if (platform, key) in STATE_KEYS:
+                assert set(node["state"]) == set(ITEM_STATE_OPTIONS)
+    # The {host} placeholder of the cert names is filled from the entity.
+    for path in (EN, DE):
+        entity = _load(path)["entity"]
+        assert _placeholders(entity["sensor"]["certificate_expiry"]["name"]) == {"host"}
+        assert _placeholders(entity["binary_sensor"]["certificate_expiring"]["name"]) == {"host"}
+
+
+def test_every_code_key_has_icons() -> None:
+    """Every translation key has a default icon; ENUM sensors and problem sensors have state icons."""
+    icons = _load(ICONS)["entity"]
+    for platform, key in _code_keys():
+        node = icons.get(platform, {}).get(key)
+        assert node is not None, f"icons.json: entity.{platform}.{key} missing"
+        assert node["default"].startswith("mdi:"), f"{platform}.{key}"
+        if (platform, key) in STATE_KEYS:
+            assert set(node["state"]) == set(ITEM_STATE_OPTIONS), f"{platform}.{key}"
+        if (platform, key) in ON_OFF_KEYS:
+            assert set(node["state"]) == {"on", "off"}, f"{platform}.{key}"
+        for icon in node.get("state", {}).values():
+            assert icon.startswith("mdi:")
+    # No icon for a key the code does not use.
+    used = _code_keys()
+    for platform, entries in icons.items():
+        for key in entries:
+            assert (platform, key) in used, f"icons.json: unused entity.{platform}.{key}"
+
+
+def test_parallel_updates() -> None:
+    """sensor and binary_sensor read the snapshot (0); button presses are serialized (1)."""
+    assert sensor.PARALLEL_UPDATES == 0
+    assert binary_sensor.PARALLEL_UPDATES == 0
+    assert button.PARALLEL_UPDATES == 1
+
+
+@pytest.mark.usefixtures("mock_tls_probe")
+async def test_german_device_names(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """With the HA language set to German the sub-devices get the German names."""
+    hass.config.language = "de"
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry())
+    names = {
+        identifier: device.name
+        for device in dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+        for identifier in device.identifiers
+    }
+    host = "traefik.example.com"
+    assert names[device_identifier(entry.entry_id, TraefikDevice.ROUTERS)] == f"Traefik-Router ({host})"
+    assert names[device_identifier(entry.entry_id, TraefikDevice.SERVICES)] == f"Traefik-Dienste ({host})"
+    assert names[device_identifier(entry.entry_id, TraefikDevice.CERTIFICATES)] == f"Traefik-Zertifikate ({host})"
+    assert names[device_identifier(entry.entry_id, TraefikDevice.MAIN)] == f"Traefik ({host})"
+
+
+@pytest.mark.usefixtures("mock_tls_probe")
+async def test_every_option_field_is_labelled_and_described(hass: HomeAssistant, aioclient_mock: Any) -> None:
+    """Every options form field has a label and a description in en and de; no options error text is left."""
+    entry = await setup_traefik_entry(hass, aioclient_mock, make_traefik_entry())
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    hass.config_entries.options.async_abort(result["flow_id"])
+    fields = [str(marker) for marker in result["data_schema"].schema]
+    assert fields
+
+    for path in (EN, DE):
+        options = _load(path)["options"]
+        init = options["step"]["init"]
+        assert init["title"].strip(), path.name
+        assert init["description"].strip(), path.name
+        assert list(init["data"]) == fields, path.name
+        assert list(init["data_description"]) == fields, path.name
+        assert "error" not in options, path.name

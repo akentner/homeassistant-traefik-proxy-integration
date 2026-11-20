@@ -1,0 +1,636 @@
+[
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-099@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-099.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-100@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-100.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-101@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-101.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-102@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-102.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-103@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-103.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-104@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-104.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-105@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-105.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-106@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-106.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-107@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-107.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-108@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-108.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-109@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-109.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-110@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-110.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-111@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-111.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-112@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-112.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-113@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-113.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-114@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-114.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-115@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-115.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-116@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-116.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-117@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-117.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-118@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-118.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-119@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 28,
+    "priorityStr": "28",
+    "provider": "file",
+    "rule": "Host(`bulk-119.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "error": [
+      "middleware \"does-not-exist-mw@file\" does not exist"
+    ],
+    "middlewares": [
+      "broken-chain@file"
+    ],
+    "name": "chain-router@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 25,
+    "priorityStr": "25",
+    "provider": "file",
+    "rule": "Host(`chain.example.com`)",
+    "service": "file-ok-svc",
+    "status": "disabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "file-ok@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 23,
+    "priorityStr": "23",
+    "provider": "file",
+    "rule": "Host(`app.example.com`)",
+    "service": "file-ok-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "lb-router@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 22,
+    "priorityStr": "22",
+    "provider": "file",
+    "rule": "Host(`lb.example.com`)",
+    "service": "lb-mixed",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "traefik"
+    ],
+    "name": "ping@internal",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 9223372036854775807,
+    "priorityStr": "9223372036854775807",
+    "provider": "internal",
+    "rule": "PathPrefix(`/ping`)",
+    "ruleSyntax": "default",
+    "service": "ping@internal",
+    "status": "enabled",
+    "using": [
+      "traefik"
+    ]
+  },
+  {
+    "entryPoints": [
+      "websecure"
+    ],
+    "name": "secure@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 26,
+    "priorityStr": "26",
+    "provider": "file",
+    "rule": "Host(`secure.example.com`)",
+    "service": "file-ok-svc",
+    "status": "enabled",
+    "tls": {
+      "domains": [
+        {
+          "main": "secure.example.com",
+          "sans": [
+            "www.secure.example.com"
+          ]
+        }
+      ],
+      "options": "default"
+    },
+    "using": [
+      "websecure"
+    ]
+  },
+  {
+    "entryPoints": [
+      "traefik"
+    ],
+    "middlewares": [
+      "api-auth@file"
+    ],
+    "name": "traefik-api@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 18,
+    "priorityStr": "18",
+    "provider": "file",
+    "rule": "PathPrefix(`/api`)",
+    "service": "api@internal",
+    "status": "enabled",
+    "using": [
+      "traefik"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web",
+      "does-not-exist"
+    ],
+    "error": [
+      "entryPoint \"does-not-exist\" doesn't exist"
+    ],
+    "name": "warn-unknown-entrypoint@file",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 24,
+    "priorityStr": "24",
+    "provider": "file",
+    "rule": "Host(`warn.example.com`)",
+    "service": "file-ok-svc",
+    "status": "warning",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "whoami@docker",
+    "observability": {
+      "accessLogs": true,
+      "metrics": true,
+      "traceVerbosity": "minimal",
+      "tracing": true
+    },
+    "priority": 26,
+    "priorityStr": "26",
+    "provider": "docker",
+    "rule": "Host(`whoami.example.com`)",
+    "service": "whoami",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  }
+]

@@ -1,0 +1,92 @@
+{
+  "entity": {
+    "sensor": {
+      "router": {
+        "default": "mdi:routes",
+        "state": {
+          "enabled": "mdi:routes",
+          "warning": "mdi:alert-outline",
+          "error": "mdi:alert-circle-outline",
+          "disabled": "mdi:cancel",
+          "missing": "mdi:help-circle-outline"
+        }
+      },
+      "service": {
+        "default": "mdi:server-network",
+        "state": {
+          "enabled": "mdi:server-network",
+          "warning": "mdi:alert-outline",
+          "error": "mdi:alert-circle-outline",
+          "disabled": "mdi:server-network-off",
+          "missing": "mdi:help-circle-outline"
+        }
+      },
+      "entrypoint": {
+        "default": "mdi:door"
+      },
+      "routers_count": {
+        "default": "mdi:routes"
+      },
+      "services_count": {
+        "default": "mdi:server-network"
+      },
+      "middlewares_count": {
+        "default": "mdi:layers-triple"
+      },
+      "version": {
+        "default": "mdi:information-outline"
+      },
+      "start_time": {
+        "default": "mdi:clock-start"
+      },
+      "healthy_ratio": {
+        "default": "mdi:percent-circle"
+      },
+      "certificate_expiry": {
+        "default": "mdi:certificate"
+      }
+    },
+    "binary_sensor": {
+      "routers_problem": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle",
+          "off": "mdi:check-circle-outline"
+        }
+      },
+      "services_problem": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle",
+          "off": "mdi:check-circle-outline"
+        }
+      },
+      "middlewares_problem": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle",
+          "off": "mdi:check-circle-outline"
+        }
+      },
+      "certificate_expiring": {
+        "default": "mdi:lock-check",
+        "state": {
+          "on": "mdi:lock-alert",
+          "off": "mdi:lock-check"
+        }
+      },
+      "certificates_problem": {
+        "default": "mdi:lock-check",
+        "state": {
+          "on": "mdi:lock-alert",
+          "off": "mdi:lock-check"
+        }
+      }
+    },
+    "button": {
+      "refresh": {
+        "default": "mdi:refresh"
+      }
+    }
+  }
+}

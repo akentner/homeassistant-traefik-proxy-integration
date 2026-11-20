@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Mit Traefik verbinden",
+        "description": "Gib die Adresse der Traefik-API ein und wie sie geschützt ist. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft. Über HTTP werden Zugangsdaten unverschlüsselt gesendet; nutze möglichst HTTPS.",
+        "data": {
+          "url": "URL der Traefik-API",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "url": "Adresse der Traefik-API mit Schema (http oder https), Host und Port, zum Beispiel die Adresse des Traefik-Dashboards ohne den Pfad /dashboard/.",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Benutzername der basicAuth-Middleware vor der Traefik-API.",
+          "password": "Passwort der basicAuth-Middleware vor der Traefik-API.",
+          "token": "Token, das deine forwardAuth-Middleware akzeptiert; es wird als Bearer-Token gesendet."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Erneut bei Traefik anmelden",
+        "description": "Traefik hat die gespeicherten Zugangsdaten abgelehnt. Wähle, wie die Traefik-API geschützt ist, und gib die aktuellen Zugangsdaten ein. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft.",
+        "data": {
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Benutzername der basicAuth-Middleware vor der Traefik-API.",
+          "password": "Passwort der basicAuth-Middleware vor der Traefik-API.",
+          "token": "Token, das deine forwardAuth-Middleware akzeptiert; es wird als Bearer-Token gesendet."
+        }
+      },
+      "reconfigure": {
+        "title": "Traefik neu konfigurieren",
+        "description": "Ändere die Adresse der Traefik-API, die TLS-Prüfung oder die Authentifizierung; die Integration wird danach neu geladen. Die Traefik-API hat keine eigenen Zugangsdaten: Sie wird durch eine Middleware vor dem Dienst api@internal geschützt, meist basicAuth (Benutzername und Passwort) oder ein forwardAuth, das ein Bearer-Token prüft. Über HTTP werden Zugangsdaten unverschlüsselt gesendet; nutze möglichst HTTPS.",
+        "data": {
+          "url": "URL der Traefik-API",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "auth_type": "Authentifizierung",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "token": "Bearer-Token"
+        },
+        "data_description": {
+          "url": "Adresse der Traefik-API mit Schema (http oder https), Host und Port, zum Beispiel die Adresse des Traefik-Dashboards ohne den Pfad /dashboard/.",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "auth_type": "Wie die Traefik-API geschützt ist: keine Authentifizierung, Basic Auth oder ein Bearer-Token, das eine forwardAuth-Middleware prüft.",
+          "username": "Lass das Feld leer, um den gespeicherten Benutzernamen zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben.",
+          "password": "Lass das Feld leer, um das gespeicherte Passwort zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben.",
+          "token": "Lass das Feld leer, um das gespeicherte Token zu behalten, solange Adresse (Schema, Host und Port) und Authentifizierung gleich bleiben."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Die Adresse ist ungültig. Nutze das Schema http oder https und einen Hostnamen, optional gefolgt von einem Port.",
+      "url_has_credentials": "Die Adresse enthält einen Benutzernamen oder ein Passwort. Entferne sie aus der Adresse und gib sie stattdessen in den Feldern zur Authentifizierung ein.",
+      "invalid_auth": "Traefik hat die Zugangsdaten abgelehnt. Die Traefik-API hat keine eigenen Zugangsdaten: Prüfe die basicAuth- oder forwardAuth-Middleware vor dem Dienst api@internal und die gewählte Authentifizierung. Zugangsdaten mit einem Steuerzeichen oder einem Doppelpunkt im Benutzernamen können nicht gesendet werden.",
+      "invalid_credential_format": "Dieser Wert kann nicht gesendet werden: Ein Benutzername darf keinen Doppelpunkt enthalten, und keine Zugangsangabe darf ein Steuerzeichen wie einen Zeilenumbruch oder einen Tabulator enthalten.",
+      "cannot_connect": "Traefik ist nicht erreichbar. Prüfe Adresse, Port und Netzwerk und ob Traefik läuft. Bei einem selbstsignierten Zertifikat der Traefik-API schalte die TLS-Prüfung aus.",
+      "api_disabled": "Traefik hat mit HTTP 404 geantwortet: Unter dieser Adresse ist die API nicht verfügbar. Aktiviere die API in der statischen Traefik-Konfiguration (Abschnitt api) und leite sie an den Dienst api@internal weiter, oder korrigiere die Adresse.",
+      "redirect": "Traefik hat mit einer Weiterleitung geantwortet, der nicht gefolgt wird. Gib stattdessen die Zieladresse der Weiterleitung ein, meist die HTTPS-Adresse der Traefik-API.",
+      "required": "Für die gewählte Authentifizierung erforderlich.",
+      "unknown": "Unerwarteter Fehler bei der Verbindung zu Traefik. Details findest du im Home-Assistant-Log."
+    },
+    "abort": {
+      "already_configured": "Diese Traefik-Instanz (gleicher Host und Port) ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Traefik-Optionen",
+        "description": "Änderungen gelten, nachdem Home Assistant die Integration automatisch neu geladen hat. Die Adresse der Traefik-API oder die Zugangsdaten änderst du über „Neu konfigurieren“.",
+        "data": {
+          "scan_interval": "Abfrageintervall",
+          "verify_ssl": "TLS-Zertifikat prüfen",
+          "tls_warn_days": "Warnschwelle für Zertifikate",
+          "per_item_entities": "Entitäten für Router und Dienste anlegen",
+          "missing_grace_hours": "Karenzzeit für fehlende Entitäten"
+        },
+        "data_description": {
+          "scan_interval": "Sekunden zwischen zwei Abfragen der Traefik-API (15-300).",
+          "verify_ssl": "Schalte das nur bei einem selbstsignierten Zertifikat der Traefik-API aus.",
+          "tls_warn_days": "Tage vor Ablauf, ab denen ein Zertifikat als bald ablaufend gilt (1-90).",
+          "per_item_entities": "Eine Entität pro Router und pro Dienst. Aus behält die Sammel-, Diagnose- und Zertifikats-Entitäten und entfernt die Router- und Dienst-Entitäten nach dem Neuladen.",
+          "missing_grace_hours": "Stunden, die ein aus Traefik verschwundener Router, Dienst oder ein Zertifikat als „fehlend“ bleibt, bevor seine Entität entfernt wird (1-168)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "auth_type": {
+      "options": {
+        "none": "Keine Authentifizierung",
+        "basic": "Basic Auth (Benutzername und Passwort)",
+        "bearer": "Bearer-Token"
+      }
+    }
+  },
+  "exceptions": {
+    "auth_failed": {
+      "message": "Traefik hat die Zugangsdaten für {path} abgelehnt. Gib sie im Dialog zur erneuten Authentifizierung neu ein."
+    },
+    "api_error": {
+      "message": "Das Lesen von {path} aus der Traefik-API ist fehlgeschlagen: {detail}."
+    },
+    "redirect": {
+      "message": "Die Traefik-API hat {path} umgeleitet (HTTP {status}). Die Integration folgt keinen Umleitungen; gib über „Neu konfigurieren“ die Adresse ein, auf die Traefik umleitet (zum Beispiel die HTTPS-Adresse)."
+    },
+    "invalid_url": {
+      "message": "Home Assistant kann keine Anfragen an die gespeicherte Traefik-URL senden. Korrigiere die URL über „Neu konfigurieren“."
+    },
+    "invalid_credentials": {
+      "message": "Die gespeicherten Zugangsdaten können nicht an Traefik gesendet werden. Gib sie im Dialog zur erneuten Authentifizierung neu ein."
+    },
+    "version_unavailable": {
+      "message": "Die Traefik-Version ist noch nicht verfügbar."
+    },
+    "certificates_failed": {
+      "message": "Das Lesen der Zertifikate von {path} ist fehlgeschlagen: {detail}."
+    },
+    "no_probe_host": {
+      "message": "Die Traefik-URL enthält keinen Host, an dem Zertifikate geprüft werden können. Korrigiere die URL über „Neu konfigurieren“."
+    }
+  },
+  "device": {
+    "main": {
+      "name": "Traefik ({host})"
+    },
+    "routers": {
+      "name": "Traefik-Router ({host})"
+    },
+    "services": {
+      "name": "Traefik-Dienste ({host})"
+    },
+    "certificates": {
+      "name": "Traefik-Zertifikate ({host})"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "router": {
+        "state": {
+          "enabled": "Aktiviert",
+          "warning": "Warnung",
+          "error": "Fehler",
+          "disabled": "Deaktiviert",
+          "missing": "Fehlt"
+        }
+      },
+      "service": {
+        "state": {
+          "enabled": "Aktiviert",
+          "warning": "Warnung",
+          "error": "Fehler",
+          "disabled": "Deaktiviert",
+          "missing": "Fehlt"
+        }
+      },
+      "routers_count": {
+        "name": "Router"
+      },
+      "services_count": {
+        "name": "Dienste"
+      },
+      "middlewares_count": {
+        "name": "Middlewares"
+      },
+      "version": {
+        "name": "Traefik-Version"
+      },
+      "start_time": {
+        "name": "Startzeit"
+      },
+      "healthy_ratio": {
+        "name": "Gesunde Router"
+      },
+      "certificate_expiry": {
+        "name": "{host} Ablauf"
+      }
+    },
+    "binary_sensor": {
+      "routers_problem": {
+        "name": "Router-Probleme"
+      },
+      "services_problem": {
+        "name": "Dienst-Probleme"
+      },
+      "middlewares_problem": {
+        "name": "Middleware-Probleme"
+      },
+      "certificates_problem": {
+        "name": "Zertifikatsprobleme"
+      },
+      "certificate_expiring": {
+        "name": "{host} läuft ab",
+        "state_attributes": {
+          "reason": {
+            "name": "Grund",
+            "state": {
+              "expired": "Abgelaufen",
+              "probe_failed": "Abruf fehlgeschlagen",
+              "not_found": "Kein Zertifikat gefunden",
+              "expiring": "Läuft bald ab"
+            }
+          }
+        }
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Jetzt aktualisieren"
+      }
+    }
+  },
+  "issues": {
+    "entities_migrated": {
+      "title": "Traefik-Entitäten wurden ersetzt",
+      "description": "Die Traefik-Integration „{entry_title}“ wurde aktualisiert. Router-Binärsensoren wurden durch Router-Sensoren ersetzt (Zustände: aktiviert, Warnung, Fehler, deaktiviert, fehlt). Aktivierte, sichtbare Router-Sensoren haben neue Entitäts-IDs; deaktivierte oder ausgeblendete Router-Sensoren behalten ihre bisherige Entitäts-ID in der Domäne sensor (sensor.… statt binary_sensor.…). Der Knopf und der Dienst zum Neuladen wurden entfernt, weil Traefik keine Reload-API hat; nutze stattdessen den Knopf „Jetzt aktualisieren“. {removed_count} alte Entitäten wurden entfernt. Passe Automationen, Skripte und Dashboards an, die sie verwendet haben, und schließe danach diesen Hinweis."
+    },
+    "insecure_credentials": {
+      "title": "Traefik-Zugangsdaten werden unverschlüsselt gesendet",
+      "description": "Die Traefik-Integration „{entry_title}“ verbindet sich über unverschlüsseltes HTTP mit der Traefik-API und sendet ihre Zugangsdaten (Benutzername und Passwort oder Token) im Klartext, sodass jeder auf dem Netzwerkweg sie mitlesen kann. Öffne die Integration, wähle „Neu konfigurieren“ und stelle die URL auf HTTPS um oder entferne die Authentifizierung. Dieser Hinweis erscheint nach jedem Neustart oder Neuladen wieder, solange HTTP mit Zugangsdaten verwendet wird."
+    }
+  }
+}

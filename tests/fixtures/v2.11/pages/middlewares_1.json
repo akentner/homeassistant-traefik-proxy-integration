@@ -1,0 +1,33 @@
+[
+  {
+    "basicAuth": {
+      "users": [
+        "redacted:redacted"
+      ]
+    },
+    "name": "api-auth@file",
+    "provider": "file",
+    "status": "enabled",
+    "type": "basicauth",
+    "usedBy": [
+      "traefik-api@file"
+    ]
+  },
+  {
+    "chain": {
+      "middlewares": [
+        "does-not-exist-mw@file"
+      ]
+    },
+    "error": [
+      "middleware \"does-not-exist-mw@file\" does not exist"
+    ],
+    "name": "broken-chain@file",
+    "provider": "file",
+    "status": "disabled",
+    "type": "chain",
+    "usedBy": [
+      "chain-router@file"
+    ]
+  }
+]

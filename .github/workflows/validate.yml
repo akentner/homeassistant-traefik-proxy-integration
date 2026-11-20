@@ -1,27 +1,48 @@
 name: Validate
 
+# Every `run:` command of the lint, test and test-min-ha jobs is the Makefile's
+# command string (make lint / typecheck / test / test-min-ha), so a developer
+# runs exactly what CI runs. Actions are pinned to commit SHAs; Dependabot
+# (.github/dependabot.yml) proposes updates. For hassfest and hacs/action the
+# SHA pin freezes only the action wrapper: both run a moving upstream image
+# (ghcr.io/home-assistant/hassfest:latest, ghcr.io/hacs/action:main), so the
+# validator code can change between runs without a commit here. Every job
+# runs with `permissions: {}`, and every checkout sets persist-credentials to
+# false because no job runs git operations with the token. `make hassfest` /
+# `make hacs-action` pin those images by digest for local runs. Dev dependencies come from the committed
+# uv.lock: `uv sync --locked`, and UV_LOCKED makes every `uv run` refuse a
+# stale lock (the Makefile exports the same variable).
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
 
 permissions: {}
+
+env:
+  UV_LOCKED: "1"
 
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
 
       - name: Set up Python
-        run: uv python install 3.13
+        run: uv python install 3.14
 
       - name: Sync dev dependencies
-        run: uv sync
+        run: uv sync --locked
 
       - name: Ruff lint
         run: uv run ruff check custom_components tests
@@ -34,32 +55,71 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.13"]
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v5
-      - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set up Python
+        run: uv python install 3.14
+
       - name: Sync dev dependencies
-        run: uv sync
-      - name: Pytest with coverage
-        run: uv run pytest tests/ -v --cov
+        run: uv sync --locked
+
+      - name: Pytest with the coverage gate
+        run: uv run pytest -q tests
+
+  test-min-ha:
+    name: Tests (minimum HA 2026.11.0)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Create the minimum-HA venv
+        run: uv venv --clear --python 3.14 .venv-min-ha
+
+      - name: Install the locked minimum-HA test stack
+        run: uv pip sync --python .venv-min-ha/bin/python --require-hashes .github/requirements-min-ha.txt
+
+      - name: Pytest against HA 2026.11.0
+        run: .venv-min-ha/bin/python -m pytest -q tests
 
   hassfest:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: home-assistant/actions/hassfest@master
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # No version tag exists upstream; pinned to the master commit of that date.
+      # The pin freezes the wrapper only; it runs ghcr.io/home-assistant/hassfest:latest.
+      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master (2026-10-26)
 
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
-      - uses: hacs/action@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The token comes from the action's github_token input default.
+      # The pin freezes the wrapper only; it runs ghcr.io/hacs/action:main.
+      - uses: hacs/action@d556e736723344f83838d08488c983a15381059a # 22.5.0
         with:
           category: integration
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,4 +1,4 @@
-# Home Assistant Traefik Integration
+# Home Assistant Traefik Proxy Integration
 
 ## What This Is
 
@@ -41,43 +41,65 @@ and which TLS certificates are expiring soon.
       when any router is reporting a non-`enabled` status. _(Validated in
       Phase 2 — `TraefikAnyRouterFailingBinarySensor` on the Diagnostics
       device.)_
-- [x] **DIAG-03**: The integration supports a "reload" service that calls the
-      Traefik `/api/http/routers/refresh` endpoint, allowing HA automations
-      to trigger a hot reload after route changes. _(Validated in Phase 2 —
-      `traefik.reload_routers` registered at module level.)_
+- [x] **DIAG-03**: ~~The integration supports a "reload" service that triggers
+      a Traefik router refresh.~~ _(Superseded in Phase 5: the reload service
+      and reload button were removed; the "Refresh now" button, which polls
+      Traefik again on demand, replaces them.)_
+
+- [x] **TLS-01**: For every router terminating TLS, the integration exposes
+      a sensor with the certificate's `notAfter` date and a calculated
+      "days until expiry" attribute. _(Validated in Phase 3; refined in
+      Phase 6 by CERT-01/05 — `/api/certificates` on Traefik ≥ 3.7, threadless
+      probe otherwise, live `days_until_expiry`.)_
+- [x] **TLS-02**: The integration creates a dedicated `binary_sensor` per
+      certificate that turns `on` when the certificate is within a
+      user-configurable expiry threshold (default: 14 days). _(Validated in
+      Phase 3; refined in Phase 6 by CERT-05 — on with a `reason` for
+      expiring / expired / probe_failed / not_found, plus the
+      `certificates_problem` aggregate.)_
+
+- [x] **CORE-01**: User can configure the integration via the Home Assistant
+      config flow by providing the Traefik API URL and an API key (or bearer
+      token). _(Validated in Phase 1; refined in Phase 7 — auth selector
+      none / basic / bearer, reauth and reconfigure flows.)_
+- [x] **CORE-03**: The integration connects to the Traefik API over HTTP.
+      _(Validated in Phase 1; refined in Phase 4 — one `/api/rawdata` request
+      per cycle, paginated `/api/http/*` endpoints only as the 404 fallback.)_
+- [x] **CFG-01**: User can override the API base URL, TLS verification, scan
+      interval, and certificate warning threshold from integration options.
+      _(Validated in Phase 1; refined in Phase 7 — `OptionsFlowWithReload`,
+      configurable entity grace period.)_
+- [x] **DOCS-01**: A `README.md` documents install via HACS and manual,
+      configuration options, and example dashboards / automations.
+      _(Validated in Phase 1; rewritten for the Marketplace in Phase 8,
+      REL-03.)_
+- [x] **TEST-01**: Unit tests cover the Traefik API client (parsing, error
+      paths) and the entity state derivation logic. _(Validated in Phase 1;
+      Phase 8: 1180 tests, coverage gate 99 % on the minimum HA 2026.11.0
+      stack too.)_
+- [x] **REL-01..08**: Marketplace and release readiness — manifest category,
+      brand, README/CHANGELOG, CI and tooling, no planning references, local
+      hassfest plus hacs/action 10/10 in the first PR CI run, branch pushed
+      with Draft PR #2. _(Validated in Phase 8.)_
 
 ### Active
 
 <!-- Current scope. Building toward these. Hypotheses until shipped. -->
 
-- [ ] **CORE-01**: User can configure the integration via the Home Assistant
-      config flow by providing the Traefik API URL and an API key (or bearer
-      token).
-- [ ] **CORE-02**: User can alternatively configure the integration by editing
-      `configuration.yaml`, for users who prefer YAML / pinned releases.
-- [ ] **CORE-03**: The integration connects to the Traefik API over HTTP using
-      the `/api/entrypoints`, `/api/http/routers`, `/api/http/services`, and
-      `/api/http/middlewares` endpoints.
-- [ ] **TLS-01**: For every router terminating TLS, the integration exposes
-      a sensor with the certificate's `notAfter` date and a calculated
-      "days until expiry" attribute.
-- [ ] **TLS-02**: The integration creates a dedicated `binary_sensor` per
-      certificate that turns `on` when the certificate is within a
-      user-configurable expiry threshold (default: 14 days).
-- [ ] **CFG-01**: User can override the API base URL, TLS verification, scan
-      interval, and certificate warning threshold from integration options.
-- [ ] **DOCS-01**: A `README.md` documents install via HACS and manual,
-      configuration options, and example dashboards / automations.
-- [ ] **TEST-01**: Unit tests cover the Traefik API client (parsing, error
-      paths) and the entity state derivation logic.
+None — milestone v1.0 scope is shipped on `feat/marketplace-polish`. The
+release itself (merge, CHANGELOG date, tag `v1.0.0`, GitHub release,
+`hacs/default` PR) is the user's action.
 
 ### Out of Scope
 
 <!-- Explicit boundaries. Includes reasoning to prevent re-adding. -->
 
+- **CORE-02: YAML configuration (`configuration.yaml`)** — dropped (CFG-02):
+  the YAML path never worked and was removed in Phase 7 (FLOW-07); setup is
+  UI-only.
 - **Mutating Traefik configuration files on disk** — Traefik's dynamic
   configuration is intentionally external; this integration only reads
-  state and triggers a refresh, it does not write files.
+  state, it does not write files.
 - **Auto-provisioning TLS certificates (Let's Encrypt / ACME flow)** —
   Traefik already handles this; duplicating it in HA would fight the
   source of truth.
@@ -106,19 +128,20 @@ Home Assistant integrations follow a well-documented convention:
 concern. The HA Core `DataUpdateCoordinator` pattern is the standard way
 to poll an external API and fan updates out to entities.
 
-The Traefik HTTP API (`/api/...` with a `Bearer` token) provides
-read-only access to operational state and one mutate endpoint
-(`/api/http/routers/refresh`). All endpoints return JSON.
+The Traefik HTTP API (`/api/...`, optionally behind basic auth or a
+`Bearer` token) provides read-only access to operational state. The
+integration only reads it. All endpoints return JSON.
 
 ## Constraints
 
-- **Tech stack**: Python 3.12+, Home Assistant Core (min version 2025.4.x),
-  `aiohttp` for HTTP, HACS-compatible.
+- **Tech stack**: Python >= 3.14.2, Home Assistant Core (minimum version
+  2026.11.0), `aiohttp` for HTTP, HACS-compatible.
 - **Distribution**: HACS default repository structure (`hacs.json`,
-  `info.md`, `README.md`, version tags via releases).
+  `README.md` as the information file — no `info.md`, version tags via
+  releases).
 - **Compatibility**: Must work against Traefik v2.11+ and v3.x.
 - **Performance**: API polling must not exceed one call-set per scan
-  interval (default 30s) per integration instance; multiple endpoints
+  interval (default 15 s) per integration instance; multiple endpoints
   fetched in parallel via `asyncio.gather`.
 - **Security**: API tokens never logged; integration must support
   self-signed certificates via user option.
@@ -135,6 +158,9 @@ read-only access to operational state and one mutate endpoint
 | Config flow + YAML | Config flow is the modern HA path, YAML still needed for power users | — Pending |
 | Per-router / per-cert entities | Maps cleanly to HA entity model; users can build dashboards on top | — Pending |
 | `aiohttp` over `requests` | Async, matches HA Core's loop, no thread-pool | — Pending |
+| Certificate not covering its host = problem (`not_found`) in both sources | Traefik serves its ~1-year default certificate to uncovered hosts; reporting it as healthy would hide the failure (D-03/R-1, review CR-01) | ✓ Phase 6 |
+| Keep the Traefik Proxy logo lockup (`logo.png` / `dark_logo.png`) | User decision 2026-11-16 (A3/A8); README and `docs/BRAND.md` state that the Traefik Labs trademark guidelines were not reviewed and no permission is claimed | ✓ Phase 8 |
+| Prove hacs/action in the PR CI run, not locally | The validators need a GitHub token; agents never run `make hacs-action` (M43) | ✓ Phase 8 — run 43769962201, All (10) checks passed |
 
 ## Evolution
 
@@ -154,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 2 completion — 6 v1 requirements validated (CORE-04/05/06, DIAG-01/02/03), 8 remain in Active.*
+*Last updated: 2026-11-16 after Phase 8 completion — milestone v1.0 scope shipped on `feat/marketplace-polish` (Draft PR #2, CI green incl. hacs/action 10/10); logo lockup kept (A3/A8); release steps remain the user's.*

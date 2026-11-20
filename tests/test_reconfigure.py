@@ -1,0 +1,414 @@
+"""Tests for the reconfigure flow (security fix 5 + same-host reconfigure).
+
+Covers:
+- the reconfigure form never contains the stored token (no default, no
+  suggested value);
+- with an unchanged auth type an empty or omitted token keeps the stored one,
+  for the probe and storage;
+- a non-empty token replaces it;
+- reconfigure on the same host succeeds (also with a verify_ssl flip);
+- reconfiguring to a host owned by another entry aborts with
+  ``already_configured`` before any probe;
+- a host change to an unused host succeeds.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
+from homeassistant.const import CONF_PASSWORD, CONF_TOKEN, CONF_USERNAME
+from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant.common import MockConfigEntry
+
+from custom_components.traefik_proxy.const import (
+    CONF_URL,
+    CONF_VERIFY_SSL,
+)
+from tests.conftest import AUTH_TYPE, MOCK_URL, make_traefik_entry, stub_traefik
+
+NEW_URL = "https://traefik-new.example.com:8080"
+OTHER_URL = "https://other.example.com:8080"
+SECRET = "test-secret"
+
+
+def _make_entry(*, options: dict[str, Any] | None = None) -> MockConfigEntry:
+    """Entry A: MOCK_URL with the stored bearer token ``test-secret``."""
+    return make_traefik_entry(
+        data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: SECRET},
+        options=options,
+    )
+
+
+def _probe_auth(aioclient_mock) -> str | None:  # type: ignore[no-untyped-def]
+    """Authorization header of the first recorded ``/api/version`` request.
+
+    The entries in these tests are added but not set up before the flow, so
+    the first version request is the config-flow probe.
+    """
+    for call in aioclient_mock.mock_calls:
+        if str(call[1]).endswith("/api/version"):
+            headers = call[3] or {}
+            return headers.get("Authorization")
+    raise AssertionError("no /api/version request recorded")
+
+
+async def test_reconfigure_form_does_not_contain_token(hass) -> None:
+    """The form pre-fills the URL but never the stored token."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+
+    validated = result["data_schema"]({})
+    assert validated[CONF_URL] == MOCK_URL
+    assert validated[AUTH_TYPE] == "bearer"
+    assert CONF_TOKEN not in validated
+    for marker in result["data_schema"].schema:
+        assert SECRET not in repr(getattr(marker, "description", None))
+
+
+@pytest.mark.parametrize("submitted", [{CONF_TOKEN: ""}, {}], ids=["empty", "omitted"])
+async def test_same_host_empty_token_keeps_stored_token(hass, aioclient_mock, submitted: dict[str, Any]) -> None:
+    """Same host + empty/omitted token: success, stored token kept and used for the probe."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", **submitted},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: SECRET}
+    assert _probe_auth(aioclient_mock) == f"Bearer {SECRET}"
+
+
+async def test_same_host_new_token_replaces_stored_token(hass, aioclient_mock) -> None:
+    """Same host + non-empty token: the new token is probed and stored."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: MOCK_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "new-token", CONF_VERIFY_SSL: True},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_TOKEN] == "new-token"
+    assert _probe_auth(aioclient_mock) == "Bearer new-token"
+
+
+async def test_same_host_verify_ssl_flip(hass, aioclient_mock) -> None:
+    """Same-host reconfigure from options verify_ssl False to True updates the runtime client."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_entry(options={CONF_VERIFY_SSL: False})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.client._verify_ssl is False
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.options[CONF_VERIFY_SSL] is True
+    assert entry.runtime_data.client._verify_ssl is True
+    assert entry.data[CONF_VERIFY_SSL] is True
+    assert entry.data[CONF_TOKEN] == SECRET
+
+
+async def test_reconfigure_to_other_entry_host_aborts(hass, aioclient_mock) -> None:
+    """Reconfiguring A to a host owned by entry B aborts without probing."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    other = make_traefik_entry(
+        title="Other Traefik",
+        data={CONF_URL: OTHER_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "other"},
+        unique_id="other.example.com:8080",
+    )
+    other.add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: OTHER_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "x", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert dict(entry.data) == before
+    assert not [call for call in aioclient_mock.mock_calls if str(call[1]).startswith(OTHER_URL)]
+
+
+async def test_reconfigure_to_legacy_unique_id_owner_aborts(hass, aioclient_mock) -> None:
+    """A target owned by an entry still on the legacy bare-host unique_id aborts without probing (WR-02)."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    make_traefik_entry(
+        title="Other Traefik",
+        minor_version=2,
+        disabled_by=ConfigEntryDisabler.USER,
+        data={CONF_URL: OTHER_URL, CONF_VERIFY_SSL: True},
+        unique_id="other.example.com",
+    ).add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: OTHER_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "x", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+async def test_reconfigure_to_unused_host_succeeds(hass, aioclient_mock) -> None:
+    """A host change to a host no entry owns still succeeds."""
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: NEW_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "k", CONF_VERIFY_SSL: True},
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_URL] == NEW_URL
+
+
+async def test_reconfigure_url_has_credentials(hass, aioclient_mock) -> None:
+    """A new URL with embedded credentials is refused with url_has_credentials; nothing is sent or stored."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    before = dict(entry.data)
+
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL: "https://u:p@traefik.example.com:8080", AUTH_TYPE: "bearer", CONF_TOKEN: "k", CONF_VERIFY_SSL: True},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "url_has_credentials"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+# ----------------------- auth type switches -----------------------
+
+# admin:s3cret, base64-encoded (RFC 7617)
+BASIC_HEADER = "Basic YWRtaW46czNjcmV0"
+BASIC_DATA = {AUTH_TYPE: "basic", CONF_USERNAME: "admin", CONF_PASSWORD: "s3cret"}
+
+
+def _make_basic_entry() -> MockConfigEntry:
+    return make_traefik_entry(data={CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_DATA})
+
+
+async def _reconfigure(hass, entry: MockConfigEntry, user_input: dict[str, Any]) -> Any:  # type: ignore[no-untyped-def]
+    entry.add_to_hass(hass)
+    result = await entry.start_reconfigure_flow(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **user_input}
+    )
+    await hass.async_block_till_done()
+    return result
+
+
+async def test_unchanged_basic_with_empty_credentials_keeps_both(hass, aioclient_mock) -> None:
+    """Basic stays basic with empty username and password: both stored values are probed and kept."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "basic", CONF_USERNAME: "", CONF_PASSWORD: ""})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert _probe_auth(aioclient_mock) == BASIC_HEADER
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, **BASIC_DATA}
+
+
+async def test_bearer_to_basic_requires_new_password(hass, aioclient_mock) -> None:
+    """A changed auth type needs its own credentials; nothing is probed or stored."""
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "basic", CONF_USERNAME: "admin"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_PASSWORD: "required"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+async def test_bearer_to_none_keeps_no_credential(hass, aioclient_mock) -> None:
+    """Switching to none removes every credential; a stale submitted token is dropped."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "none", CONF_TOKEN: "stale"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "none"}
+    assert _probe_auth(aioclient_mock) is None
+
+
+async def test_basic_to_bearer_keeps_no_username_or_password(hass, aioclient_mock) -> None:
+    """Switching basic to bearer stores the token only."""
+    stub_traefik(aioclient_mock, base_url=MOCK_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "t2"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.data) == {CONF_URL: MOCK_URL, CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: "t2"}
+    assert _probe_auth(aioclient_mock) == "Bearer t2"
+
+
+# ----------------------- unique_id and title follow the URL -----------------------
+
+
+@pytest.mark.parametrize(
+    ("title", "new_title"),
+    [
+        pytest.param("traefik.example.com", "traefik-new.example.com", id="old-host"),
+        pytest.param("Traefik Proxy", "traefik-new.example.com", id="default-name"),
+        pytest.param("My Proxy", "My Proxy", id="user-renamed"),
+    ],
+)
+async def test_reconfigure_moves_unique_id_and_host_title(hass, aioclient_mock, title: str, new_title: str) -> None:
+    """A new URL moves the unique_id to the new host:port; only a host or default title follows it."""
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
+    entry = make_traefik_entry(title=title)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: NEW_URL, AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "traefik-new.example.com:8080"
+    assert entry.title == new_title
+
+
+@pytest.mark.parametrize("url", ["http://[::1", "http://traefik.example.com:99999", "", "   "])
+async def test_reconfigure_unusable_url_is_invalid_url(hass, aioclient_mock, caplog, url: str) -> None:
+    """An empty URL or one without a usable host or port is invalid_url on the form, never 'unknown' or a traceback."""
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: url, AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "invalid_url"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+    assert "Traceback" not in caplog.text
+
+
+async def test_reconfigure_redirect_shows_redirect_error(hass, aioclient_mock) -> None:
+    """A 3xx answer to the reconfigure probe is the 'redirect' form error; nothing is stored or followed."""
+    aioclient_mock.get(
+        f"{MOCK_URL}/api/version", status=302, headers={"Location": "https://intruder.example.org/api/version"}
+    )
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer", CONF_TOKEN: "k"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "redirect"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 1
+    assert not [call for call in aioclient_mock.mock_calls if "intruder.example.org" in str(call[1])]
+
+
+# ----------------------- stored secrets stay with their target (WR-01) -----------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://traefik-new.example.com:8080", id="changed-host"),
+        pytest.param("https://traefik.example.com:9443", id="changed-port"),
+        pytest.param("http://traefik.example.com:8080", id="https-to-http"),
+    ],
+)
+async def test_changed_target_requires_secret_again(hass, aioclient_mock, url: str) -> None:
+    """A new scheme or host:port never receives the stored token: the empty field is required, nothing is sent."""
+    stub_traefik(aioclient_mock, base_url=url, rawdata={})
+    entry = _make_entry()
+    before = dict(entry.data)
+
+    result = await _reconfigure(hass, entry, {CONF_URL: url, AUTH_TYPE: "bearer", CONF_TOKEN: ""})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_TOKEN: "required"}
+    assert dict(entry.data) == before
+    assert aioclient_mock.call_count == 0
+
+
+async def test_changed_host_requires_basic_credentials_again(hass, aioclient_mock) -> None:
+    """Basic auth to a new host needs username and password again; the stored ones are not sent."""
+    stub_traefik(aioclient_mock, base_url=NEW_URL, rawdata={})
+    entry = _make_basic_entry()
+
+    result = await _reconfigure(hass, entry, {CONF_URL: NEW_URL, AUTH_TYPE: "basic"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_USERNAME: "required", CONF_PASSWORD: "required"}
+    assert aioclient_mock.call_count == 0
+
+
+async def test_same_target_with_explicit_default_port_keeps_stored_token(hass, aioclient_mock) -> None:
+    """Spelling out the default port is the same host:port, so the stored token is still used."""
+    stub_traefik(aioclient_mock, base_url="https://traefik.example.com:443", rawdata={})
+    entry = make_traefik_entry(
+        data={CONF_URL: "https://traefik.example.com", CONF_VERIFY_SSL: True, AUTH_TYPE: "bearer", CONF_TOKEN: SECRET}
+    )
+
+    result = await _reconfigure(hass, entry, {CONF_URL: "https://traefik.example.com:443", AUTH_TYPE: "bearer"})
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_TOKEN] == SECRET
+    assert _probe_auth(aioclient_mock) == f"Bearer {SECRET}"
+
+
+async def test_unusable_stored_url_requires_secret_again(hass, aioclient_mock) -> None:
+    """A stored URL without a usable host:port is never the same target; the token must be entered again."""
+    entry = make_traefik_entry(
+        data={
+            CONF_URL: "https://traefik.example.com:99999",
+            CONF_VERIFY_SSL: True,
+            AUTH_TYPE: "bearer",
+            CONF_TOKEN: SECRET,
+        }
+    )
+
+    result = await _reconfigure(hass, entry, {AUTH_TYPE: "bearer"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {CONF_TOKEN: "required"}
+    assert aioclient_mock.call_count == 0

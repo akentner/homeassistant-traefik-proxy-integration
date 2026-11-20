@@ -1,0 +1,1305 @@
+[
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "error": [
+      "the service \"does-not-exist@file\" does not exist"
+    ],
+    "name": "broken-missing-service@file",
+    "provider": "file",
+    "rule": "Host(`broken.example.com`)",
+    "service": "does-not-exist",
+    "status": "disabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-000@file",
+    "provider": "file",
+    "rule": "Host(`bulk-000.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-001@file",
+    "provider": "file",
+    "rule": "Host(`bulk-001.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-002@file",
+    "provider": "file",
+    "rule": "Host(`bulk-002.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-003@file",
+    "provider": "file",
+    "rule": "Host(`bulk-003.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-004@file",
+    "provider": "file",
+    "rule": "Host(`bulk-004.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-005@file",
+    "provider": "file",
+    "rule": "Host(`bulk-005.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-006@file",
+    "provider": "file",
+    "rule": "Host(`bulk-006.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-007@file",
+    "provider": "file",
+    "rule": "Host(`bulk-007.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-008@file",
+    "provider": "file",
+    "rule": "Host(`bulk-008.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-009@file",
+    "provider": "file",
+    "rule": "Host(`bulk-009.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-010@file",
+    "provider": "file",
+    "rule": "Host(`bulk-010.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-011@file",
+    "provider": "file",
+    "rule": "Host(`bulk-011.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-012@file",
+    "provider": "file",
+    "rule": "Host(`bulk-012.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-013@file",
+    "provider": "file",
+    "rule": "Host(`bulk-013.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-014@file",
+    "provider": "file",
+    "rule": "Host(`bulk-014.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-015@file",
+    "provider": "file",
+    "rule": "Host(`bulk-015.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-016@file",
+    "provider": "file",
+    "rule": "Host(`bulk-016.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-017@file",
+    "provider": "file",
+    "rule": "Host(`bulk-017.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-018@file",
+    "provider": "file",
+    "rule": "Host(`bulk-018.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-019@file",
+    "provider": "file",
+    "rule": "Host(`bulk-019.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-020@file",
+    "provider": "file",
+    "rule": "Host(`bulk-020.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-021@file",
+    "provider": "file",
+    "rule": "Host(`bulk-021.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-022@file",
+    "provider": "file",
+    "rule": "Host(`bulk-022.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-023@file",
+    "provider": "file",
+    "rule": "Host(`bulk-023.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-024@file",
+    "provider": "file",
+    "rule": "Host(`bulk-024.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-025@file",
+    "provider": "file",
+    "rule": "Host(`bulk-025.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-026@file",
+    "provider": "file",
+    "rule": "Host(`bulk-026.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-027@file",
+    "provider": "file",
+    "rule": "Host(`bulk-027.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-028@file",
+    "provider": "file",
+    "rule": "Host(`bulk-028.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-029@file",
+    "provider": "file",
+    "rule": "Host(`bulk-029.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-030@file",
+    "provider": "file",
+    "rule": "Host(`bulk-030.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-031@file",
+    "provider": "file",
+    "rule": "Host(`bulk-031.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-032@file",
+    "provider": "file",
+    "rule": "Host(`bulk-032.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-033@file",
+    "provider": "file",
+    "rule": "Host(`bulk-033.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-034@file",
+    "provider": "file",
+    "rule": "Host(`bulk-034.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-035@file",
+    "provider": "file",
+    "rule": "Host(`bulk-035.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-036@file",
+    "provider": "file",
+    "rule": "Host(`bulk-036.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-037@file",
+    "provider": "file",
+    "rule": "Host(`bulk-037.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-038@file",
+    "provider": "file",
+    "rule": "Host(`bulk-038.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-039@file",
+    "provider": "file",
+    "rule": "Host(`bulk-039.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-040@file",
+    "provider": "file",
+    "rule": "Host(`bulk-040.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-041@file",
+    "provider": "file",
+    "rule": "Host(`bulk-041.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-042@file",
+    "provider": "file",
+    "rule": "Host(`bulk-042.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-043@file",
+    "provider": "file",
+    "rule": "Host(`bulk-043.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-044@file",
+    "provider": "file",
+    "rule": "Host(`bulk-044.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-045@file",
+    "provider": "file",
+    "rule": "Host(`bulk-045.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-046@file",
+    "provider": "file",
+    "rule": "Host(`bulk-046.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-047@file",
+    "provider": "file",
+    "rule": "Host(`bulk-047.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-048@file",
+    "provider": "file",
+    "rule": "Host(`bulk-048.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-049@file",
+    "provider": "file",
+    "rule": "Host(`bulk-049.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-050@file",
+    "provider": "file",
+    "rule": "Host(`bulk-050.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-051@file",
+    "provider": "file",
+    "rule": "Host(`bulk-051.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-052@file",
+    "provider": "file",
+    "rule": "Host(`bulk-052.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-053@file",
+    "provider": "file",
+    "rule": "Host(`bulk-053.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-054@file",
+    "provider": "file",
+    "rule": "Host(`bulk-054.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-055@file",
+    "provider": "file",
+    "rule": "Host(`bulk-055.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-056@file",
+    "provider": "file",
+    "rule": "Host(`bulk-056.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-057@file",
+    "provider": "file",
+    "rule": "Host(`bulk-057.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-058@file",
+    "provider": "file",
+    "rule": "Host(`bulk-058.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-059@file",
+    "provider": "file",
+    "rule": "Host(`bulk-059.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-060@file",
+    "provider": "file",
+    "rule": "Host(`bulk-060.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-061@file",
+    "provider": "file",
+    "rule": "Host(`bulk-061.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-062@file",
+    "provider": "file",
+    "rule": "Host(`bulk-062.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-063@file",
+    "provider": "file",
+    "rule": "Host(`bulk-063.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-064@file",
+    "provider": "file",
+    "rule": "Host(`bulk-064.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-065@file",
+    "provider": "file",
+    "rule": "Host(`bulk-065.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-066@file",
+    "provider": "file",
+    "rule": "Host(`bulk-066.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-067@file",
+    "provider": "file",
+    "rule": "Host(`bulk-067.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-068@file",
+    "provider": "file",
+    "rule": "Host(`bulk-068.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-069@file",
+    "provider": "file",
+    "rule": "Host(`bulk-069.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-070@file",
+    "provider": "file",
+    "rule": "Host(`bulk-070.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-071@file",
+    "provider": "file",
+    "rule": "Host(`bulk-071.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-072@file",
+    "provider": "file",
+    "rule": "Host(`bulk-072.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-073@file",
+    "provider": "file",
+    "rule": "Host(`bulk-073.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-074@file",
+    "provider": "file",
+    "rule": "Host(`bulk-074.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-075@file",
+    "provider": "file",
+    "rule": "Host(`bulk-075.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-076@file",
+    "provider": "file",
+    "rule": "Host(`bulk-076.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-077@file",
+    "provider": "file",
+    "rule": "Host(`bulk-077.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-078@file",
+    "provider": "file",
+    "rule": "Host(`bulk-078.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-079@file",
+    "provider": "file",
+    "rule": "Host(`bulk-079.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-080@file",
+    "provider": "file",
+    "rule": "Host(`bulk-080.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-081@file",
+    "provider": "file",
+    "rule": "Host(`bulk-081.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-082@file",
+    "provider": "file",
+    "rule": "Host(`bulk-082.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-083@file",
+    "provider": "file",
+    "rule": "Host(`bulk-083.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-084@file",
+    "provider": "file",
+    "rule": "Host(`bulk-084.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-085@file",
+    "provider": "file",
+    "rule": "Host(`bulk-085.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-086@file",
+    "provider": "file",
+    "rule": "Host(`bulk-086.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-087@file",
+    "provider": "file",
+    "rule": "Host(`bulk-087.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-088@file",
+    "provider": "file",
+    "rule": "Host(`bulk-088.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-089@file",
+    "provider": "file",
+    "rule": "Host(`bulk-089.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-090@file",
+    "provider": "file",
+    "rule": "Host(`bulk-090.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-091@file",
+    "provider": "file",
+    "rule": "Host(`bulk-091.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-092@file",
+    "provider": "file",
+    "rule": "Host(`bulk-092.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-093@file",
+    "provider": "file",
+    "rule": "Host(`bulk-093.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-094@file",
+    "provider": "file",
+    "rule": "Host(`bulk-094.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-095@file",
+    "provider": "file",
+    "rule": "Host(`bulk-095.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-096@file",
+    "provider": "file",
+    "rule": "Host(`bulk-096.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-097@file",
+    "provider": "file",
+    "rule": "Host(`bulk-097.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  },
+  {
+    "entryPoints": [
+      "web"
+    ],
+    "name": "bulk-098@file",
+    "provider": "file",
+    "rule": "Host(`bulk-098.example.com`)",
+    "service": "bulk-svc",
+    "status": "enabled",
+    "using": [
+      "web"
+    ]
+  }
+]

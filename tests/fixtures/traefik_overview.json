@@ -1,9 +1,0 @@
-{
-  "http": {
-    "routers": 4,
-    "services": 3,
-    "middlewares": 2
-  },
-  "tcp": {},
-  "udp": {}
-}
