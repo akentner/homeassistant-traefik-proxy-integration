@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Every release tag gets an entry, also when it has no user-visible change.
 
+## [1.0.1] - 2026-11-20
+
+No entity or behaviour change; no action required.
+
+### Added
+
+- Licence notice for the brand images, shipped with the integration in
+  `custom_components/traefik_proxy/brand/LICENSE.md` (MIT, copyright of
+  Containous SAS and Traefik Labs), so HACS installs carry it.
+
+### Changed
+
+- Trademark section in the README and `docs/BRAND.md`: records the review of
+  2026-11-20 (no public Traefik Labs trademark policy found) and the press kit
+  provenance of the artwork.
+
 ## [1.0.0] - 2026-11-20
 
 The integration code is identical to 1.0.0-rc1 apart from the version number.
@@ -311,6 +327,7 @@ developer tooling).
   sensor), checked every 6 hours.
 - A reload button and service.
 
+[1.0.1]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.3.0...v1.0.0
 [1.0.0-rc1]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.3.0...v1.0.0-rc1
 [0.3.0]: https://github.com/akentner/homeassistant-traefik-proxy-integration/compare/v0.2.1...v0.3.0
