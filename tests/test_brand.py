@@ -31,8 +31,10 @@ ICONS = {"icon.png": 256, "icon@2x.png": 512}
 LOGOS = {"logo.png": 128, "logo@2x.png": 256, "dark_logo.png": 128, "dark_logo@2x.png": 256}
 # Dark-theme logo -> the light-theme logo it mirrors.
 DARK_LOGOS = {"dark_logo.png": "logo.png", "dark_logo@2x.png": "logo@2x.png"}
+# The licence notice for the artwork (MIT, see docs/BRAND.md); the only non-image file in brand/.
+LICENCE_FILE = "LICENSE.md"
 # The complete set of files shipped in brand/ (no dark_icon: the teal mark reads on dark themes).
-BRAND_FILES = {*ICONS, *LOGOS}
+BRAND_FILES = {*ICONS, *LOGOS, LICENCE_FILE}
 # Mean luminance (0-255) of the opaque wordmark pixels: dark text below, light text above.
 DARK_TEXT_MAX_LUMINANCE = 96
 LIGHT_TEXT_MIN_LUMINANCE = 160
@@ -199,5 +201,15 @@ def test_wordmark_is_dark_on_logo_and_light_on_dark_logo(dark: str, light: str) 
 
 
 def test_brand_folder_holds_exactly_the_brand_files() -> None:
-    """``brand/`` ships the icons, the logos and the dark logos, and nothing else."""
+    """``brand/`` ships the icons, the logos, the dark logos and the licence notice, and nothing else."""
     assert sorted(p.name for p in BRAND.iterdir()) == sorted(BRAND_FILES)
+
+
+def test_brand_licence_notice_carries_copyright_and_mit_text() -> None:
+    """The shipped licence names the copyright holders and holds the full MIT text and the trademark pointer."""
+    text = (BRAND / LICENCE_FILE).read_text(encoding="utf-8")
+    assert "Brand images derived from traefik/traefik (MIT)" in text
+    assert "Copyright (c) 2016-2020 Containous SAS; 2020-2025 Traefik Labs" in text
+    assert "Permission is hereby granted, free of charge" in text
+    assert 'THE SOFTWARE IS PROVIDED "AS IS"' in text
+    assert "Trademark" in text and "README" in text
