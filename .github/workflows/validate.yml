@@ -107,7 +107,7 @@ jobs:
 
       # No version tag exists upstream; pinned to the master commit of that date.
       # The pin freezes the wrapper only; it runs ghcr.io/home-assistant/hassfest:latest.
-      - uses: home-assistant/actions/hassfest@86d4564712fa02543c808e3a693dd04f9d3f8361 # master (2026-10-26)
+      - uses: home-assistant/actions/hassfest@9e9565e68f5a70d874202871f4c4064d23814235 # master (2026-10-26)
 
   hacs:
     name: HACS validation
