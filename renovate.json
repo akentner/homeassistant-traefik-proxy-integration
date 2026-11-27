@@ -5,5 +5,14 @@
   ],
   "github-actions": {
     "enabled": false
-  }
+  },
+  "packageRules": [
+    {
+      "description": "Python version follows Home Assistant; bump manually",
+      "matchDepNames": [
+        "python"
+      ],
+      "enabled": false
+    }
+  ]
 }
